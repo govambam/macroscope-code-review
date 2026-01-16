@@ -23,7 +23,7 @@ interface StatusMessage {
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<InputMode>("commit");
+  const [mode, setMode] = useState<InputMode>("pr");
   const [repoUrl, setRepoUrl] = useState("");
   const [specifyCommit, setSpecifyCommit] = useState(false);
   const [commitHash, setCommitHash] = useState("");
@@ -207,18 +207,6 @@ export default function Home() {
             <div className="flex mb-6 border-b border-border">
               <button
                 type="button"
-                onClick={() => handleModeChange("commit")}
-                disabled={loading}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                  mode === "commit"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-text-secondary hover:text-accent"
-                } disabled:opacity-50`}
-              >
-                Latest Commit
-              </button>
-              <button
-                type="button"
                 onClick={() => handleModeChange("pr")}
                 disabled={loading}
                 className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -229,10 +217,47 @@ export default function Home() {
               >
                 Recreate PR
               </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange("commit")}
+                disabled={loading}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  mode === "commit"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Latest Commit
+              </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              {mode === "commit" ? (
+              {mode === "pr" ? (
+                <>
+                  {/* PR URL Input */}
+                  <div>
+                    <label
+                      htmlFor="prUrl"
+                      className="block text-sm font-medium text-accent mb-2"
+                    >
+                      Pull Request URL
+                    </label>
+                    <input
+                      type="text"
+                      id="prUrl"
+                      value={prUrl}
+                      onChange={(e) => setPrUrl(e.target.value)}
+                      placeholder="https://github.com/owner/repo/pull/123"
+                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      required
+                      disabled={loading}
+                    />
+                    <p className="mt-2 text-sm text-text-muted">
+                      Paste any GitHub PR URL to recreate it for review
+                    </p>
+                  </div>
+                </>
+              ) : (
                 <>
                   {/* Repository URL Input */}
                   <div>
@@ -299,31 +324,6 @@ export default function Home() {
                       </p>
                     </div>
                   )}
-                </>
-              ) : (
-                <>
-                  {/* PR URL Input */}
-                  <div>
-                    <label
-                      htmlFor="prUrl"
-                      className="block text-sm font-medium text-accent mb-2"
-                    >
-                      Pull Request URL
-                    </label>
-                    <input
-                      type="text"
-                      id="prUrl"
-                      value={prUrl}
-                      onChange={(e) => setPrUrl(e.target.value)}
-                      placeholder="https://github.com/owner/repo/pull/123"
-                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                      required
-                      disabled={loading}
-                    />
-                    <p className="mt-2 text-sm text-text-muted">
-                      Paste any GitHub PR URL to recreate it for review
-                    </p>
-                  </div>
                 </>
               )}
 
