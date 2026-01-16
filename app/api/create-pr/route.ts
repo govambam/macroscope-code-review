@@ -13,14 +13,28 @@ interface ApiResponse {
   commitHash?: string;
   forkUrl?: string;
   error?: string;
+  commitCount?: number;
+  originalPrNumber?: number;
 }
 
-// Parse GitHub URL to extract owner and repo name
-// Example: https://github.com/getsentry/sentry-python -> { owner: "getsentry", repo: "sentry-python" }
+// Commit info from PR
+interface PrCommitInfo {
+  sha: string;
+  message: string;
+}
+
+// Parse GitHub repo URL to extract owner and repo name
 function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
   const match = url.match(/^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/?$/);
   if (!match) return null;
   return { owner: match[1], repo: match[2] };
+}
+
+// Parse GitHub PR URL to extract owner, repo, and PR number
+function parsePrUrl(url: string): { owner: string; repo: string; prNumber: number } | null {
+  const match = url.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/);
+  if (!match) return null;
+  return { owner: match[1], repo: match[2], prNumber: parseInt(match[3], 10) };
 }
 
 // Generate a short hash for branch naming
@@ -44,6 +58,50 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Ensure fork exists, create if needed
+async function ensureFork(
+  octokit: Octokit,
+  forkOwner: string,
+  upstreamOwner: string,
+  repoName: string
+): Promise<{ forkUrl: string; created: boolean }> {
+  let forkExists = false;
+
+  try {
+    await octokit.repos.get({
+      owner: forkOwner,
+      repo: repoName,
+    });
+    forkExists = true;
+    console.log("Fork already exists, using existing fork");
+  } catch {
+    console.log("Fork doesn't exist, creating fork...");
+  }
+
+  if (!forkExists) {
+    try {
+      await octokit.repos.get({
+        owner: upstreamOwner,
+        repo: repoName,
+      });
+    } catch {
+      throw new Error(`The repository ${upstreamOwner}/${repoName} does not exist or is not accessible`);
+    }
+
+    await octokit.repos.createFork({
+      owner: upstreamOwner,
+      repo: repoName,
+    });
+    console.log("Fork created, waiting for it to be ready...");
+    await wait(3000);
+  }
+
+  return {
+    forkUrl: `https://github.com/${forkOwner}/${repoName}`,
+    created: !forkExists,
+  };
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse>> {
   let tmpDir: string | null = null;
 
@@ -63,170 +121,505 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
 
     // Parse request body
     const body = await request.json();
-    const { repoUrl, commitHash: specifiedCommitHash } = body;
-
-    // Validate required fields
-    if (!repoUrl) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Missing required fields",
-          error: "repoUrl is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Parse the upstream GitHub URL to get owner and repo
-    const parsed = parseGitHubUrl(repoUrl);
-    if (!parsed) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid GitHub URL format",
-          error: "Expected format: https://github.com/owner/repo-name",
-        },
-        { status: 400 }
-      );
-    }
-
-    const { owner: upstreamOwner, repo: repoName } = parsed;
+    const { repoUrl, commitHash: specifiedCommitHash, prUrl: inputPrUrl } = body;
 
     // Initialize Octokit with the GitHub token
     const octokit = new Octokit({ auth: githubToken });
 
-    // Step 1: Get the authenticated user (owner of the fork)
+    // Get the authenticated user (owner of the fork)
     console.log("Getting authenticated user...");
     const { data: authenticatedUser } = await octokit.users.getAuthenticated();
     const forkOwner = authenticatedUser.login;
     console.log(`Authenticated as: ${forkOwner}`);
 
-    // Step 2: Check if fork already exists, create if not
-    console.log("Checking if fork exists...");
-    let forkExists = false;
-    try {
-      await octokit.repos.get({
-        owner: forkOwner,
-        repo: repoName,
-      });
-      forkExists = true;
-      console.log("Fork already exists, using existing fork");
-    } catch {
-      // Fork doesn't exist, need to create it
-      console.log("Fork doesn't exist, creating fork...");
-    }
+    // Determine which mode we're in: PR URL mode or commit mode
+    if (inputPrUrl) {
+      // ========================================
+      // PR URL MODE - Recreate an existing PR
+      // ========================================
+      console.log("PR URL mode detected");
 
-    if (!forkExists) {
-      try {
-        // Verify the upstream repo exists first
-        await octokit.repos.get({
-          owner: upstreamOwner,
-          repo: repoName,
-        });
-      } catch {
+      // Parse the PR URL
+      const parsedPr = parsePrUrl(inputPrUrl);
+      if (!parsedPr) {
         return NextResponse.json(
           {
             success: false,
-            message: "Upstream repository not found",
-            error: `The repository ${upstreamOwner}/${repoName} does not exist or is not accessible`,
+            message: "Invalid PR URL format",
+            error: "Expected format: https://github.com/owner/repo/pull/123",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { owner: upstreamOwner, repo: repoName, prNumber } = parsedPr;
+      console.log(`Parsed PR: ${upstreamOwner}/${repoName}#${prNumber}`);
+
+      // Fetch PR details
+      console.log(`Fetching PR #${prNumber} details...`);
+      let prData;
+      try {
+        const { data } = await octokit.pulls.get({
+          owner: upstreamOwner,
+          repo: repoName,
+          pull_number: prNumber,
+        });
+        prData = data;
+      } catch (prError) {
+        const errorMessage = prError instanceof Error ? prError.message : String(prError);
+        if (errorMessage.includes("Not Found")) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: "PR not found",
+              error: `Pull request #${prNumber} does not exist or is not accessible in ${upstreamOwner}/${repoName}`,
+            },
+            { status: 404 }
+          );
+        }
+        throw prError;
+      }
+
+      const prTitle = prData.title;
+      const prAuthor = prData.user?.login || "unknown";
+      const prState = prData.state;
+      const prMerged = prData.merged;
+      const mergeCommitSha = prData.merge_commit_sha;
+
+      console.log(`PR: "${prTitle}" by @${prAuthor}`);
+      console.log(`Status: ${prState}${prMerged ? " (merged)" : ""}`);
+
+      // Determine the correct base commit
+      let baseCommit: string;
+
+      if (prMerged && mergeCommitSha) {
+        // PR was merged - use the commit immediately before the merge
+        console.log("Fetching merge commit details...");
+        try {
+          const { data: mergeCommit } = await octokit.repos.getCommit({
+            owner: upstreamOwner,
+            repo: repoName,
+            ref: mergeCommitSha,
+          });
+
+          if (mergeCommit.parents && mergeCommit.parents.length > 0) {
+            // First parent is the main branch state right before this PR was merged
+            baseCommit = mergeCommit.parents[0].sha;
+            console.log("Using commit immediately before PR was merged as base");
+          } else {
+            // Fallback to original base if no parents found
+            baseCommit = prData.base.sha;
+            console.log("No parent found on merge commit, using original base");
+          }
+        } catch (mergeCommitError) {
+          // Fallback to original base if we can't fetch merge commit
+          console.log(`Could not fetch merge commit: ${mergeCommitError instanceof Error ? mergeCommitError.message : String(mergeCommitError)}`);
+          baseCommit = prData.base.sha;
+          console.log("Falling back to original base commit");
+        }
+      } else {
+        // PR was not merged - use the original base
+        baseCommit = prData.base.sha;
+        console.log("PR not merged - using original base commit");
+      }
+
+      // Get all commits from the PR
+      console.log("Fetching PR commits...");
+      const { data: prCommitsList } = await octokit.pulls.listCommits({
+        owner: upstreamOwner,
+        repo: repoName,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+
+      const prCommits: PrCommitInfo[] = prCommitsList.map(c => ({
+        sha: c.sha,
+        message: c.commit.message.split("\n")[0],
+      }));
+
+      console.log(`PR contains ${prCommits.length} commit(s)`);
+
+      if (prCommits.length === 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "PR has no commits",
+            error: "The pull request does not contain any commits to recreate",
+          },
+          { status: 400 }
+        );
+      }
+
+      // Ensure fork exists
+      console.log("Checking if fork exists...");
+      const { forkUrl } = await ensureFork(octokit, forkOwner, upstreamOwner, repoName);
+
+      // Create branch name from PR number
+      const branchName = `review-pr-${prNumber}`;
+
+      // Check if a PR already exists for this branch
+      console.log("Checking for existing PR...");
+      try {
+        const { data: existingPRs } = await octokit.pulls.list({
+          owner: forkOwner,
+          repo: repoName,
+          state: "open",
+          head: `${forkOwner}:${branchName}`,
+        });
+
+        if (existingPRs.length > 0) {
+          return NextResponse.json({
+            success: true,
+            message: `A PR already exists for PR #${prNumber}`,
+            prUrl: existingPRs[0].html_url,
+            forkUrl,
+            commitCount: prCommits.length,
+            originalPrNumber: prNumber,
+          });
+        }
+      } catch {
+        // Continue if we can't check
+      }
+
+      // Clone the fork repository
+      console.log("Cloning fork...");
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "macroscope-"));
+
+      const cloneUrl = `https://x-access-token:${githubToken}@github.com/${forkOwner}/${repoName}.git`;
+
+      const git: SimpleGit = simpleGit();
+      await git.clone(cloneUrl, tmpDir, ["--no-single-branch"]);
+
+      const repoGit = simpleGit(tmpDir);
+
+      await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
+      await repoGit.addConfig("user.name", "Macroscope PR Creator");
+
+      const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
+      await repoGit.addRemote("upstream", upstreamCloneUrl);
+
+      console.log("Fetching from upstream...");
+      // Fetch all branches from upstream to ensure we have the commits
+      await repoGit.fetch(["upstream", "--no-tags"]);
+
+      // Also fetch the specific commits we need (base commit and all PR commits)
+      // This ensures we have them even if they're not on any branch ref
+      console.log("Fetching specific commits needed for cherry-pick...");
+      const commitsToFetch = [baseCommit, ...prCommits.map(c => c.sha)];
+      for (const sha of commitsToFetch) {
+        try {
+          await repoGit.fetch(["upstream", sha]);
+        } catch {
+          // Ignore errors - commit might already be available or fetchable via refs
+        }
+      }
+
+      // Create branch from the PR's base commit
+      console.log(`Creating review branch from base commit ${getShortHash(baseCommit)}...`);
+      try {
+        await repoGit.checkout(["-b", branchName, baseCommit]);
+      } catch (checkoutError) {
+        // Try fetching the base commit directly from upstream if checkout fails
+        console.log("Base commit not found locally, trying to fetch from upstream...");
+        try {
+          // Fetch the merge commit and its history which should include the base
+          if (mergeCommitSha) {
+            await repoGit.raw(["fetch", "upstream", mergeCommitSha, "--depth=100"]);
+          }
+          await repoGit.checkout(["-b", branchName, baseCommit]);
+        } catch {
+          try {
+            await repoGit.checkout([branchName]);
+            await repoGit.reset(["--hard", baseCommit]);
+          } catch {
+            await cleanup(tmpDir);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Failed to create review branch",
+                error: `Could not create branch ${branchName} from base commit ${baseCommit}. The commit may not be accessible.`,
+              },
+              { status: 500 }
+            );
+          }
+        }
+      }
+
+      // Cherry-pick all PR commits in order
+      console.log(`Cherry-picking ${prCommits.length} commits from PR...`);
+
+      for (let i = 0; i < prCommits.length; i++) {
+        const commit = prCommits[i];
+        console.log(`Cherry-picking commit ${i + 1}/${prCommits.length}: ${commit.sha.substring(0, 7)}`);
+
+        try {
+          await repoGit.raw(["cherry-pick", commit.sha]);
+        } catch (cherryPickError) {
+          // Try fetching the specific commit from upstream and retry
+          console.log(`Cherry-pick failed, trying to fetch commit ${commit.sha.substring(0, 7)} from upstream...`);
+          try {
+            await repoGit.raw(["fetch", "upstream", commit.sha]);
+            await repoGit.raw(["cherry-pick", commit.sha]);
+          } catch (retryError) {
+            try {
+              await repoGit.raw(["cherry-pick", "--abort"]);
+            } catch {
+              // Ignore abort errors
+            }
+
+            await cleanup(tmpDir);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Cherry-pick failed",
+                error: `Failed to cherry-pick commit ${commit.sha.substring(0, 7)} (${i + 1}/${prCommits.length}): "${commit.message}". This may be due to merge conflicts or the commit not being accessible.`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+      }
+
+      // Push the new branch to the fork
+      console.log("Pushing branch...");
+      try {
+        await repoGit.push(["origin", branchName, "--force"]);
+      } catch (pushError) {
+        await cleanup(tmpDir);
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Failed to push branch",
+            error: `Could not push branch to repository. Error: ${
+              pushError instanceof Error ? pushError.message : String(pushError)
+            }`,
+          },
+          { status: 500 }
+        );
+      }
+
+      // Create the Pull Request with detailed description
+      console.log("Creating pull request...");
+
+      const newPrTitle = `[Review] ${prTitle}`;
+      const newPrBody = `Recreated from ${inputPrUrl} for Macroscope review.
+
+**Original PR:** #${prNumber} by @${prAuthor}
+**Status:** ${prState}${prMerged ? " (merged)" : ""}
+
+**Includes ${prCommits.length} commit(s):**
+${prCommits.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("\n")}
+
+**Original PR:** ${inputPrUrl}`;
+
+      let newPrUrl: string;
+      try {
+        const { data: pr } = await octokit.pulls.create({
+          owner: forkOwner,
+          repo: repoName,
+          title: newPrTitle,
+          body: newPrBody,
+          head: branchName,
+          base: "main",
+        });
+        newPrUrl = pr.html_url;
+      } catch (prError) {
+        const errorMessage = prError instanceof Error ? prError.message : String(prError);
+
+        if (errorMessage.includes("A pull request already exists")) {
+          const { data: existingPRs } = await octokit.pulls.list({
+            owner: forkOwner,
+            repo: repoName,
+            state: "open",
+            head: `${forkOwner}:${branchName}`,
+          });
+
+          if (existingPRs.length > 0) {
+            await cleanup(tmpDir);
+            return NextResponse.json({
+              success: true,
+              message: `A PR already exists for PR #${prNumber}`,
+              prUrl: existingPRs[0].html_url,
+              forkUrl,
+              commitCount: prCommits.length,
+              originalPrNumber: prNumber,
+            });
+          }
+        }
+
+        // Try with master as base if main failed
+        try {
+          const { data: pr } = await octokit.pulls.create({
+            owner: forkOwner,
+            repo: repoName,
+            title: newPrTitle,
+            body: newPrBody,
+            head: branchName,
+            base: "master",
+          });
+          newPrUrl = pr.html_url;
+        } catch {
+          await cleanup(tmpDir);
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Failed to create PR",
+              error: `GitHub API error: ${errorMessage}`,
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      // Clean up
+      await cleanup(tmpDir);
+
+      console.log(`PR created: ${newPrUrl}`);
+      return NextResponse.json({
+        success: true,
+        message: `PR recreated with ${prCommits.length} commits from original PR #${prNumber}`,
+        prUrl: newPrUrl,
+        forkUrl,
+        commitCount: prCommits.length,
+        originalPrNumber: prNumber,
+      });
+
+    } else if (repoUrl) {
+      // ========================================
+      // COMMIT MODE - Existing logic
+      // ========================================
+
+      // Parse the upstream GitHub URL to get owner and repo
+      const parsed = parseGitHubUrl(repoUrl);
+      if (!parsed) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid GitHub URL format",
+            error: "Expected format: https://github.com/owner/repo-name",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { owner: upstreamOwner, repo: repoName } = parsed;
+
+      // Ensure fork exists
+      console.log("Checking if fork exists...");
+      let forkUrl: string;
+      try {
+        const result = await ensureFork(octokit, forkOwner, upstreamOwner, repoName);
+        forkUrl = result.forkUrl;
+      } catch (forkError) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Failed to create fork",
+            error: forkError instanceof Error ? forkError.message : String(forkError),
           },
           { status: 404 }
         );
       }
 
-      // Create the fork
-      await octokit.repos.createFork({
-        owner: upstreamOwner,
-        repo: repoName,
-      });
-      console.log("Fork created, waiting for it to be ready...");
+      // Get the target commit (either specified or latest from main)
+      let targetCommit: string;
+      console.log("Getting target commit...");
 
-      // Wait for the fork to be ready (GitHub needs time to complete the fork)
-      await wait(3000);
-    }
-
-    const forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-
-    // Step 3: Get the target commit (either specified or latest from main)
-    let targetCommit: string;
-    console.log("Getting target commit...");
-
-    if (specifiedCommitHash) {
-      // User specified a commit hash, verify it exists
-      targetCommit = specifiedCommitHash;
-      console.log(`Using specified commit: ${targetCommit}`);
-      try {
-        await octokit.repos.getCommit({
-          owner: forkOwner,
-          repo: repoName,
-          ref: targetCommit,
-        });
-      } catch {
-        // If not found in fork, try upstream (fork might not have synced yet)
+      if (specifiedCommitHash) {
+        targetCommit = specifiedCommitHash;
+        console.log(`Using specified commit: ${targetCommit}`);
         try {
           await octokit.repos.getCommit({
-            owner: upstreamOwner,
+            owner: forkOwner,
             repo: repoName,
             ref: targetCommit,
           });
         } catch {
-          return NextResponse.json(
-            {
-              success: false,
-              message: "Commit not found",
-              error: `The commit ${targetCommit} does not exist in the repository`,
-            },
-            { status: 404 }
-          );
+          try {
+            await octokit.repos.getCommit({
+              owner: upstreamOwner,
+              repo: repoName,
+              ref: targetCommit,
+            });
+          } catch {
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Commit not found",
+                error: `The commit ${targetCommit} does not exist in the repository`,
+              },
+              { status: 404 }
+            );
+          }
         }
-      }
-    } else {
-      // Get the latest commit from main branch
-      console.log("Getting latest commit from main branch...");
-      try {
-        const { data: branch } = await octokit.repos.getBranch({
-          owner: forkOwner,
-          repo: repoName,
-          branch: "main",
-        });
-        targetCommit = branch.commit.sha;
-        console.log(`Latest commit on main: ${targetCommit}`);
-      } catch {
-        // Try master branch if main doesn't exist
+      } else {
+        console.log("Getting latest commit from main branch...");
         try {
           const { data: branch } = await octokit.repos.getBranch({
             owner: forkOwner,
             repo: repoName,
-            branch: "master",
+            branch: "main",
           });
           targetCommit = branch.commit.sha;
-          console.log(`Latest commit on master: ${targetCommit}`);
+          console.log(`Latest commit on main: ${targetCommit}`);
+        } catch {
+          try {
+            const { data: branch } = await octokit.repos.getBranch({
+              owner: forkOwner,
+              repo: repoName,
+              branch: "master",
+            });
+            targetCommit = branch.commit.sha;
+            console.log(`Latest commit on master: ${targetCommit}`);
+          } catch {
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Could not find main or master branch",
+                error: "Unable to determine the default branch of the repository",
+              },
+              { status: 404 }
+            );
+          }
+        }
+      }
+
+      // Detect commit type and get commit details
+      console.log("Detecting commit type...");
+      let parentCommit: string;
+      let isMergeCommit = false;
+      let commitMessage: string;
+      let prCommits: PrCommitInfo[] = [];
+      let originalPrNumber: number | null = null;
+
+      // Get commit details (try fork first, then upstream)
+      let commitData;
+      try {
+        const response = await octokit.repos.getCommit({
+          owner: forkOwner,
+          repo: repoName,
+          ref: targetCommit,
+        });
+        commitData = response.data;
+      } catch {
+        try {
+          const response = await octokit.repos.getCommit({
+            owner: upstreamOwner,
+            repo: repoName,
+            ref: targetCommit,
+          });
+          commitData = response.data;
         } catch {
           return NextResponse.json(
             {
               success: false,
-              message: "Could not find main or master branch",
-              error: "Unable to determine the default branch of the repository",
+              message: "Could not get commit details",
+              error: `Unable to fetch details for commit ${targetCommit}`,
             },
-            { status: 404 }
+            { status: 500 }
           );
         }
       }
-    }
-
-    // Step 4: Get the parent commit automatically via GitHub API
-    console.log("Finding parent commit...");
-    let parentCommit: string;
-    let isMergeCommit = false;
-    let commitMessage: string;
-
-    try {
-      // First try to get commit from fork
-      const { data: commitData } = await octokit.repos.getCommit({
-        owner: forkOwner,
-        repo: repoName,
-        ref: targetCommit,
-      });
 
       if (!commitData.parents || commitData.parents.length === 0) {
         return NextResponse.json(
@@ -241,198 +634,70 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
 
       parentCommit = commitData.parents[0].sha;
       isMergeCommit = commitData.parents.length > 1;
-      commitMessage = commitData.commit.message.split("\n")[0]; // First line only
-      console.log(`Parent commit: ${parentCommit}`);
-      console.log(`Is merge commit: ${isMergeCommit}`);
-    } catch {
-      // If not in fork, try upstream
-      try {
-        const { data: commitData } = await octokit.repos.getCommit({
-          owner: upstreamOwner,
-          repo: repoName,
-          ref: targetCommit,
-        });
+      commitMessage = commitData.commit.message.split("\n")[0];
 
-        if (!commitData.parents || commitData.parents.length === 0) {
-          return NextResponse.json(
-            {
-              success: false,
-              message: "Commit has no parent",
-              error: "The target commit appears to be the initial commit and has no parent",
-            },
-            { status: 400 }
-          );
-        }
-
-        parentCommit = commitData.parents[0].sha;
-        isMergeCommit = commitData.parents.length > 1;
-        commitMessage = commitData.commit.message.split("\n")[0];
-        console.log(`Parent commit (from upstream): ${parentCommit}`);
-      } catch {
-        return NextResponse.json(
-          {
-            success: false,
-            message: "Could not get commit details",
-            error: `Unable to fetch details for commit ${targetCommit}`,
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    const shortHash = getShortHash(targetCommit);
-    const branchName = `review-${shortHash}`;
-
-    // Step 5: Check if a PR already exists for this branch
-    console.log("Checking for existing PR...");
-    try {
-      const { data: existingPRs } = await octokit.pulls.list({
-        owner: forkOwner,
-        repo: repoName,
-        state: "open",
-        head: `${forkOwner}:${branchName}`,
-      });
-
-      if (existingPRs.length > 0) {
-        return NextResponse.json({
-          success: true,
-          message: `A PR already exists for this commit`,
-          prUrl: existingPRs[0].html_url,
-          commitHash: targetCommit,
-          forkUrl,
-        });
-      }
-    } catch {
-      // If we can't check for existing PRs, continue anyway
-    }
-
-    // Step 6: Clone the fork repository
-    console.log("Cloning fork...");
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "macroscope-"));
-
-    // Construct the authenticated clone URL for the FORK
-    const cloneUrl = `https://x-access-token:${githubToken}@github.com/${forkOwner}/${repoName}.git`;
-
-    const git: SimpleGit = simpleGit();
-    await git.clone(cloneUrl, tmpDir, ["--no-single-branch"]);
-
-    const repoGit = simpleGit(tmpDir);
-
-    // Configure git user for commits (required for cherry-pick)
-    await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
-    await repoGit.addConfig("user.name", "Macroscope PR Creator");
-
-    // Add upstream remote to fetch the commit if needed
-    const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
-    await repoGit.addRemote("upstream", upstreamCloneUrl);
-
-    // Fetch from both origin and upstream to ensure we have all commits
-    console.log("Fetching commits...");
-    await repoGit.fetch(["--all"]);
-
-    // Step 7: Create a new branch from the parent commit
-    console.log("Creating review branch...");
-    try {
-      await repoGit.checkout(["-b", branchName, parentCommit]);
-    } catch {
-      // Branch might already exist locally, try to check it out and reset
-      try {
-        await repoGit.checkout([branchName]);
-        await repoGit.reset(["--hard", parentCommit]);
-      } catch {
-        await cleanup(tmpDir);
-        return NextResponse.json(
-          {
-            success: false,
-            message: "Failed to create review branch",
-            error: `Could not create branch ${branchName} from parent commit ${parentCommit}`,
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Step 8: Cherry-pick the target commit
-    console.log("Cherry-picking commit...");
-    try {
+      // If merge commit, try to find associated PR and get all commits
       if (isMergeCommit) {
-        // For merge commits, use -m 1 to pick the first parent's changes
-        await repoGit.raw(["cherry-pick", "-m", "1", targetCommit]);
+        console.log("Found merge commit, looking for associated PR...");
+
+        try {
+          const { data: prs } = await octokit.repos.listPullRequestsAssociatedWithCommit({
+            owner: upstreamOwner,
+            repo: repoName,
+            commit_sha: targetCommit,
+          });
+
+          if (prs.length > 0) {
+            const mergedPr = prs.find(pr => pr.merge_commit_sha === targetCommit) || prs[0];
+            originalPrNumber = mergedPr.number;
+            console.log(`Found associated PR #${originalPrNumber}`);
+
+            const { data: prCommitsList } = await octokit.pulls.listCommits({
+              owner: upstreamOwner,
+              repo: repoName,
+              pull_number: originalPrNumber,
+              per_page: 100,
+            });
+
+            if (prCommitsList.length > 0) {
+              prCommits = prCommitsList.map(c => ({
+                sha: c.sha,
+                message: c.commit.message.split("\n")[0],
+              }));
+
+              const firstCommitSha = prCommits[0].sha;
+              try {
+                const { data: firstCommitData } = await octokit.repos.getCommit({
+                  owner: upstreamOwner,
+                  repo: repoName,
+                  ref: firstCommitSha,
+                });
+                if (firstCommitData.parents && firstCommitData.parents.length > 0) {
+                  parentCommit = firstCommitData.parents[0].sha;
+                }
+              } catch {
+                // Keep the original parent commit
+              }
+
+              console.log(`Including ${prCommits.length} commits from PR #${originalPrNumber}`);
+            }
+          } else {
+            console.log("No associated PR found, using single merge commit");
+          }
+        } catch (prError) {
+          console.log(`PR detection failed: ${prError instanceof Error ? prError.message : String(prError)}`);
+          console.log("Falling back to single commit mode");
+        }
       } else {
-        await repoGit.raw(["cherry-pick", targetCommit]);
+        console.log("Single commit detected");
       }
-    } catch (cherryPickError) {
-      // Cherry-pick failed, likely due to merge conflicts
+
+      const shortHash = getShortHash(targetCommit);
+      const branchName = `review-${shortHash}`;
+
+      // Check if a PR already exists for this branch
+      console.log("Checking for existing PR...");
       try {
-        await repoGit.raw(["cherry-pick", "--abort"]);
-      } catch {
-        // Ignore abort errors
-      }
-
-      await cleanup(tmpDir);
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Cherry-pick failed",
-          error: `Merge conflict or other error during cherry-pick. Error: ${
-            cherryPickError instanceof Error
-              ? cherryPickError.message
-              : String(cherryPickError)
-          }`,
-        },
-        { status: 409 }
-      );
-    }
-
-    // Step 9: Push the new branch to the fork
-    console.log("Pushing branch...");
-    try {
-      await repoGit.push(["origin", branchName, "--force"]);
-    } catch (pushError) {
-      await cleanup(tmpDir);
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Failed to push branch",
-          error: `Could not push branch to repository. Make sure your token has push access. Error: ${
-            pushError instanceof Error ? pushError.message : String(pushError)
-          }`,
-        },
-        { status: 500 }
-      );
-    }
-
-    // Step 10: Create the Pull Request within the fork
-    // CRITICAL: The PR is created WITHIN the fork:
-    // - owner: The fork owner (authenticated user)
-    // - repo: The fork repo name
-    // - base: "main" - the base branch in the FORK
-    // - head: the review branch we just pushed
-    // This ensures the PR targets the fork itself, NOT the upstream repository
-    console.log("Creating pull request...");
-    let prUrl: string;
-    try {
-      const { data: pr } = await octokit.pulls.create({
-        owner: forkOwner,
-        repo: repoName,
-        title: commitMessage,
-        body: `Recreated from commit \`${shortHash}\` for Macroscope review.
-
-**Original commit:** ${targetCommit}
-**Parent commit:** ${parentCommit}
-**Original upstream:** https://github.com/${upstreamOwner}/${repoName}
-${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1`." : ""}`,
-        head: branchName,
-        base: "main",
-      });
-
-      prUrl = pr.html_url;
-    } catch (prError) {
-      const errorMessage =
-        prError instanceof Error ? prError.message : String(prError);
-
-      // Check if error is because PR already exists
-      if (errorMessage.includes("A pull request already exists")) {
         const { data: existingPRs } = await octokit.pulls.list({
           owner: forkOwner,
           repo: repoName,
@@ -441,61 +706,263 @@ ${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1
         });
 
         if (existingPRs.length > 0) {
-          await cleanup(tmpDir);
           return NextResponse.json({
             success: true,
-            message: "A PR already exists for this commit",
+            message: `A PR already exists for this commit`,
             prUrl: existingPRs[0].html_url,
             commitHash: targetCommit,
             forkUrl,
+            commitCount: prCommits.length || 1,
+            originalPrNumber: originalPrNumber || undefined,
           });
+        }
+      } catch {
+        // Continue if we can't check
+      }
+
+      // Clone the fork repository
+      console.log("Cloning fork...");
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "macroscope-"));
+
+      const cloneUrl = `https://x-access-token:${githubToken}@github.com/${forkOwner}/${repoName}.git`;
+
+      const git: SimpleGit = simpleGit();
+      await git.clone(cloneUrl, tmpDir, ["--no-single-branch"]);
+
+      const repoGit = simpleGit(tmpDir);
+
+      await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
+      await repoGit.addConfig("user.name", "Macroscope PR Creator");
+
+      const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
+      await repoGit.addRemote("upstream", upstreamCloneUrl);
+
+      console.log("Fetching commits...");
+      await repoGit.fetch(["--all"]);
+
+      // Create a new branch from the parent commit
+      console.log("Creating review branch...");
+      try {
+        await repoGit.checkout(["-b", branchName, parentCommit]);
+      } catch {
+        try {
+          await repoGit.checkout([branchName]);
+          await repoGit.reset(["--hard", parentCommit]);
+        } catch {
+          await cleanup(tmpDir);
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Failed to create review branch",
+              error: `Could not create branch ${branchName} from parent commit ${parentCommit}`,
+            },
+            { status: 500 }
+          );
         }
       }
 
-      // Try with master as base if main failed
+      // Cherry-pick commits
+      if (prCommits.length > 1) {
+        console.log(`Cherry-picking ${prCommits.length} commits from PR...`);
+
+        for (let i = 0; i < prCommits.length; i++) {
+          const commit = prCommits[i];
+          console.log(`Cherry-picking commit ${i + 1}/${prCommits.length}: ${commit.sha.substring(0, 7)}`);
+
+          try {
+            await repoGit.raw(["cherry-pick", commit.sha]);
+          } catch (cherryPickError) {
+            try {
+              await repoGit.raw(["cherry-pick", "--abort"]);
+            } catch {
+              // Ignore abort errors
+            }
+
+            await cleanup(tmpDir);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Cherry-pick failed",
+                error: `Failed to cherry-pick commit ${commit.sha.substring(0, 7)} (${i + 1}/${prCommits.length}). Error: ${
+                  cherryPickError instanceof Error
+                    ? cherryPickError.message
+                    : String(cherryPickError)
+                }`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+      } else {
+        console.log("Cherry-picking commit...");
+        try {
+          if (isMergeCommit) {
+            await repoGit.raw(["cherry-pick", "-m", "1", targetCommit]);
+          } else {
+            await repoGit.raw(["cherry-pick", targetCommit]);
+          }
+        } catch (cherryPickError) {
+          try {
+            await repoGit.raw(["cherry-pick", "--abort"]);
+          } catch {
+            // Ignore abort errors
+          }
+
+          await cleanup(tmpDir);
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Cherry-pick failed",
+              error: `Merge conflict or other error during cherry-pick. Error: ${
+                cherryPickError instanceof Error
+                  ? cherryPickError.message
+                  : String(cherryPickError)
+              }`,
+            },
+            { status: 409 }
+          );
+        }
+      }
+
+      // Push the new branch to the fork
+      console.log("Pushing branch...");
       try {
-        const { data: pr } = await octokit.pulls.create({
-          owner: forkOwner,
-          repo: repoName,
-          title: commitMessage,
-          body: `Recreated from commit \`${shortHash}\` for Macroscope review.
-
-**Original commit:** ${targetCommit}
-**Parent commit:** ${parentCommit}
-**Original upstream:** https://github.com/${upstreamOwner}/${repoName}
-${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1`." : ""}`,
-          head: branchName,
-          base: "master",
-        });
-
-        prUrl = pr.html_url;
-      } catch {
+        await repoGit.push(["origin", branchName, "--force"]);
+      } catch (pushError) {
         await cleanup(tmpDir);
         return NextResponse.json(
           {
             success: false,
-            message: "Failed to create PR",
-            error: `GitHub API error: ${errorMessage}`,
+            message: "Failed to push branch",
+            error: `Could not push branch to repository. Make sure your token has push access. Error: ${
+              pushError instanceof Error ? pushError.message : String(pushError)
+            }`,
           },
           { status: 500 }
         );
       }
+
+      // Create the Pull Request
+      console.log("Creating pull request...");
+
+      let prBody: string;
+      let prTitle: string;
+
+      if (prCommits.length > 1 && originalPrNumber) {
+        prTitle = commitMessage;
+        prBody = `Recreated from PR #${originalPrNumber} for Macroscope review.
+
+**Includes ${prCommits.length} commits from the original PR:**
+${prCommits.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("\n")}
+
+**Original upstream:** https://github.com/${upstreamOwner}/${repoName}/pull/${originalPrNumber}`;
+      } else {
+        prTitle = commitMessage;
+        prBody = `Recreated from commit \`${shortHash}\` for Macroscope review.
+
+**Original commit:** ${targetCommit}
+**Parent commit:** ${parentCommit}
+**Original upstream:** https://github.com/${upstreamOwner}/${repoName}
+${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1`." : ""}`;
+      }
+
+      let prUrl: string;
+      try {
+        const { data: pr } = await octokit.pulls.create({
+          owner: forkOwner,
+          repo: repoName,
+          title: prTitle,
+          body: prBody,
+          head: branchName,
+          base: "main",
+        });
+
+        prUrl = pr.html_url;
+      } catch (prError) {
+        const errorMessage =
+          prError instanceof Error ? prError.message : String(prError);
+
+        if (errorMessage.includes("A pull request already exists")) {
+          const { data: existingPRs } = await octokit.pulls.list({
+            owner: forkOwner,
+            repo: repoName,
+            state: "open",
+            head: `${forkOwner}:${branchName}`,
+          });
+
+          if (existingPRs.length > 0) {
+            await cleanup(tmpDir);
+            return NextResponse.json({
+              success: true,
+              message: "A PR already exists for this commit",
+              prUrl: existingPRs[0].html_url,
+              commitHash: targetCommit,
+              forkUrl,
+              commitCount: prCommits.length || 1,
+              originalPrNumber: originalPrNumber || undefined,
+            });
+          }
+        }
+
+        // Try with master as base if main failed
+        try {
+          const { data: pr } = await octokit.pulls.create({
+            owner: forkOwner,
+            repo: repoName,
+            title: prTitle,
+            body: prBody,
+            head: branchName,
+            base: "master",
+          });
+
+          prUrl = pr.html_url;
+        } catch {
+          await cleanup(tmpDir);
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Failed to create PR",
+              error: `GitHub API error: ${errorMessage}`,
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      // Clean up
+      await cleanup(tmpDir);
+
+      // Build success message
+      let successMessage: string;
+      if (prCommits.length > 1 && originalPrNumber) {
+        successMessage = `PR created with ${prCommits.length} commits from original PR #${originalPrNumber}`;
+      } else {
+        successMessage = `PR created successfully in your fork at ${forkOwner}/${repoName}`;
+      }
+
+      console.log(`PR created: ${prUrl}`);
+      return NextResponse.json({
+        success: true,
+        message: successMessage,
+        prUrl,
+        commitHash: targetCommit,
+        forkUrl,
+        commitCount: prCommits.length || 1,
+        originalPrNumber: originalPrNumber || undefined,
+      });
+
+    } else {
+      // No input provided
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Missing required fields",
+          error: "Either repoUrl or prUrl is required",
+        },
+        { status: 400 }
+      );
     }
-
-    // Clean up the temporary directory
-    await cleanup(tmpDir);
-
-    // Return success response
-    console.log(`PR created: ${prUrl}`);
-    return NextResponse.json({
-      success: true,
-      message: `PR created successfully in your fork at ${forkOwner}/${repoName}`,
-      prUrl,
-      commitHash: targetCommit,
-      forkUrl,
-    });
   } catch (error) {
-    // Clean up on any unexpected error
     if (tmpDir) {
       await cleanup(tmpDir);
     }

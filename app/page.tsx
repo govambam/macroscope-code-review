@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Image from "next/image";
 
+type InputMode = "commit" | "pr";
+
 interface ApiResponse {
   success: boolean;
   prUrl?: string;
@@ -10,6 +12,8 @@ interface ApiResponse {
   commitHash?: string;
   forkUrl?: string;
   error?: string;
+  commitCount?: number;
+  originalPrNumber?: number;
 }
 
 interface StatusMessage {
@@ -19,9 +23,11 @@ interface StatusMessage {
 }
 
 export default function Home() {
+  const [mode, setMode] = useState<InputMode>("commit");
   const [repoUrl, setRepoUrl] = useState("");
   const [specifyCommit, setSpecifyCommit] = useState(false);
   const [commitHash, setCommitHash] = useState("");
+  const [prUrl, setPrUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<StatusMessage[]>([]);
   const [result, setResult] = useState<ApiResponse | null>(null);
@@ -49,39 +55,71 @@ export default function Home() {
     try {
       addStatus("Validating inputs...", "info");
 
-      const githubUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/;
-      if (!githubUrlRegex.test(repoUrl)) {
-        throw new Error("Invalid GitHub URL format. Expected: https://github.com/owner/repo-name");
-      }
-
-      if (specifyCommit && commitHash) {
-        const hashRegex = /^[a-f0-9]{7,40}$/i;
-        if (!hashRegex.test(commitHash)) {
-          throw new Error("Invalid commit hash format. Expected 7-40 character hex string");
+      if (mode === "commit") {
+        // Validate repository URL
+        const githubUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/;
+        if (!githubUrlRegex.test(repoUrl)) {
+          throw new Error("Invalid GitHub URL format. Expected: https://github.com/owner/repo-name");
         }
-      }
 
-      addStatus("Sending request to API...", "info");
+        // Validate commit hash if specified
+        if (specifyCommit && commitHash) {
+          const hashRegex = /^[a-f0-9]{7,40}$/i;
+          if (!hashRegex.test(commitHash)) {
+            throw new Error("Invalid commit hash format. Expected 7-40 character hex string");
+          }
+        }
 
-      const response = await fetch("/api/create-pr", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          repoUrl,
-          commitHash: specifyCommit ? commitHash : undefined,
-        }),
-      });
+        addStatus("Sending request to API...", "info");
 
-      const data: ApiResponse = await response.json();
+        const response = await fetch("/api/create-pr", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            repoUrl,
+            commitHash: specifyCommit ? commitHash : undefined,
+          }),
+        });
 
-      if (data.success) {
-        addStatus("PR created successfully!", "success");
-        setResult(data);
+        const data: ApiResponse = await response.json();
+
+        if (data.success) {
+          addStatus("PR created successfully!", "success");
+          setResult(data);
+        } else {
+          addStatus(data.error || data.message, "error");
+          setResult(data);
+        }
       } else {
-        addStatus(data.error || data.message, "error");
-        setResult(data);
+        // PR mode
+        const prUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+        if (!prUrlRegex.test(prUrl)) {
+          throw new Error("Invalid PR URL format. Expected: https://github.com/owner/repo/pull/123");
+        }
+
+        addStatus("Sending request to API...", "info");
+
+        const response = await fetch("/api/create-pr", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prUrl,
+          }),
+        });
+
+        const data: ApiResponse = await response.json();
+
+        if (data.success) {
+          addStatus("PR created successfully!", "success");
+          setResult(data);
+        } else {
+          addStatus(data.error || data.message, "error");
+          setResult(data);
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
@@ -126,6 +164,12 @@ export default function Home() {
     }
   };
 
+  const handleModeChange = (newMode: InputMode) => {
+    setMode(newMode);
+    setStatus([]);
+    setResult(null);
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Top Navigation Bar */}
@@ -159,71 +203,128 @@ export default function Home() {
 
           {/* Main Card */}
           <div className="bg-white border border-border rounded-xl shadow-sm p-8">
+            {/* Mode Tabs */}
+            <div className="flex mb-6 border-b border-border">
+              <button
+                type="button"
+                onClick={() => handleModeChange("commit")}
+                disabled={loading}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  mode === "commit"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Latest Commit
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange("pr")}
+                disabled={loading}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  mode === "pr"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Recreate PR
+              </button>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Repository URL Input */}
-              <div>
-                <label
-                  htmlFor="repoUrl"
-                  className="block text-sm font-medium text-accent mb-2"
-                >
-                  GitHub Repository URL
-                </label>
-                <input
-                  type="text"
-                  id="repoUrl"
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo-name"
-                  className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                  required
-                  disabled={loading}
-                />
-                <p className="mt-2 text-sm text-text-muted">
-                  Enter the original repository URL (we&apos;ll fork it for you)
-                </p>
-              </div>
+              {mode === "commit" ? (
+                <>
+                  {/* Repository URL Input */}
+                  <div>
+                    <label
+                      htmlFor="repoUrl"
+                      className="block text-sm font-medium text-accent mb-2"
+                    >
+                      GitHub Repository URL
+                    </label>
+                    <input
+                      type="text"
+                      id="repoUrl"
+                      value={repoUrl}
+                      onChange={(e) => setRepoUrl(e.target.value)}
+                      placeholder="https://github.com/owner/repo-name"
+                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      required
+                      disabled={loading}
+                    />
+                    <p className="mt-2 text-sm text-text-muted">
+                      Enter the original repository URL (we&apos;ll fork it for you)
+                    </p>
+                  </div>
 
-              {/* Specify Commit Checkbox */}
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="specifyCommit"
-                  checked={specifyCommit}
-                  onChange={(e) => setSpecifyCommit(e.target.checked)}
-                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                  disabled={loading}
-                />
-                <label
-                  htmlFor="specifyCommit"
-                  className="ml-3 text-sm text-text-secondary cursor-pointer select-none"
-                >
-                  Specify commit (otherwise uses latest from main branch)
-                </label>
-              </div>
+                  {/* Specify Commit Checkbox */}
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="specifyCommit"
+                      checked={specifyCommit}
+                      onChange={(e) => setSpecifyCommit(e.target.checked)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                      disabled={loading}
+                    />
+                    <label
+                      htmlFor="specifyCommit"
+                      className="ml-3 text-sm text-text-secondary cursor-pointer select-none"
+                    >
+                      Specify commit (otherwise uses latest from main branch)
+                    </label>
+                  </div>
 
-              {/* Commit Hash Input (conditional) */}
-              {specifyCommit && (
-                <div>
-                  <label
-                    htmlFor="commitHash"
-                    className="block text-sm font-medium text-accent mb-2"
-                  >
-                    Commit Hash
-                  </label>
-                  <input
-                    type="text"
-                    id="commitHash"
-                    value={commitHash}
-                    onChange={(e) => setCommitHash(e.target.value)}
-                    placeholder="abc1234..."
-                    className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                    required={specifyCommit}
-                    disabled={loading}
-                  />
-                  <p className="mt-2 text-sm text-text-muted">
-                    The specific commit you want to recreate as a PR
-                  </p>
-                </div>
+                  {/* Commit Hash Input (conditional) */}
+                  {specifyCommit && (
+                    <div>
+                      <label
+                        htmlFor="commitHash"
+                        className="block text-sm font-medium text-accent mb-2"
+                      >
+                        Commit Hash
+                      </label>
+                      <input
+                        type="text"
+                        id="commitHash"
+                        value={commitHash}
+                        onChange={(e) => setCommitHash(e.target.value)}
+                        placeholder="abc1234..."
+                        className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                        required={specifyCommit}
+                        disabled={loading}
+                      />
+                      <p className="mt-2 text-sm text-text-muted">
+                        The specific commit you want to recreate as a PR
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* PR URL Input */}
+                  <div>
+                    <label
+                      htmlFor="prUrl"
+                      className="block text-sm font-medium text-accent mb-2"
+                    >
+                      Pull Request URL
+                    </label>
+                    <input
+                      type="text"
+                      id="prUrl"
+                      value={prUrl}
+                      onChange={(e) => setPrUrl(e.target.value)}
+                      placeholder="https://github.com/owner/repo/pull/123"
+                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      required
+                      disabled={loading}
+                    />
+                    <p className="mt-2 text-sm text-text-muted">
+                      Paste any GitHub PR URL to recreate it for review
+                    </p>
+                  </div>
+                </>
               )}
 
               {/* Submit Button */}
@@ -300,9 +401,16 @@ export default function Home() {
                     <p className="mt-2 text-sm text-text-secondary">
                       {result.message}
                     </p>
-                    {result.commitHash && (
+                    {result.originalPrNumber && result.commitCount && result.commitCount > 0 && (
                       <p className="mt-2 text-sm text-text-secondary">
-                        Recreated commit:{" "}
+                        Includes{" "}
+                        <span className="font-medium text-accent">{result.commitCount} commit{result.commitCount > 1 ? "s" : ""}</span>
+                        {" "}from original PR #{result.originalPrNumber}
+                      </p>
+                    )}
+                    {result.commitHash && !result.originalPrNumber && (
+                      <p className="mt-2 text-sm text-text-secondary">
+                        {result.commitCount && result.commitCount > 1 ? "Merge commit:" : "Recreated commit:"}{" "}
                         <code className="bg-white px-1.5 py-0.5 rounded text-xs font-mono border border-border text-accent">
                           {result.commitHash.substring(0, 7)}
                         </code>
