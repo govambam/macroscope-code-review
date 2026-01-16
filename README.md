@@ -45,12 +45,8 @@ Macroscope reviews pull requests, but sometimes you want to review commits that 
 - A GitHub account
 - A GitHub Personal Access Token
 
-### 1. Clone the Repository
+### 1. Clone this Repository
 
-```bash
-git clone <repository-url>
-cd macroscope-code-review
-```
 
 ### 2. Install Dependencies
 
