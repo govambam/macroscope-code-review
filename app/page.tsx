@@ -7,13 +7,14 @@ interface ApiResponse {
   prUrl?: string;
   message: string;
   commitHash?: string;
+  forkUrl?: string;
   error?: string;
 }
 
 export default function Home() {
   const [repoUrl, setRepoUrl] = useState("");
+  const [specifyCommit, setSpecifyCommit] = useState(false);
   const [commitHash, setCommitHash] = useState("");
-  const [parentCommitHash, setParentCommitHash] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string[]>([]);
   const [result, setResult] = useState<ApiResponse | null>(null);
@@ -38,15 +39,15 @@ export default function Home() {
       // Basic validation
       const githubUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/;
       if (!githubUrlRegex.test(repoUrl)) {
-        throw new Error("Invalid GitHub URL format. Expected: https://github.com/username/repo-name");
+        throw new Error("Invalid GitHub URL format. Expected: https://github.com/owner/repo-name");
       }
 
-      const hashRegex = /^[a-f0-9]{7,40}$/i;
-      if (!hashRegex.test(commitHash)) {
-        throw new Error("Invalid commit hash format. Expected 7-40 character hex string");
-      }
-      if (!hashRegex.test(parentCommitHash)) {
-        throw new Error("Invalid parent commit hash format. Expected 7-40 character hex string");
+      // Validate commit hash if specified
+      if (specifyCommit && commitHash) {
+        const hashRegex = /^[a-f0-9]{7,40}$/i;
+        if (!hashRegex.test(commitHash)) {
+          throw new Error("Invalid commit hash format. Expected 7-40 character hex string");
+        }
       }
 
       addStatus("Sending request to API...");
@@ -58,11 +59,11 @@ export default function Home() {
         },
         body: JSON.stringify({
           repoUrl,
-          commitHash,
-          parentCommitHash,
+          commitHash: specifyCommit ? commitHash : undefined,
         }),
       });
 
+      // Handle streaming status updates if available
       const data: ApiResponse = await response.json();
 
       if (data.success) {
@@ -113,7 +114,7 @@ export default function Home() {
             Macroscope PR Creator
           </h1>
           <p className="mt-2 text-gray-600">
-            Recreate commits as pull requests in forked repositories for Macroscope code reviews
+            Automatically fork repositories and create PRs for Macroscope code reviews
           </p>
         </div>
 
@@ -124,66 +125,63 @@ export default function Home() {
                 htmlFor="repoUrl"
                 className="block text-sm font-medium text-gray-700"
               >
-                GitHub Fork URL
+                GitHub Repository URL
               </label>
               <input
                 type="text"
                 id="repoUrl"
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
-                placeholder="https://github.com/username/repo-name"
+                placeholder="https://github.com/owner/repo-name"
                 className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 required
                 disabled={loading}
               />
               <p className="mt-1 text-xs text-gray-500">
-                Enter YOUR forked repository URL (not the original upstream repo)
+                Enter the original repository URL (we&apos;ll fork it for you)
               </p>
             </div>
 
-            <div>
-              <label
-                htmlFor="commitHash"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Commit Hash to Review
-              </label>
+            <div className="flex items-center">
               <input
-                type="text"
-                id="commitHash"
-                value={commitHash}
-                onChange={(e) => setCommitHash(e.target.value)}
-                placeholder="abc1234..."
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono text-sm"
-                required
+                type="checkbox"
+                id="specifyCommit"
+                checked={specifyCommit}
+                onChange={(e) => setSpecifyCommit(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 disabled={loading}
               />
-              <p className="mt-1 text-xs text-gray-500">
-                The commit you want to recreate as a PR for review
-              </p>
+              <label
+                htmlFor="specifyCommit"
+                className="ml-2 block text-sm text-gray-700"
+              >
+                Specify commit (otherwise uses latest from main branch)
+              </label>
             </div>
 
-            <div>
-              <label
-                htmlFor="parentCommitHash"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Parent Commit Hash
-              </label>
-              <input
-                type="text"
-                id="parentCommitHash"
-                value={parentCommitHash}
-                onChange={(e) => setParentCommitHash(e.target.value)}
-                placeholder="def5678..."
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono text-sm"
-                required
-                disabled={loading}
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                The commit right before the one you want to review (the base for the branch)
-              </p>
-            </div>
+            {specifyCommit && (
+              <div>
+                <label
+                  htmlFor="commitHash"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Commit Hash
+                </label>
+                <input
+                  type="text"
+                  id="commitHash"
+                  value={commitHash}
+                  onChange={(e) => setCommitHash(e.target.value)}
+                  placeholder="abc1234..."
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono text-sm"
+                  required={specifyCommit}
+                  disabled={loading}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  The specific commit you want to recreate as a PR for review
+                </p>
+              </div>
+            )}
 
             <button
               type="submit"
@@ -259,6 +257,19 @@ export default function Home() {
                       </code>
                     </p>
                   )}
+                  {result.forkUrl && (
+                    <p className="mt-1 text-sm text-green-600">
+                      Fork:{" "}
+                      <a
+                        href={result.forkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline"
+                      >
+                        {result.forkUrl}
+                      </a>
+                    </p>
+                  )}
                   {result.prUrl && (
                     <div className="mt-4 flex items-center gap-2">
                       <a
@@ -292,7 +303,7 @@ export default function Home() {
 
         <div className="mt-8 text-center text-sm text-gray-500">
           <p>
-            This tool creates PRs within YOUR fork repository, not the upstream repo.
+            This tool automatically forks the repository and creates PRs within your fork.
           </p>
           <p className="mt-1">
             Make sure your GitHub token has repo permissions.
