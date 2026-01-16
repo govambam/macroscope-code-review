@@ -1,1 +1,62 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+
+  /* Macroscope Brand Colors */
+  --color-primary: #5B4DFF;
+  --color-primary-hover: #4A3DE6;
+  --color-primary-light: #EBE9FF;
+
+  /* Status Colors */
+  --color-success: #10B981;
+  --color-success-light: #ECFDF5;
+  --color-error: #EF4444;
+  --color-error-light: #FEF2F2;
+  --color-info: #5B4DFF;
+  --color-info-light: #EBE9FF;
+
+  /* Neutral Colors */
+  --color-border: #E5E7EB;
+  --color-border-hover: #D1D5DB;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-bg-subtle: #F9FAFB;
+
+  /* Accent Color */
+  --color-accent: rgb(63, 73, 104);
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}
