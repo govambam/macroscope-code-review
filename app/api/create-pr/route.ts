@@ -254,6 +254,20 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       console.log("Checking if fork exists...");
       const { forkUrl } = await ensureFork(octokit, forkOwner, upstreamOwner, repoName);
 
+      // Disable GitHub Actions on the fork to prevent unnecessary workflow runs
+      console.log("Disabling GitHub Actions on fork...");
+      try {
+        await octokit.actions.setGithubActionsPermissionsRepository({
+          owner: forkOwner,
+          repo: repoName,
+          enabled: false,
+        });
+        console.log("GitHub Actions disabled - only Macroscope will run");
+      } catch (actionsError) {
+        // Non-critical error - continue anyway
+        console.log(`Note: Could not disable Actions (continuing anyway): ${actionsError instanceof Error ? actionsError.message : String(actionsError)}`);
+      }
+
       // Create branch name from PR number
       const branchName = `review-pr-${prNumber}`;
 
@@ -519,6 +533,20 @@ ${prCommits.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("\n")}
           },
           { status: 404 }
         );
+      }
+
+      // Disable GitHub Actions on the fork to prevent unnecessary workflow runs
+      console.log("Disabling GitHub Actions on fork...");
+      try {
+        await octokit.actions.setGithubActionsPermissionsRepository({
+          owner: forkOwner,
+          repo: repoName,
+          enabled: false,
+        });
+        console.log("GitHub Actions disabled - only Macroscope will run");
+      } catch (actionsError) {
+        // Non-critical error - continue anyway
+        console.log(`Note: Could not disable Actions (continuing anyway): ${actionsError instanceof Error ? actionsError.message : String(actionsError)}`);
       }
 
       // Get the target commit (either specified or latest from main)

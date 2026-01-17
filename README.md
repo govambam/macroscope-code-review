@@ -84,6 +84,24 @@ The recreated PR includes:
 - Original author and PR status
 - List of all commits included
 
+### My Forks Tab
+
+The **My Forks** tab helps you manage all your review PRs in one place:
+
+1. Click **Refresh** to fetch all your forked repositories from GitHub
+2. View a hierarchical list of forks and their review PRs
+3. **Search** by repository name or PR title
+4. **Bug Count**: See how many issues Macroscope found in each PR
+   - Click the refresh icon on unchecked PRs to fetch the bug count
+   - PRs with bugs show an orange warning icon
+   - Use "Show only PRs with issues" filter to focus on PRs that need attention
+5. **Bulk Delete**: Select repos or individual PRs and delete them
+   - Selecting a repo selects all its PRs
+   - Deleting a repo removes the entire fork from GitHub
+   - Deleting individual PRs closes them and removes their branches
+
+Data is cached locally for quick access between sessions.
+
 ## Setup Guide
 
 ### Prerequisites
@@ -254,6 +272,8 @@ For merged PRs, the tool uses intelligent base commit detection:
 - **Styling**: Tailwind CSS v4
 
 The API route (`/api/create-pr`) handles all operations server-side. Repositories are cloned to a temporary directory and cleaned up after the PR is created.
+
+**Note**: GitHub Actions are automatically disabled on forked repositories to prevent workflows from running on your forks.
 
 ## Troubleshooting
 
