@@ -36,3 +36,9 @@ Thumbs.db
 
 # Testing
 /coverage
+
+# SQLite Database
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm

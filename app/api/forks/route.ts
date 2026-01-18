@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
+import {
+  syncForksFromGitHub,
+  getAllForksWithPRs,
+  deleteFork,
+  deletePR,
+  getFork,
+} from "@/lib/services/database";
 
 interface PRRecord {
   prNumber: number;
@@ -10,6 +17,8 @@ interface PRRecord {
   state: string;
   branchName: string;
   macroscopeBugs?: number;
+  hasAnalysis?: boolean;
+  analysisId?: number | null;
 }
 
 interface ForkRecord {
@@ -63,8 +72,53 @@ async function countMacroscopeBugs(
   }
 }
 
-// GET - Fetch all forks from GitHub
-export async function GET(): Promise<NextResponse> {
+// GET - Fetch forks
+// Query params:
+// - source=db: Load from database only (fast, for initial page load)
+// - source=github (default): Fetch from GitHub and sync to database
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const { searchParams } = new URL(request.url);
+  const source = searchParams.get("source") || "github";
+
+  // If source=db, just return data from the database (no GitHub API calls)
+  if (source === "db") {
+    try {
+      const dbForks = getAllForksWithPRs();
+
+      // Transform database format to API format
+      const forks: ForkRecord[] = dbForks.map(dbFork => ({
+        repoName: dbFork.repo_name,
+        forkUrl: dbFork.fork_url,
+        createdAt: dbFork.created_at,
+        prs: dbFork.prs.map(dbPR => ({
+          prNumber: dbPR.pr_number,
+          prUrl: dbPR.forked_pr_url,
+          prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
+          createdAt: dbPR.created_at,
+          commitCount: 0,
+          state: "open", // Not stored in DB, default to open
+          branchName: `review-pr-${dbPR.pr_number}`, // Reconstructed
+          macroscopeBugs: dbPR.bug_count ?? undefined,
+          hasAnalysis: Boolean(dbPR.has_analysis),
+          analysisId: dbPR.analysis_id ?? null,
+        })),
+      }));
+
+      return NextResponse.json({
+        success: true,
+        forks,
+        source: "database",
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return NextResponse.json(
+        { success: false, error: errorMessage },
+        { status: 500 }
+      );
+    }
+  }
+
+  // Default: Fetch from GitHub
   try {
     const githubToken = process.env.GITHUB_TOKEN;
     if (!githubToken) {
@@ -153,10 +207,38 @@ export async function GET(): Promise<NextResponse> {
       }
     }
 
+    // Sync to database
+    try {
+      syncForksFromGitHub(forkRecords);
+    } catch (dbError) {
+      console.error("Failed to sync to database:", dbError);
+      // Continue anyway, GitHub data is the source of truth
+    }
+
+    // Get data back from database (includes analysis status)
+    const dbForks = getAllForksWithPRs();
+
+    // Merge GitHub data with database analysis status
+    const mergedForks = forkRecords.map(ghFork => {
+      const dbFork = dbForks.find(f => f.repo_name === ghFork.repoName);
+      return {
+        ...ghFork,
+        prs: ghFork.prs.map(ghPR => {
+          const dbPR = dbFork?.prs.find(p => p.pr_number === ghPR.prNumber);
+          return {
+            ...ghPR,
+            hasAnalysis: Boolean(dbPR?.has_analysis),
+            analysisId: dbPR?.analysis_id ?? null,
+          };
+        }),
+      };
+    });
+
     return NextResponse.json({
       success: true,
-      forks: forkRecords,
+      forks: mergedForks,
       username: user.login,
+      source: "github",
       debug: allDebugInfo,
     });
   } catch (error) {
@@ -221,6 +303,16 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
         }
 
         results.deletedPRs.push({ repo: pr.repo, prNumber: pr.prNumber });
+
+        // Also delete from database
+        try {
+          const fork = getFork(user.login, pr.repo);
+          if (fork) {
+            deletePR(fork.id, pr.prNumber);
+          }
+        } catch (dbError) {
+          console.error("Failed to delete PR from database:", dbError);
+        }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         results.errors.push(`Failed to delete PR #${pr.prNumber} in ${pr.repo}: ${msg}`);
@@ -235,6 +327,13 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
           repo: repo,
         });
         results.deletedRepos.push(repo);
+
+        // Also delete from database
+        try {
+          deleteFork(user.login, repo);
+        } catch (dbError) {
+          console.error("Failed to delete fork from database:", dbError);
+        }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         results.errors.push(`Failed to delete repo ${repo}: ${msg}`);
