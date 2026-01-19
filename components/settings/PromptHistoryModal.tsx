@@ -111,11 +111,6 @@ export function PromptHistoryModal({
               <span className="text-sm font-medium text-accent">
                 Version {getVersionNumber(viewingVersion)}
               </span>
-              {viewingVersion.is_default && (
-                <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
-                  Default
-                </span>
-              )}
               {isCurrentVersion(viewingVersion) && (
                 <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
                   Current
@@ -127,7 +122,7 @@ export function PromptHistoryModal({
           <div className="text-sm text-text-secondary">
             <p>
               <span className="font-medium">Edited by:</span>{" "}
-              {viewingVersion.edited_by_user_name || (viewingVersion.is_default ? "System" : "Unknown")}
+              {viewingVersion.edited_by_user_name || "Unknown"}
             </p>
             <p>
               <span className="font-medium">Date:</span> {formatDate(viewingVersion.created_at)}
@@ -175,15 +170,10 @@ export function PromptHistoryModal({
                           Current
                         </span>
                       )}
-                      {version.is_default && (
-                        <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
-                          Default
-                        </span>
-                      )}
                     </div>
                     <p className="text-sm text-text-secondary mt-1">
                       <span className="font-medium">Edited by:</span>{" "}
-                      {version.edited_by_user_name || (version.is_default ? "System" : "Unknown")}
+                      {version.edited_by_user_name || "Unknown"}
                     </p>
                     <p className="text-xs text-text-muted mt-0.5">
                       {formatDate(version.created_at)}
@@ -233,7 +223,6 @@ export function PromptHistoryModal({
               Are you sure you want to revert to{" "}
               <span className="font-medium">
                 Version {getVersionNumber(confirmRevert)}
-                {confirmRevert.is_default ? " (Default)" : ""}
               </span>
               ? This will create a new version with that content.
             </p>

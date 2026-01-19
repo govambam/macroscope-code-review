@@ -12,7 +12,7 @@ Each prompt file follows this format:
 ## Available Prompts
 
 ### pr-analysis.md
-- **Model**: Claude Opus 4.5 (`claude-opus-4-20250514`)
+- **Model**: Claude Opus 4.5 (`claude-opus-4-5-20250514`)
 - **Purpose**: Analyze PRs to identify meaningful bugs found by Macroscope
 - **Variables**:
   - `{FORKED_PR_URL}` - The forked PR URL containing Macroscope's review comments

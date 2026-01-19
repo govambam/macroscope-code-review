@@ -293,7 +293,7 @@ export function usePrompts() {
       if (!data.success) {
         throw new Error(data.error || "Failed to fetch prompts");
       }
-      const defaultModel = "claude-sonnet-4-20250514";
+      const defaultModel = "claude-sonnet-4-5-20250514";
       return {
         prompts: data.prompts || { prAnalysis: "", emailGeneration: "" },
         versions: data.versions || {

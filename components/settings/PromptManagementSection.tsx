@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Modal } from "../Modal";
-import { usePrompts, useUpdatePrompt, useRevertPrompt, VersionInfo } from "@/lib/hooks/use-settings";
+import { usePrompts, useUpdatePrompt, VersionInfo } from "@/lib/hooks/use-settings";
 import { useUser } from "@/lib/contexts/UserContext";
 import { PromptHistoryModal } from "./PromptHistoryModal";
 import { AI_MODELS, getModelDisplayName } from "@/lib/config/models";
@@ -237,8 +237,6 @@ interface PromptCardProps {
   onView: () => void;
   onEdit: () => void;
   onHistory: () => void;
-  onRevertToDefault: () => void;
-  isReverting?: boolean;
 }
 
 function formatVersionDate(dateString: string | null): string {
@@ -259,12 +257,9 @@ function PromptCard({
   onView,
   onEdit,
   onHistory,
-  onRevertToDefault,
-  isReverting,
 }: PromptCardProps) {
   const hasVersions = versionInfo && versionInfo.currentVersion > 0;
-  const canRevertToDefault = hasVersions && !versionInfo.isDefault;
-  const modelDisplayName = versionInfo?.model ? getModelDisplayName(versionInfo.model) : "Default";
+  const modelDisplayName = versionInfo?.model ? getModelDisplayName(versionInfo.model) : "Unknown";
 
   return (
     <div className="p-4 border border-border rounded-lg hover:border-primary/30 transition-colors">
@@ -284,19 +279,15 @@ function PromptCard({
           </p>
 
           {/* Version info */}
-          {hasVersions && (
+          {hasVersions && versionInfo.lastEditedBy && (
             <div className="mt-2 text-xs">
-              {versionInfo.isDefault ? (
-                <span className="text-purple-600 font-medium">Using default version</span>
-              ) : versionInfo.lastEditedBy ? (
-                <span className="text-text-secondary">
-                  Last edited by{" "}
-                  <span className="font-medium text-accent">{versionInfo.lastEditedBy}</span>
-                  {versionInfo.lastEditedAt && (
-                    <span> on {formatVersionDate(versionInfo.lastEditedAt)}</span>
-                  )}
-                </span>
-              ) : null}
+              <span className="text-text-secondary">
+                Last edited by{" "}
+                <span className="font-medium text-accent">{versionInfo.lastEditedBy}</span>
+                {versionInfo.lastEditedAt && (
+                  <span> on {formatVersionDate(versionInfo.lastEditedAt)}</span>
+                )}
+              </span>
             </div>
           )}
         </div>
@@ -322,15 +313,6 @@ function PromptCard({
           >
             Edit
           </button>
-          {canRevertToDefault && (
-            <button
-              onClick={onRevertToDefault}
-              disabled={isReverting}
-              className="px-3 py-1.5 text-xs font-medium text-purple-700 hover:text-purple-800 border border-purple-200 hover:border-purple-300 bg-purple-50 hover:bg-purple-100 rounded transition-colors disabled:opacity-50"
-            >
-              {isReverting ? "Reverting..." : "Revert to Default"}
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -340,7 +322,6 @@ function PromptCard({
 export function PromptManagementSection() {
   const { data: promptsData, isLoading: promptsLoading, refetch } = usePrompts();
   const updatePromptMutation = useUpdatePrompt();
-  const revertMutation = useRevertPrompt();
   const { currentUser } = useUser();
 
   const [viewModal, setViewModal] = useState<{ type: "pr-analysis" | "email-generation"; open: boolean }>({
@@ -355,7 +336,6 @@ export function PromptManagementSection() {
     type: "pr-analysis",
     open: false,
   });
-  const [revertConfirm, setRevertConfirm] = useState<"pr-analysis" | "email-generation" | null>(null);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const showNotification = (type: "success" | "error", message: string) => {
@@ -378,20 +358,6 @@ export function PromptManagementSection() {
     }
   };
 
-  const handleRevertToDefault = async (type: "pr-analysis" | "email-generation") => {
-    try {
-      await revertMutation.mutateAsync({
-        type,
-        // No versionId means revert to default
-        userId: currentUser?.id ? parseInt(currentUser.id) : undefined,
-      });
-      showNotification("success", "Reverted to default prompt");
-      setRevertConfirm(null);
-    } catch (error) {
-      showNotification("error", error instanceof Error ? error.message : "Failed to revert");
-    }
-  };
-
   const getPromptContent = (type: "pr-analysis" | "email-generation"): string => {
     if (!promptsData?.prompts) return "";
     return type === "pr-analysis" ? promptsData.prompts.prAnalysis : promptsData.prompts.emailGeneration;
@@ -404,7 +370,7 @@ export function PromptManagementSection() {
 
   const getModel = (type: "pr-analysis" | "email-generation"): string => {
     const versionInfo = getVersionInfo(type);
-    return versionInfo?.model || "claude-sonnet-4-20250514";
+    return versionInfo?.model || "claude-sonnet-4-5-20250514";
   };
 
   if (promptsLoading) {
@@ -451,8 +417,6 @@ export function PromptManagementSection() {
           onView={() => setViewModal({ type: "pr-analysis", open: true })}
           onEdit={() => setEditModal({ type: "pr-analysis", open: true })}
           onHistory={() => setHistoryModal({ type: "pr-analysis", open: true })}
-          onRevertToDefault={() => setRevertConfirm("pr-analysis")}
-          isReverting={revertMutation.isPending && revertConfirm === "pr-analysis"}
         />
 
         <PromptCard
@@ -462,8 +426,6 @@ export function PromptManagementSection() {
           onView={() => setViewModal({ type: "email-generation", open: true })}
           onEdit={() => setEditModal({ type: "email-generation", open: true })}
           onHistory={() => setHistoryModal({ type: "email-generation", open: true })}
-          onRevertToDefault={() => setRevertConfirm("email-generation")}
-          isReverting={revertMutation.isPending && revertConfirm === "email-generation"}
         />
       </div>
 
@@ -495,40 +457,6 @@ export function PromptManagementSection() {
         title={historyModal.type === "pr-analysis" ? "PR Analysis Prompt" : "Email Generation Prompt"}
         onReverted={() => refetch()}
       />
-
-      {/* Revert to Default Confirmation */}
-      {revertConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-accent mb-2">Revert to Default?</h3>
-            <p className="text-sm text-text-secondary mb-4">
-              Are you sure you want to revert to the original default prompt? This will create a new version with the default content.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setRevertConfirm(null)}
-                disabled={revertMutation.isPending}
-                className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleRevertToDefault(revertConfirm)}
-                disabled={revertMutation.isPending}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {revertMutation.isPending && (
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                )}
-                Revert to Default
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

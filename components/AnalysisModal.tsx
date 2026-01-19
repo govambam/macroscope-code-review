@@ -396,11 +396,6 @@ export function AnalysisModal({ isOpen, onClose, prUrl, hasExistingAnalysis = fa
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="text-lg font-semibold text-accent">Meaningful Bugs Found</h3>
-                            {isViewingCached && (
-                              <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
-                                Cached
-                              </span>
-                            )}
                             {analysisResult.analysisModel && (
                               <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
                                 {getModelShortName(analysisResult.analysisModel)}
@@ -615,11 +610,6 @@ export function AnalysisModal({ isOpen, onClose, prUrl, hasExistingAnalysis = fa
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-lg font-semibold text-accent">No Meaningful Bugs Found</h3>
-                        {isViewingCached && (
-                          <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
-                            Cached
-                          </span>
-                        )}
                         {analysisResult.analysisModel && (
                           <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
                             {getModelShortName(analysisResult.analysisModel)}
