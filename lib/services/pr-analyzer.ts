@@ -1,6 +1,7 @@
 import { loadPrompt, getPromptMetadata } from "./prompt-loader";
 import { sendMessageAndParseJSON, DEFAULT_MODEL } from "./anthropic";
 import { Octokit } from "@octokit/rest";
+import { getGitHubToken } from "@/lib/config/api-keys";
 
 /**
  * A review comment from Macroscope bot.
@@ -56,6 +57,7 @@ export type PRAnalysisResult = NoMeaningfulBugsResult | MeaningfulBugsResult;
 export interface PRAnalysisInput {
   forkedPrUrl: string;
   originalPrUrl: string;
+  model?: string; // Optional model override
 }
 
 /**
@@ -95,9 +97,9 @@ async function fetchMacroscopeComments(
   repo: string,
   prNumber: number
 ): Promise<MacroscopeComment[]> {
-  const githubToken = process.env.GITHUB_TOKEN;
+  const githubToken = await getGitHubToken();
   if (!githubToken) {
-    throw new Error("GITHUB_TOKEN is required to fetch PR comments");
+    throw new Error("GITHUB_TOKEN is required to fetch PR comments. Configure it in Settings or .env.local");
   }
 
   const octokit = new Octokit({ auth: githubToken });
@@ -180,12 +182,12 @@ export function extractOriginalPRUrl(prBody: string): string | null {
  * 2. Sends those comments to Claude for evaluation
  * 3. Claude determines which comments represent real, meaningful bugs
  *
- * @param input - The forked PR URL (with Macroscope comments) and original PR URL
+ * @param input - The forked PR URL (with Macroscope comments), original PR URL, and optional model
  * @returns Analysis result indicating whether meaningful bugs were found
  * @throws Error if URLs are invalid or API call fails
  */
 export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResult> {
-  const { forkedPrUrl, originalPrUrl } = input;
+  const { forkedPrUrl, originalPrUrl, model: inputModel } = input;
 
   // Validate URLs
   if (!isValidPRUrl(forkedPrUrl)) {
@@ -228,9 +230,9 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
     TOTAL_COMMENTS: macroscopeComments.length.toString(),
   });
 
-  // Get model from prompt metadata, fallback to default
+  // Use input model if provided, otherwise get from prompt metadata, fallback to default
   const metadata = getPromptMetadata("pr-analysis");
-  const model = metadata.model || DEFAULT_MODEL;
+  const model = inputModel || metadata.model || DEFAULT_MODEL;
 
   // Send to Claude and parse response
   const result = await sendMessageAndParseJSON<PRAnalysisResult>(prompt, {

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateEmail, EmailGenerationInput } from "@/lib/services/email-generator";
 import { BugSnippet } from "@/lib/services/pr-analyzer";
-import { saveGeneratedEmail } from "@/lib/services/database";
+import { saveGeneratedEmail, getLatestPromptVersion } from "@/lib/services/database";
+import { DEFAULT_MODEL } from "@/lib/config/models";
+import { getAnthropicApiKey } from "@/lib/config/api-keys";
 
 interface GenerateEmailRequest {
   originalPrUrl: string; // URL to their original PR in their repo
@@ -10,6 +12,7 @@ interface GenerateEmailRequest {
   bug: BugSnippet;
   totalBugs: number;
   analysisId?: number; // Database ID of the analysis to link this email to
+  createdByUser?: string; // User ID of who generated the email
 }
 
 interface GenerateEmailResponse {
@@ -17,6 +20,7 @@ interface GenerateEmailResponse {
   email?: string;
   error?: string;
   emailId?: number; // Database ID of the saved email
+  model?: string; // Model used for generation
 }
 
 /**
@@ -27,13 +31,14 @@ interface GenerateEmailResponse {
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    // Check for required environment variables
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // Check for required API key (from database settings or environment variables)
+    const anthropicKey = await getAnthropicApiKey();
+    if (!anthropicKey) {
       return NextResponse.json<GenerateEmailResponse>(
         {
           success: false,
           error:
-            "ANTHROPIC_API_KEY is not configured. Please add it to your .env.local file.",
+            "ANTHROPIC_API_KEY is not configured. Please configure it in Settings or add it to your .env.local file.",
         },
         { status: 500 }
       );
@@ -63,6 +68,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Get the model from prompt settings
+    let emailModel = DEFAULT_MODEL;
+    try {
+      const promptVersion = await getLatestPromptVersion("email-generation");
+      if (promptVersion?.model) {
+        emailModel = promptVersion.model;
+      }
+    } catch {
+      // Use default model if settings can't be fetched
+    }
+
     // Generate the email (with Attio merge fields for personalization)
     const input: EmailGenerationInput = {
       originalPrUrl: body.originalPrUrl,
@@ -70,6 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       forkedPrUrl: body.forkedPrUrl,
       bug: body.bug,
       totalBugs: body.totalBugs || 1,
+      model: emailModel,
     };
 
     const email = await generateEmail(input);
@@ -79,13 +96,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     let emailId: number | undefined;
     if (body.analysisId) {
       try {
-        emailId = saveGeneratedEmail(
+        emailId = await saveGeneratedEmail(
           body.analysisId,
           "{ First Name }", // Attio merge field
           null,
           "{ Company Name }", // Attio merge field
           "{ Sender Name }", // Attio merge field
-          email
+          email,
+          body.createdByUser,
+          emailModel
         );
       } catch (dbError) {
         console.error("Failed to save email to database:", dbError);
@@ -97,6 +116,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       success: true,
       email,
       emailId,
+      model: emailModel,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

@@ -12,6 +12,7 @@ export interface EmailGenerationInput {
   forkedPrUrl: string; // URL to our fork with Macroscope review
   bug: BugSnippet;
   totalBugs: number;
+  model?: string; // Optional model override
 }
 
 /**
@@ -56,6 +57,7 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
     forkedPrUrl,
     bug,
     totalBugs,
+    model: inputModel,
   } = input;
 
   // Validate required fields
@@ -81,9 +83,9 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
     TOTAL_BUGS: totalBugs.toString(),
   });
 
-  // Get model from prompt metadata, fallback to Sonnet
+  // Use input model if provided, otherwise get from prompt metadata, fallback to default
   const metadata = getPromptMetadata("email-generation");
-  const model = metadata.model || DEFAULT_MODEL;
+  const model = inputModel || metadata.model || DEFAULT_MODEL;
 
   // Send to Claude and get response (not JSON, just text)
   const email = await sendMessage(prompt, {
