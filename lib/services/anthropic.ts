@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicApiKey } from "@/lib/config/api-keys";
 
 // Default model for PR analysis
-export const DEFAULT_MODEL = "claude-opus-4-20250514";
+export const DEFAULT_MODEL = "claude-opus-4-5-20250514";
 
 // Retry configuration
 const MAX_RETRIES = 3;

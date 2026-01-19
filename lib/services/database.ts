@@ -16,6 +16,7 @@ export interface PRRecord {
   pr_title: string | null;
   forked_pr_url: string;
   original_pr_url: string | null;
+  original_pr_title: string | null;
   has_macroscope_bugs: boolean;
   bug_count: number | null;
   created_at: string;
@@ -251,6 +252,13 @@ export async function initializeDatabase(): Promise<void> {
     // Column already exists
   }
 
+  // Migration: Add original_pr_title column to prs table
+  try {
+    await db.execute(`ALTER TABLE prs ADD COLUMN original_pr_title TEXT`);
+  } catch {
+    // Column already exists
+  }
+
   initialized = true;
   console.log("Turso database initialized successfully");
 }
@@ -312,26 +320,28 @@ export async function savePR(
   originalPrUrl: string | null,
   hasBugs: boolean,
   bugCount: number | null = null,
-  createdByUser: string | null = null
+  createdByUser: string | null = null,
+  originalPrTitle: string | null = null
 ): Promise<number> {
   await initializeDatabase();
   const db = getClient();
 
   const result = await db.execute({
     sql: `
-      INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, has_macroscope_bugs, bug_count, created_by_user)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, created_by_user)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fork_id, pr_number)
       DO UPDATE SET
         pr_title = COALESCE(excluded.pr_title, prs.pr_title),
         forked_pr_url = excluded.forked_pr_url,
         original_pr_url = COALESCE(excluded.original_pr_url, prs.original_pr_url),
+        original_pr_title = COALESCE(excluded.original_pr_title, prs.original_pr_title),
         has_macroscope_bugs = excluded.has_macroscope_bugs,
         bug_count = COALESCE(excluded.bug_count, prs.bug_count),
         created_by_user = COALESCE(excluded.created_by_user, prs.created_by_user)
       RETURNING id
     `,
-    args: [forkId, prNumber, prTitle, forkedPrUrl, originalPrUrl, hasBugs ? 1 : 0, bugCount, createdByUser],
+    args: [forkId, prNumber, prTitle, forkedPrUrl, originalPrUrl, originalPrTitle, hasBugs ? 1 : 0, bugCount, createdByUser],
   });
 
   return result.rows[0].id as number;
@@ -383,17 +393,28 @@ export async function updatePRBugCount(prId: number, bugCount: number): Promise<
 }
 
 /**
- * Update the original PR URL for a PR record.
- * Used when the original URL is extracted later (e.g., during analysis).
+ * Update the original PR URL and title for a PR record.
+ * Used when the original URL/title is extracted later (e.g., during analysis).
  */
-export async function updatePROriginalUrl(prId: number, originalPrUrl: string): Promise<void> {
+export async function updatePROriginalUrl(
+  prId: number,
+  originalPrUrl: string,
+  originalPrTitle: string | null = null
+): Promise<void> {
   await initializeDatabase();
   const db = getClient();
 
-  await db.execute({
-    sql: `UPDATE prs SET original_pr_url = ? WHERE id = ?`,
-    args: [originalPrUrl, prId],
-  });
+  if (originalPrTitle) {
+    await db.execute({
+      sql: `UPDATE prs SET original_pr_url = ?, original_pr_title = ? WHERE id = ?`,
+      args: [originalPrUrl, originalPrTitle, prId],
+    });
+  } else {
+    await db.execute({
+      sql: `UPDATE prs SET original_pr_url = ? WHERE id = ?`,
+      args: [originalPrUrl, prId],
+    });
+  }
 }
 
 /**
@@ -463,6 +484,94 @@ export async function getAnalysisByPRUrl(forkedPrUrl: string): Promise<PRAnalysi
 
   if (result.rows.length === 0) return null;
   return rowToObject<PRAnalysisRecord>(result.rows[0] as Record<string, unknown>);
+}
+
+/**
+ * Combined result for cached analysis lookup.
+ */
+export interface CachedAnalysisData {
+  analysis: PRAnalysisRecord;
+  pr: PRRecord;
+  latestEmail: GeneratedEmailRecord | null;
+}
+
+/**
+ * Get cached analysis with all related data in optimized queries.
+ * Returns analysis, PR record, and latest email in minimal database calls.
+ */
+export async function getCachedAnalysisData(forkedPrUrl: string): Promise<CachedAnalysisData | null> {
+  await initializeDatabase();
+  const db = getClient();
+
+  // Single query to get analysis and PR data joined
+  const result = await db.execute({
+    sql: `
+      SELECT
+        a.id as analysis_id,
+        a.pr_id,
+        a.analyzed_at,
+        a.meaningful_bugs_found,
+        a.analysis_json,
+        a.created_by_user as analysis_created_by_user,
+        a.model as analysis_model,
+        p.id as pr_id,
+        p.fork_id,
+        p.pr_number,
+        p.pr_title,
+        p.forked_pr_url,
+        p.original_pr_url,
+        p.original_pr_title,
+        p.has_macroscope_bugs,
+        p.bug_count,
+        p.created_at as pr_created_at,
+        p.created_by_user as pr_created_by_user
+      FROM pr_analyses a
+      JOIN prs p ON a.pr_id = p.id
+      WHERE p.forked_pr_url = ?
+      ORDER BY a.analyzed_at DESC LIMIT 1
+    `,
+    args: [forkedPrUrl],
+  });
+
+  if (result.rows.length === 0) return null;
+
+  const row = result.rows[0];
+
+  const analysis: PRAnalysisRecord = {
+    id: row.analysis_id as number,
+    pr_id: row.pr_id as number,
+    analyzed_at: row.analyzed_at as string,
+    meaningful_bugs_found: Boolean(row.meaningful_bugs_found),
+    analysis_json: row.analysis_json as string,
+    created_by_user: row.analysis_created_by_user as string | null,
+    model: row.analysis_model as string | null,
+  };
+
+  const pr: PRRecord = {
+    id: row.pr_id as number,
+    fork_id: row.fork_id as number,
+    pr_number: row.pr_number as number,
+    pr_title: row.pr_title as string | null,
+    forked_pr_url: row.forked_pr_url as string,
+    original_pr_url: row.original_pr_url as string | null,
+    original_pr_title: row.original_pr_title as string | null,
+    has_macroscope_bugs: Boolean(row.has_macroscope_bugs),
+    bug_count: row.bug_count as number | null,
+    created_at: row.pr_created_at as string,
+    created_by_user: row.pr_created_by_user as string | null,
+  };
+
+  // Get latest email for this analysis
+  const emailResult = await db.execute({
+    sql: `SELECT * FROM generated_emails WHERE pr_analysis_id = ? ORDER BY generated_at DESC LIMIT 1`,
+    args: [analysis.id],
+  });
+
+  const latestEmail = emailResult.rows.length > 0
+    ? rowToObject<GeneratedEmailRecord>(emailResult.rows[0] as Record<string, unknown>)
+    : null;
+
+  return { analysis, pr, latestEmail };
 }
 
 /**

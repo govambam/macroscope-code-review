@@ -6,14 +6,13 @@ import {
   PRAnalysisResult,
 } from "@/lib/services/pr-analyzer";
 import {
-  getAnalysisByPRUrl,
   saveAnalysis,
   saveFork,
   savePR,
   getPRByUrl,
-  getEmailsForAnalysis,
   getLatestPromptVersion,
   updatePROriginalUrl,
+  getCachedAnalysisData,
 } from "@/lib/services/database";
 import {
   getCachedAnalysis,
@@ -117,67 +116,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
       }
 
-      // Fall back to database cache
+      // Fall back to database cache - optimized single query
       try {
-        const cachedAnalysis = await getAnalysisByPRUrl(forkedPrUrl);
-        if (cachedAnalysis) {
-          const result = JSON.parse(cachedAnalysis.analysis_json) as PRAnalysisResult;
-
-          // Get the stored PR record to retrieve originalPrUrl
-          const prRecord = await getPRByUrl(forkedPrUrl);
-          const storedOriginalUrl = prRecord?.original_pr_url || originalPrUrl;
-
-          // Fetch original PR title from GitHub (quick call, needed for email)
-          let originalPrTitle: string | undefined;
-          if (storedOriginalUrl) {
-            const parsedOriginal = parsePrUrl(storedOriginalUrl);
-            if (parsedOriginal) {
-              try {
-                const githubToken = await getGitHubToken();
-                if (githubToken) {
-                  const octokit = new Octokit({ auth: githubToken });
-                  const { data: originalPr } = await octokit.pulls.get({
-                    owner: parsedOriginal.owner,
-                    repo: parsedOriginal.repo,
-                    pull_number: parsedOriginal.prNumber,
-                  });
-                  originalPrTitle = originalPr.title;
-                }
-              } catch {
-                // Continue without title
-              }
-            }
-          }
-
-          // Get any previously generated email for this analysis
-          let cachedEmail: string | undefined;
-          let emailModel: string | undefined;
-          try {
-            const emails = await getEmailsForAnalysis(cachedAnalysis.id);
-            if (emails.length > 0) {
-              // Return the most recent email
-              cachedEmail = emails[0].email_content;
-              emailModel = emails[0].model || undefined;
-            }
-          } catch {
-            // Continue without cached email
-          }
+        const cachedData = await getCachedAnalysisData(forkedPrUrl);
+        if (cachedData) {
+          const { analysis, pr, latestEmail } = cachedData;
+          const result = JSON.parse(analysis.analysis_json) as PRAnalysisResult;
 
           const response: AnalyzeResponse = {
             success: true,
             result,
             forkedPrUrl,
-            originalPrUrl: storedOriginalUrl,
-            originalPrTitle,
+            originalPrUrl: pr.original_pr_url || originalPrUrl,
+            originalPrTitle: pr.original_pr_title || undefined,
             cached: true,
-            analysisId: cachedAnalysis.id,
-            cachedEmail,
-            analysisModel: cachedAnalysis.model || undefined,
-            emailModel,
+            analysisId: analysis.id,
+            cachedEmail: latestEmail?.email_content,
+            analysisModel: analysis.model || undefined,
+            emailModel: latestEmail?.model || undefined,
           };
 
-          // Cache in Redis for faster future access
-          await setCachedAnalysis(forkedPrUrl, response);
+          // Cache in Redis for faster future access (don't await)
+          setCachedAnalysis(forkedPrUrl, response).catch(() => {});
 
           return NextResponse.json<AnalyzeResponse>(response);
         }
@@ -295,9 +255,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const existingPR = await getPRByUrl(forkedPrUrl);
       if (existingPR) {
         prId = existingPR.id;
-        // Update the original PR URL if it wasn't stored before
-        if (!existingPR.original_pr_url && originalPrUrl) {
-          await updatePROriginalUrl(prId, originalPrUrl);
+        // Update the original PR URL and title if not stored before
+        if ((!existingPR.original_pr_url && originalPrUrl) || (!existingPR.original_pr_title && originalPrTitle)) {
+          await updatePROriginalUrl(prId, originalPrUrl || existingPR.original_pr_url || "", originalPrTitle);
         }
       } else {
         // Create fork and PR records
@@ -309,11 +269,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         prId = await savePR(
           forkId,
           parsedForkedPr.prNumber,
-          null, // title not known
+          null, // forked PR title not known
           forkedPrUrl,
           originalPrUrl,
           result.meaningful_bugs_found,
-          result.meaningful_bugs_found ? result.total_macroscope_bugs_found : 0
+          result.meaningful_bugs_found ? result.total_macroscope_bugs_found : 0,
+          createdByUser,
+          originalPrTitle // Store the original PR title
         );
       }
 
