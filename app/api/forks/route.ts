@@ -7,6 +7,12 @@ import {
   deletePR,
   getFork,
 } from "@/lib/services/database";
+import {
+  getCachedForks,
+  setCachedForks,
+  invalidateForksCache,
+} from "@/lib/services/redis";
+import { getGitHubToken } from "@/lib/config/api-keys";
 
 interface PRRecord {
   prNumber: number;
@@ -19,6 +25,8 @@ interface PRRecord {
   macroscopeBugs?: number;
   hasAnalysis?: boolean;
   analysisId?: number | null;
+  createdByUser?: string | null;
+  analyzedAt?: string | null;
 }
 
 interface ForkRecord {
@@ -83,7 +91,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // If source=db, just return data from the database (no GitHub API calls)
   if (source === "db") {
     try {
-      const dbForks = getAllForksWithPRs();
+      // Check Redis cache first
+      const cachedForks = await getCachedForks<ForkRecord[]>("default");
+      if (cachedForks) {
+        return NextResponse.json({
+          success: true,
+          forks: cachedForks,
+          source: "cache",
+        });
+      }
+
+      const dbForks = await getAllForksWithPRs();
 
       // Transform database format to API format
       const forks: ForkRecord[] = dbForks.map(dbFork => ({
@@ -101,8 +119,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           macroscopeBugs: dbPR.bug_count ?? undefined,
           hasAnalysis: Boolean(dbPR.has_analysis),
           analysisId: dbPR.analysis_id ?? null,
+          createdByUser: dbPR.created_by_user ?? null,
+          analyzedAt: dbPR.analyzed_at ?? null,
         })),
       }));
+
+      // Cache the result in Redis
+      await setCachedForks("default", forks);
 
       return NextResponse.json({
         success: true,
@@ -120,10 +143,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Default: Fetch from GitHub
   try {
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = await getGitHubToken();
     if (!githubToken) {
       return NextResponse.json(
-        { success: false, error: "GitHub token not configured" },
+        { success: false, error: "GitHub token not configured. Please configure it in Settings." },
         { status: 500 }
       );
     }
@@ -207,16 +230,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // Invalidate Redis cache before syncing new data
+    await invalidateForksCache("default");
+
     // Sync to database
     try {
-      syncForksFromGitHub(forkRecords);
+      await syncForksFromGitHub(forkRecords);
     } catch (dbError) {
       console.error("Failed to sync to database:", dbError);
       // Continue anyway, GitHub data is the source of truth
     }
 
     // Get data back from database (includes analysis status)
-    const dbForks = getAllForksWithPRs();
+    const dbForks = await getAllForksWithPRs();
 
     // Merge GitHub data with database analysis status
     const mergedForks = forkRecords.map(ghFork => {
@@ -229,10 +255,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             ...ghPR,
             hasAnalysis: Boolean(dbPR?.has_analysis),
             analysisId: dbPR?.analysis_id ?? null,
+            createdByUser: dbPR?.created_by_user ?? null,
+            analyzedAt: dbPR?.analyzed_at ?? null,
           };
         }),
       };
     });
+
+    // Cache the merged result in Redis
+    await setCachedForks("default", mergedForks);
 
     return NextResponse.json({
       success: true,
@@ -253,10 +284,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // DELETE - Delete selected forks and PRs
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   try {
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = await getGitHubToken();
     if (!githubToken) {
       return NextResponse.json(
-        { success: false, error: "GitHub token not configured" },
+        { success: false, error: "GitHub token not configured. Please configure it in Settings." },
         { status: 500 }
       );
     }
@@ -306,9 +337,9 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 
         // Also delete from database
         try {
-          const fork = getFork(user.login, pr.repo);
+          const fork = await getFork(user.login, pr.repo);
           if (fork) {
-            deletePR(fork.id, pr.prNumber);
+            await deletePR(fork.id, pr.prNumber);
           }
         } catch (dbError) {
           console.error("Failed to delete PR from database:", dbError);
@@ -330,7 +361,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 
         // Also delete from database
         try {
-          deleteFork(user.login, repo);
+          await deleteFork(user.login, repo);
         } catch (dbError) {
           console.error("Failed to delete fork from database:", dbError);
         }
@@ -339,6 +370,9 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
         results.errors.push(`Failed to delete repo ${repo}: ${msg}`);
       }
     }
+
+    // Invalidate Redis cache after deletions
+    await invalidateForksCache("default");
 
     return NextResponse.json({
       success: true,
