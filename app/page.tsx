@@ -181,22 +181,27 @@ export default function Home() {
     loadForksFromDatabase();
   }, []);
 
-  // Initialize expanded repos from localStorage and auto-expand all repos
+  // Initialize expanded repos from localStorage and auto-expand repos with PRs
   useEffect(() => {
     if (forks.length > 0 && !expandedReposInitialized.current) {
+      // Only expand repos that have PRs
+      const reposWithPRs = new Set(forks.filter(f => f.prs.length > 0).map(f => f.repoName));
+
       // Try to load from localStorage first
       const stored = localStorage.getItem("macroscope-expanded-repos");
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
-          setExpandedRepos(new Set(parsed));
+          // Filter to only include repos that still have PRs
+          const validExpanded = parsed.filter((repoName: string) => reposWithPRs.has(repoName));
+          setExpandedRepos(new Set(validExpanded));
         } catch {
-          // If invalid, expand all repos by default
-          setExpandedRepos(new Set(forks.map(f => f.repoName)));
+          // If invalid, expand all repos with PRs by default
+          setExpandedRepos(reposWithPRs);
         }
       } else {
-        // Default: expand all repos
-        setExpandedRepos(new Set(forks.map(f => f.repoName)));
+        // Default: expand all repos with PRs
+        setExpandedRepos(reposWithPRs);
       }
       expandedReposInitialized.current = true;
     }
@@ -711,7 +716,7 @@ export default function Home() {
         // Remove deleted repos
         updatedForks = updatedForks.filter((f) => !data.deletedRepos.includes(f.repoName));
 
-        // Remove deleted PRs
+        // Remove deleted PRs (but keep the repo even if it has no PRs left)
         data.deletedPRs.forEach((deleted: { repo: string; prNumber: number }) => {
           const forkIndex = updatedForks.findIndex((f) => f.repoName === deleted.repo);
           if (forkIndex !== -1) {
@@ -719,10 +724,6 @@ export default function Home() {
               ...updatedForks[forkIndex],
               prs: updatedForks[forkIndex].prs.filter((pr) => pr.prNumber !== deleted.prNumber),
             };
-            // Remove fork if no PRs left
-            if (updatedForks[forkIndex].prs.length === 0) {
-              updatedForks.splice(forkIndex, 1);
-            }
           }
         });
 
@@ -730,20 +731,35 @@ export default function Home() {
         localStorage.setItem("macroscope-forks", JSON.stringify(updatedForks));
         setSelection({ repos: new Set(), prs: new Set() });
 
+        // Collapse repos that now have no PRs
+        setExpandedRepos((prev) => {
+          const newExpanded = new Set(prev);
+          updatedForks.forEach((fork) => {
+            if (fork.prs.length === 0) {
+              newExpanded.delete(fork.repoName);
+            }
+          });
+          return newExpanded;
+        });
+
         const message =
           data.errors.length > 0
             ? `Deleted ${data.deletedRepos.length} repos and ${data.deletedPRs.length} PRs. Some errors occurred.`
             : `Successfully deleted ${data.deletedRepos.length} repos and ${data.deletedPRs.length} PRs.`;
 
         setDeleteResult({ success: data.errors.length === 0, message });
+        // Auto-hide success message after 5 seconds
+        setTimeout(() => setDeleteResult(null), 5000);
       } else {
         setDeleteResult({ success: false, message: data.error || "Failed to delete" });
+        setTimeout(() => setDeleteResult(null), 5000);
       }
     } catch (error) {
       setDeleteResult({
         success: false,
         message: error instanceof Error ? error.message : "Failed to delete",
       });
+      setTimeout(() => setDeleteResult(null), 5000);
     } finally {
       setDeleteLoading(false);
     }
@@ -1016,15 +1032,36 @@ export default function Home() {
               <h1 className="text-2xl font-semibold text-accent tracking-tight">My Repos</h1>
               <p className="mt-2 text-text-secondary">Manage your repositories and analyze PRs</p>
             </div>
-            <button
-              onClick={openCreatePRModal}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              Create PR
-            </button>
+            <div className="flex items-center gap-3">
+              {totalSelected > 0 && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  disabled={deleteLoading}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-error hover:bg-error/90 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {deleteLoading ? (
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  )}
+                  Delete Selected
+                </button>
+              )}
+              <button
+                onClick={openCreatePRModal}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Create PR
+              </button>
+            </div>
           </div>
 
           {/* Search and Refresh */}
@@ -1264,8 +1301,12 @@ export default function Home() {
 
                           {/* Empty state for repos with no PRs */}
                           {isExpanded && fork.prs.length === 0 && (
-                            <div className="px-6 py-6 bg-white">
-                              <p className="text-sm text-gray-500 italic">No review PRs in this repository</p>
+                            <div className="px-6 py-8 bg-white text-center">
+                              <svg className="mx-auto h-8 w-8 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <p className="text-sm text-gray-500">No review PRs in this repository</p>
+                              <p className="text-xs text-gray-400 mt-1">Create a PR to get started</p>
                             </div>
                           )}
                         </div>
@@ -1274,33 +1315,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Delete button */}
-                {totalSelected > 0 && (
-                  <div className="p-6 border-t border-border">
-                    <button
-                      onClick={() => setShowDeleteConfirm(true)}
-                      disabled={deleteLoading}
-                      className="px-4 py-2.5 bg-error hover:bg-error/90 text-white font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {deleteLoading ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          Deleting...
-                        </>
-                      ) : (
-                        <>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Delete Selected ({totalSelected} item{totalSelected !== 1 ? "s" : ""})
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
               </div>
 
               {/* Summary */}
@@ -1319,20 +1333,68 @@ export default function Home() {
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-accent mb-2">Confirm Delete</h3>
+          <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+            <h3 className="text-lg font-semibold text-accent mb-4">Confirm Delete</h3>
+
             <p className="text-sm text-text-secondary mb-4">
-              Are you sure you want to delete{" "}
-              {reposToDelete.length > 0 && (
-                <span className="font-medium">{reposToDelete.length} repo{reposToDelete.length !== 1 ? "s" : ""}</span>
-              )}
-              {reposToDelete.length > 0 && prsToDelete.length > 0 && " and "}
-              {prsToDelete.length > 0 && (
-                <span className="font-medium">{prsToDelete.length} PR{prsToDelete.length !== 1 ? "s" : ""}</span>
-              )}
-              ? This cannot be undone.
+              Are you sure you want to delete the following? This action cannot be undone.
             </p>
-            <div className="flex gap-3 justify-end">
+
+            {/* Repos to delete */}
+            {reposToDelete.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-accent mb-2">
+                  Repositories ({reposToDelete.length})
+                </h4>
+                <div className="bg-bg-subtle rounded-lg border border-border p-3 max-h-32 overflow-y-auto">
+                  <ul className="space-y-1">
+                    {reposToDelete.map((repo) => (
+                      <li key={repo} className="text-sm text-text-secondary flex items-center gap-2">
+                        <svg className="h-4 w-4 text-error shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        <span className="font-medium">{repo}</span>
+                        <span className="text-text-muted text-xs">(and all its PRs)</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* PRs to delete */}
+            {prsToDelete.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-accent mb-2">
+                  Pull Requests ({prsToDelete.length})
+                </h4>
+                <div className="bg-bg-subtle rounded-lg border border-border p-3 max-h-32 overflow-y-auto">
+                  <ul className="space-y-1">
+                    {prsToDelete.map((pr) => {
+                      const fork = forks.find(f => f.repoName === pr.repo);
+                      const prData = fork?.prs.find(p => p.prNumber === pr.prNumber);
+                      return (
+                        <li key={`${pr.repo}-${pr.prNumber}`} className="text-sm text-text-secondary flex items-center gap-2">
+                          <svg className="h-4 w-4 text-error shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <span>
+                            <span className="font-medium">{pr.repo}</span>
+                            <span className="text-text-muted"> / </span>
+                            <span>#{pr.prNumber}</span>
+                            {prData?.prTitle && (
+                              <span className="text-text-muted"> - {prData.prTitle}</span>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end pt-2">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
