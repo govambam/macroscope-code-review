@@ -208,7 +208,7 @@ export function getFork(repoOwner: string, repoName: string): ForkRecord | null 
     SELECT * FROM forks WHERE repo_owner = ? AND repo_name = ?
   `);
 
-  return stmt.get(repoOwner, repoName) as ForkRecord | null;
+  return (stmt.get(repoOwner, repoName) ?? null) as ForkRecord | null;
 }
 
 /**
