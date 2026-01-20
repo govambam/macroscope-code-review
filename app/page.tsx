@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 
-type MainTab = "create" | "forks";
 type CreateMode = "commit" | "pr";
 
 // PR Analysis types
@@ -93,10 +92,9 @@ interface Selection {
 }
 
 export default function Home() {
-  // Main tab state
-  const [mainTab, setMainTab] = useState<MainTab>("create");
-
-  // Create PR tab state
+  // Create PR modal state
+  const [showCreatePRModal, setShowCreatePRModal] = useState(false);
+  const [createPRModalExpanded, setCreatePRModalExpanded] = useState(false);
   const [createMode, setCreateMode] = useState<CreateMode>("pr");
   const [repoUrl, setRepoUrl] = useState("");
   const [specifyCommit, setSpecifyCommit] = useState(false);
@@ -211,9 +209,9 @@ export default function Home() {
     }
   }, [expandedRepos]);
 
-  // Auto-check missing bug counts when switching to My Forks tab
+  // Auto-check missing bug counts when forks are loaded
   useEffect(() => {
-    if (mainTab === "forks" && forks.length > 0) {
+    if (forks.length > 0) {
       // Find PRs with missing bug counts that we haven't already checked
       const prsToCheck: { repoName: string; prNumber: number }[] = [];
       forks.forEach((fork) => {
@@ -265,7 +263,7 @@ export default function Home() {
         checkBugs();
       }
     }
-  }, [mainTab, forks]);
+  }, [forks]);
 
   const addStatus = (
     text: string,
@@ -415,6 +413,17 @@ export default function Home() {
     setCreateMode(newMode);
     setStatus([]);
     setResult(null);
+  };
+
+  const openCreatePRModal = () => {
+    setShowCreatePRModal(true);
+    setStatus([]);
+    setResult(null);
+  };
+
+  const closeCreatePRModal = () => {
+    setShowCreatePRModal(false);
+    setCreatePRModalExpanded(false);
   };
 
   // My Forks functions
@@ -970,7 +979,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Sidebar Navigation */}
+      {/* Left Sidebar - Logo only */}
       <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
@@ -987,324 +996,102 @@ export default function Home() {
         {/* Navigation Links */}
         <nav className="flex-1 px-4 py-6">
           <div className="space-y-1">
+            <div className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg bg-primary/10 text-primary">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              My Repos
+            </div>
+          </div>
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 bg-bg-subtle h-screen overflow-y-auto">
+        {/* Sticky Header Section */}
+        <div className="sticky top-0 z-10 bg-bg-subtle px-8 pt-8 pb-4 border-b border-border shadow-sm">
+          {/* Page Header */}
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <h1 className="text-2xl font-semibold text-accent tracking-tight">My Repos</h1>
+              <p className="mt-2 text-text-secondary">Manage your repositories and analyze PRs</p>
+            </div>
             <button
-              type="button"
-              onClick={() => setMainTab("create")}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mainTab === "create"
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
-              }`}
+              onClick={openCreatePRModal}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
               Create PR
             </button>
-            <button
-              type="button"
-              onClick={() => setMainTab("forks")}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mainTab === "forks"
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
-              }`}
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </div>
+
+          {/* Search and Refresh */}
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search repos or PR titles..."
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+              />
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
-              My Repos
+            </div>
+            <button
+              onClick={refreshFromGitHub}
+              disabled={forksLoading}
+              className="px-4 py-2.5 bg-white border border-border rounded-lg text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {forksLoading ? (
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              ) : (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+              Refresh
             </button>
           </div>
-        </nav>
-      </aside>
+        </div>
 
-      {/* Main Content Area */}
-      <main className="flex-1 bg-bg-subtle min-h-screen overflow-auto">
-        <div className={`py-12 px-8 ${mainTab === "forks" ? "" : "max-w-xl mx-auto"}`}>
-          {/* Page Header */}
-          <div className="mb-10">
-            <h1 className="text-2xl font-semibold text-accent tracking-tight">
-              {mainTab === "create" ? "Create PR" : "My Repos"}
-            </h1>
-            <p className="mt-2 text-text-secondary">
-              {mainTab === "create"
-                ? "Automatically fork repositories and create PRs for code review"
-                : "Manage your repositories and analyze PRs"}
-            </p>
-          </div>
-
-          {mainTab === "create" ? (
-            <>
-              {/* Create PR Card */}
-              <div className="bg-white border border-border rounded-xl shadow-sm p-8">
-                {/* Sub-tabs for Create PR */}
-                <div className="flex mb-6 border-b border-border">
-                  <button
-                    type="button"
-                    onClick={() => handleCreateModeChange("pr")}
-                    disabled={loading}
-                    className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                      createMode === "pr"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-text-secondary hover:text-accent"
-                    } disabled:opacity-50`}
-                  >
-                    Recreate PR
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleCreateModeChange("commit")}
-                    disabled={loading}
-                    className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                      createMode === "commit"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-text-secondary hover:text-accent"
-                    } disabled:opacity-50`}
-                  >
-                    Latest Commit
-                  </button>
-                </div>
-
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  {createMode === "pr" ? (
-                    <div>
-                      <label htmlFor="prUrl" className="block text-sm font-medium text-accent mb-2">
-                        Pull Request URL
-                      </label>
-                      <input
-                        type="text"
-                        id="prUrl"
-                        value={prUrl}
-                        onChange={(e) => setPrUrl(e.target.value)}
-                        placeholder="https://github.com/owner/repo/pull/123"
-                        className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                        required
-                        disabled={loading}
-                      />
-                      <p className="mt-2 text-sm text-text-muted">
-                        Paste any GitHub PR URL to recreate it for review
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div>
-                        <label htmlFor="repoUrl" className="block text-sm font-medium text-accent mb-2">
-                          GitHub Repository URL
-                        </label>
-                        <input
-                          type="text"
-                          id="repoUrl"
-                          value={repoUrl}
-                          onChange={(e) => setRepoUrl(e.target.value)}
-                          placeholder="https://github.com/owner/repo-name"
-                          className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                          required
-                          disabled={loading}
-                        />
-                        <p className="mt-2 text-sm text-text-muted">
-                          Enter the original repository URL (we&apos;ll fork it for you)
-                        </p>
-                      </div>
-
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="specifyCommit"
-                          checked={specifyCommit}
-                          onChange={(e) => setSpecifyCommit(e.target.checked)}
-                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                          disabled={loading}
-                        />
-                        <label
-                          htmlFor="specifyCommit"
-                          className="ml-3 text-sm text-text-secondary cursor-pointer select-none"
-                        >
-                          Specify commit (otherwise uses latest from main branch)
-                        </label>
-                      </div>
-
-                      {specifyCommit && (
-                        <div>
-                          <label htmlFor="commitHash" className="block text-sm font-medium text-accent mb-2">
-                            Commit Hash
-                          </label>
-                          <input
-                            type="text"
-                            id="commitHash"
-                            value={commitHash}
-                            onChange={(e) => setCommitHash(e.target.value)}
-                            placeholder="abc1234..."
-                            className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                            required={specifyCommit}
-                            disabled={loading}
-                          />
-                          <p className="mt-2 text-sm text-text-muted">
-                            The specific commit you want to recreate as a PR
-                          </p>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full flex items-center justify-center py-3 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Creating PR...
-                      </>
-                    ) : (
-                      "Create Pull Request"
-                    )}
-                  </button>
-                </form>
-
-                {status.length > 0 && (
-                  <div className="mt-8">
-                    <h3 className="text-sm font-medium text-accent mb-3">Status</h3>
-                    <div className="bg-bg-subtle border border-border rounded-lg p-4 max-h-64 overflow-y-auto">
-                      <div className="space-y-2">
-                        {status.map((msg, idx) => (
-                          <div key={idx} className="flex items-start gap-3 text-sm">
-                            <span className="text-text-muted font-mono text-xs shrink-0 pt-0.5">
-                              {msg.timestamp}
-                            </span>
-                            {msg.step && msg.totalSteps && (
-                              <span className="shrink-0 px-1.5 py-0.5 bg-primary/10 text-primary text-xs font-medium rounded">
-                                {msg.step}/{msg.totalSteps}
-                              </span>
-                            )}
-                            <span className={`${getStatusColor(msg.type)} leading-relaxed`}>
-                              {msg.text}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {result && (
-                  <>
-                    {result.success ? (
-                      <div className="mt-8 rounded-xl border border-border bg-white p-6 shadow-sm">
-                        <div className="flex items-center gap-2 mb-4">
-                          <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <h3 className="text-lg font-semibold text-accent">PR Created Successfully</h3>
-                        </div>
-                        <p className="text-sm text-text-secondary mb-4">View your pull request:</p>
-                        <a href={result.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium break-all">
-                          {result.prUrl}
-                        </a>
-                        {result.prUrl && (
-                          <div className="mt-5">
-                            <a href={result.prUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors">
-                              <Image src="/GitHub_Invertocat_White.svg" alt="" width={20} height={20} className="h-5 w-5" />
-                              View in GitHub
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-8 rounded-xl border border-error/20 bg-error-light p-6">
-                        <div className="flex items-center gap-2 mb-3">
-                          <svg className="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <h3 className="text-lg font-semibold text-accent">Error</h3>
-                        </div>
-                        <p className="text-sm text-text-secondary">{result.error || result.message}</p>
-                      </div>
-                    )}
-                  </>
-                )}
+        {/* Content Area */}
+        <div className="px-8 py-6">
+          {/* My Repos Section */}
+          <div className="bg-white border border-border rounded-xl shadow-sm">
+            {/* Error display */}
+            {forksError && (
+              <div className="mx-6 mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
+                {forksError}
               </div>
+            )}
 
-              {/* Footer */}
-              <div className="mt-8 text-center">
-                <p className="text-sm text-text-muted">
-                  This tool automatically forks repositories and creates PRs within your fork.
-                </p>
-                <p className="mt-1 text-sm text-text-muted">
-                  Make sure your GitHub token has <code className="text-accent">repo</code> permissions.
+            {/* Delete result */}
+            {deleteResult && (
+              <div className={`mx-6 mt-4 p-3 rounded-lg border text-sm ${deleteResult.success ? "bg-success-light border-success/20 text-success" : "bg-error-light border-error/20 text-error"}`}>
+                {deleteResult.message}
+              </div>
+            )}
+
+            {/* Repos List */}
+            {forks.length === 0 ? (
+              <div className="text-center py-12">
+                <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                <h3 className="mt-4 text-sm font-medium text-accent">No repos tracked yet</h3>
+                <p className="mt-2 text-sm text-text-muted">
+                  Create a PR to get started, or click &quot;Refresh&quot; to load existing repos from GitHub.
                 </p>
               </div>
-            </>
-          ) : mainTab === "forks" ? (
-            <>
-              {/* My Repos Section */}
-              <div className="bg-white border border-border rounded-xl shadow-sm">
-                {/* Header with Search and Refresh */}
-                <div className="p-6 border-b border-border">
-                  <div className="flex gap-3">
-                    <div className="flex-1 relative">
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search repos or PR titles..."
-                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                      />
-                      <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                    </div>
-                    <button
-                      onClick={refreshFromGitHub}
-                      disabled={forksLoading}
-                      className="px-4 py-2.5 bg-white border border-border rounded-lg text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {forksLoading ? (
-                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                      ) : (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      )}
-                      Refresh
-                    </button>
-                  </div>
-                </div>
-
-                {/* Error display */}
-                {forksError && (
-                  <div className="mx-6 mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
-                    {forksError}
-                  </div>
-                )}
-
-                {/* Delete result */}
-                {deleteResult && (
-                  <div className={`mx-6 mt-4 p-3 rounded-lg border text-sm ${deleteResult.success ? "bg-success-light border-success/20 text-success" : "bg-error-light border-error/20 text-error"}`}>
-                    {deleteResult.message}
-                  </div>
-                )}
-
-                {/* Repos List */}
-                {forks.length === 0 ? (
-                  <div className="text-center py-12">
-                    <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
-                    <h3 className="mt-4 text-sm font-medium text-accent">No repos tracked yet</h3>
-                    <p className="mt-2 text-sm text-text-muted">
-                      Create a PR to get started, or click &quot;Refresh&quot; to load existing repos from GitHub.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border">
+            ) : (
+              <div className="divide-y divide-border">
                     {filteredForks().map((fork) => {
                       const checkboxState = getRepoCheckboxState(fork.repoName);
                       const isExpanded = expandedRepos.has(fork.repoName);
@@ -1526,8 +1313,6 @@ export default function Home() {
                   </p>
                 </div>
               )}
-            </>
-          ) : null}
         </div>
       </main>
 
@@ -1869,6 +1654,250 @@ export default function Home() {
                       {generatedEmail}
                     </pre>
                   </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create PR Modal */}
+      {showCreatePRModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div
+            className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ${
+              createPRModalExpanded
+                ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
+                : "w-full max-w-xl max-h-[90vh]"
+            }`}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+              <h2 className="text-lg font-semibold text-accent">Create PR</h2>
+              <div className="flex items-center gap-2">
+                {/* Expand/Collapse Button */}
+                <button
+                  onClick={() => setCreatePRModalExpanded(!createPRModalExpanded)}
+                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  title={createPRModalExpanded ? "Collapse" : "Expand"}
+                >
+                  {createPRModalExpanded ? (
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                    </svg>
+                  ) : (
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                    </svg>
+                  )}
+                </button>
+                {/* Close Button */}
+                <button
+                  onClick={closeCreatePRModal}
+                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Tabs */}
+            <div className="flex border-b border-border px-6 shrink-0">
+              <button
+                onClick={() => handleCreateModeChange("pr")}
+                disabled={loading}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  createMode === "pr"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Simulate PR
+              </button>
+              <button
+                onClick={() => handleCreateModeChange("commit")}
+                disabled={loading}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  createMode === "commit"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Latest Commit
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {createMode === "pr" ? (
+                  <div>
+                    <label htmlFor="prUrl" className="block text-sm font-medium text-accent mb-2">
+                      Pull Request URL
+                    </label>
+                    <input
+                      type="text"
+                      id="prUrl"
+                      value={prUrl}
+                      onChange={(e) => setPrUrl(e.target.value)}
+                      placeholder="https://github.com/owner/repo/pull/123"
+                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      required
+                      disabled={loading}
+                    />
+                    <p className="mt-2 text-sm text-text-muted">
+                      Paste any GitHub PR URL to simulate it for review
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label htmlFor="repoUrl" className="block text-sm font-medium text-accent mb-2">
+                        GitHub Repository URL
+                      </label>
+                      <input
+                        type="text"
+                        id="repoUrl"
+                        value={repoUrl}
+                        onChange={(e) => setRepoUrl(e.target.value)}
+                        placeholder="https://github.com/owner/repo-name"
+                        className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                        required
+                        disabled={loading}
+                      />
+                      <p className="mt-2 text-sm text-text-muted">
+                        Enter the original repository URL (we&apos;ll fork it for you)
+                      </p>
+                    </div>
+
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="specifyCommitModal"
+                        checked={specifyCommit}
+                        onChange={(e) => setSpecifyCommit(e.target.checked)}
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                        disabled={loading}
+                      />
+                      <label
+                        htmlFor="specifyCommitModal"
+                        className="ml-3 text-sm text-text-secondary cursor-pointer select-none"
+                      >
+                        Specify commit (otherwise uses latest from main branch)
+                      </label>
+                    </div>
+
+                    {specifyCommit && (
+                      <div>
+                        <label htmlFor="commitHashModal" className="block text-sm font-medium text-accent mb-2">
+                          Commit Hash
+                        </label>
+                        <input
+                          type="text"
+                          id="commitHashModal"
+                          value={commitHash}
+                          onChange={(e) => setCommitHash(e.target.value)}
+                          placeholder="abc1234..."
+                          className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                          required={specifyCommit}
+                          disabled={loading}
+                        />
+                        <p className="mt-2 text-sm text-text-muted">
+                          The specific commit you want to create as a PR
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full flex items-center justify-center py-3 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Creating PR...
+                    </>
+                  ) : (
+                    "Create Pull Request"
+                  )}
+                </button>
+              </form>
+
+              {/* Status Messages */}
+              {status.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-sm font-medium text-accent mb-3">Status</h3>
+                  <div className="bg-bg-subtle border border-border rounded-lg p-4 max-h-48 overflow-y-auto">
+                    <div className="space-y-2">
+                      {status.map((msg, idx) => (
+                        <div key={idx} className="flex items-start gap-3 text-sm">
+                          <span className="text-text-muted font-mono text-xs shrink-0 pt-0.5">
+                            {msg.timestamp}
+                          </span>
+                          {msg.step && msg.totalSteps && (
+                            <span className="shrink-0 px-1.5 py-0.5 bg-primary/10 text-primary text-xs font-medium rounded">
+                              {msg.step}/{msg.totalSteps}
+                            </span>
+                          )}
+                          <span className={`${getStatusColor(msg.type)} leading-relaxed`}>
+                            {msg.text}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Result */}
+              {result && (
+                <div className="mt-6">
+                  {result.success ? (
+                    <div className="rounded-xl border border-success/20 bg-success-light p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <h3 className="text-base font-semibold text-accent">PR Created Successfully</h3>
+                      </div>
+                      <p className="text-sm text-text-secondary mb-3">View your pull request:</p>
+                      <a href={result.prUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium break-all text-sm">
+                        {result.prUrl}
+                      </a>
+                      {result.prUrl && (
+                        <div className="mt-4 flex gap-3">
+                          <a href={result.prUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors">
+                            <Image src="/GitHub_Invertocat_White.svg" alt="" width={16} height={16} className="h-4 w-4" />
+                            View in GitHub
+                          </a>
+                          <button
+                            onClick={closeCreatePRModal}
+                            className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-error/20 bg-error-light p-5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg className="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <h3 className="text-base font-semibold text-accent">Error</h3>
+                      </div>
+                      <p className="text-sm text-text-secondary">{result.error || result.message}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
