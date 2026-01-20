@@ -4,7 +4,7 @@ A Next.js web application that automatically forks GitHub repositories and recre
 
 ## Overview
 
-When you want Macroscope to review code from any public GitHub repository, this tool automates the entire workflow. It supports two modes:
+When you want Macroscope to review code from any public GitHub repository, this tool automates the entire workflow. It supports three main features:
 
 **Latest Commit Mode**: Review the latest commit (or a specific commit) from any repository
 - Forks the repository to your GitHub account
@@ -16,6 +16,11 @@ When you want Macroscope to review code from any public GitHub repository, this 
 - Paste any GitHub PR URL directly
 - Automatically fetches all commits from the original PR
 - Recreates the PR in your fork with all original commits preserved
+
+**PR Analysis**: Analyze Macroscope findings with AI
+- Uses Claude to identify the most impactful bugs from Macroscope reviews
+- Classifies bugs by severity (critical, high, medium)
+- Generates outreach emails with Attio merge fields
 
 This gives Macroscope a clean PR to analyze, containing exactly the changes you want to review.
 
@@ -102,6 +107,23 @@ The **My Forks** tab helps you manage all your review PRs in one place:
 
 Data is cached locally for quick access between sessions.
 
+### PR Analysis Tab
+
+The **PR Analysis** tab uses Claude to analyze Macroscope findings and generate outreach emails:
+
+1. Select a PR from your forks that has Macroscope review comments
+2. Click **Analyze PR** to run Claude analysis on the findings
+3. View the analysis results:
+   - **Meaningful Bugs**: Bugs that represent real issues (not style/minor concerns)
+   - **Severity Classification**: Critical, High, or Medium impact
+   - **Most Impactful Bug**: The single most significant finding for outreach
+4. Click **Generate Email** to create an outreach email
+   - Includes Attio merge fields (`{{first_name}}`, `{{company}}`, etc.)
+   - Pre-populated with the most impactful bug as the hook
+   - Copy to clipboard for use in your email client
+
+Analysis results are cached locally to avoid re-running for the same PR.
+
 ## Setup Guide
 
 ### Prerequisites
@@ -110,6 +132,7 @@ Data is cached locally for quick access between sessions.
 - [Git](https://git-scm.com/) installed and configured
 - A GitHub account
 - A GitHub Personal Access Token
+- An Anthropic API Key (for PR Analysis feature)
 
 ### 1. Clone this Repository
 
@@ -135,7 +158,17 @@ npm install
 
 6. Copy the token immediately (you won't see it again)
 
-### 4. Configure Environment Variables
+### 4. Get an Anthropic API Key (for PR Analysis)
+
+1. Go to [Anthropic Console](https://console.anthropic.com/settings/keys)
+
+2. Create an account or sign in
+
+3. Click **Create Key**
+
+4. Copy the API key (starts with `sk-ant-`)
+
+### 5. Configure Environment Variables
 
 Create a `.env.local` file in the project root:
 
@@ -143,13 +176,14 @@ Create a `.env.local` file in the project root:
 cp .env.local.example .env.local
 ```
 
-Edit `.env.local` and add your token:
+Edit `.env.local` and add your tokens:
 
 ```
 GITHUB_TOKEN=ghp_your_token_here
+ANTHROPIC_API_KEY=sk-ant-your_key_here
 ```
 
-### 5. Run the Application
+### 6. Run the Application
 
 ```bash
 npm run dev
@@ -266,12 +300,21 @@ For merged PRs, the tool uses intelligent base commit detection:
 
 ### Technical Details
 
-- **Framework**: Next.js 14+ with App Router
+- **Framework**: Next.js 16 with App Router
+- **UI**: React 19, Tailwind CSS v4
 - **Git Operations**: [simple-git](https://github.com/steveukx/git-js) npm package
 - **GitHub API**: [@octokit/rest](https://github.com/octokit/rest.js)
-- **Styling**: Tailwind CSS v4
+- **AI Analysis**: [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) with Claude
+- **Database**: SQLite via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) for local caching
 
-The API route (`/api/create-pr`) handles all operations server-side. Repositories are cloned to a temporary directory and cleaned up after the PR is created.
+The API routes handle all operations server-side:
+- `/api/create-pr` - PR creation with SSE streaming for real-time status updates
+- `/api/forks` - Fork management and synchronization
+- `/api/forks/check-bugs` - Count Macroscope review comments
+- `/api/analyze-pr` - Claude-powered bug analysis
+- `/api/generate-email` - Outreach email generation
+
+Repositories are cloned to a temporary directory and cleaned up after the PR is created.
 
 **Note**: GitHub Actions are automatically disabled on forked repositories to prevent workflows from running on your forks.
 
@@ -319,6 +362,14 @@ Cloning large repositories can be slow. The tool fetches from upstream to ensure
 ### "PR not found" error
 
 Make sure the PR URL is correct and the PR exists. Private repositories require your token to have access to that repository.
+
+### "Anthropic API key not configured"
+
+Make sure you have added `ANTHROPIC_API_KEY` to your `.env.local` file. Restart the dev server after adding it. The PR Analysis feature requires this key.
+
+### "No meaningful bugs found" in analysis
+
+The Claude analysis filters out style suggestions, minor issues, and non-bugs. If the PR only has these types of comments, the analysis may return no meaningful bugs. This is expected behavior.
 
 ## Development
 
