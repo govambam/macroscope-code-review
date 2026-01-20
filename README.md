@@ -105,7 +105,7 @@ The **My Forks** tab helps you manage all your review PRs in one place:
    - Deleting a repo removes the entire fork from GitHub
    - Deleting individual PRs closes them and removes their branches
 
-Data is cached locally for quick access between sessions.
+Data is cached locally in SQLite for quick access between sessions. On page load, forks are retrieved from the database without GitHub API calls. Click **Refresh** to sync with GitHub and update the cache.
 
 ### PR Analysis Tab
 
@@ -122,7 +122,7 @@ The **PR Analysis** tab uses Claude to analyze Macroscope findings and generate 
    - Pre-populated with the most impactful bug as the hook
    - Copy to clipboard for use in your email client
 
-Analysis results are cached locally to avoid re-running for the same PR.
+Analysis results are cached locally in SQLite, including the original PR title and URL. This means viewing a cached analysis requires no GitHub API calls - all data is retrieved instantly from the database.
 
 ## Setup Guide
 
