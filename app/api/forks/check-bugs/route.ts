@@ -14,24 +14,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const octokit = new Octokit({ auth: githubToken });
-    const { data: user } = await octokit.users.getAuthenticated();
 
     const body = await request.json();
-    const { repoName, prNumber } = body as {
+    const { repoOwner, repoName, prNumber } = body as {
+      repoOwner: string;
       repoName: string;
       prNumber: number;
     };
 
-    if (!repoName || !prNumber) {
+    if (!repoOwner || !repoName || !prNumber) {
       return NextResponse.json(
-        { success: false, error: "Missing repoName or prNumber" },
+        { success: false, error: "Missing repoOwner, repoName, or prNumber" },
         { status: 400 }
       );
     }
 
     // Fetch review comments for this PR (comments on specific lines of code)
     const { data: reviewComments } = await octokit.pulls.listReviewComments({
-      owner: user.login,
+      owner: repoOwner,
       repo: repoName,
       pull_number: prNumber,
       per_page: 100,
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Save bug count to database with timestamp
     try {
-      const fork = getFork(user.login, repoName);
+      const fork = getFork(repoOwner, repoName);
       if (fork) {
         const pr = getPR(fork.id, prNumber);
         if (pr) {

@@ -126,21 +126,11 @@ export function initializeDatabase(): void {
   `);
 
   // Migration: Add new columns to existing prs table if they don't exist
-  const columns = db.prepare("PRAGMA table_info(prs)").all() as { name: string }[];
-  const columnNames = columns.map(c => c.name);
-
-  if (!columnNames.includes("original_pr_title")) {
-    db.exec("ALTER TABLE prs ADD COLUMN original_pr_title TEXT");
-  }
-  if (!columnNames.includes("state")) {
-    db.exec("ALTER TABLE prs ADD COLUMN state TEXT DEFAULT 'open'");
-  }
-  if (!columnNames.includes("commit_count")) {
-    db.exec("ALTER TABLE prs ADD COLUMN commit_count INTEGER");
-  }
-  if (!columnNames.includes("last_bug_check_at")) {
-    db.exec("ALTER TABLE prs ADD COLUMN last_bug_check_at DATETIME");
-  }
+  // Use try/catch for idempotent migrations (handles concurrent startups)
+  try { db.exec("ALTER TABLE prs ADD COLUMN original_pr_title TEXT"); } catch {}
+  try { db.exec("ALTER TABLE prs ADD COLUMN state TEXT DEFAULT 'open'"); } catch {}
+  try { db.exec("ALTER TABLE prs ADD COLUMN commit_count INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE prs ADD COLUMN last_bug_check_at DATETIME"); } catch {}
 
   // Create PR analyses table
   db.exec(`
@@ -603,13 +593,18 @@ export function exportToJSON(): {
 } {
   const db = getDatabase();
 
-  return {
-    forks: db.prepare("SELECT * FROM forks").all() as ForkRecord[],
-    prs: db.prepare("SELECT * FROM prs").all() as PRRecord[],
-    analyses: db.prepare("SELECT * FROM pr_analyses").all() as PRAnalysisRecord[],
-    emails: db.prepare("SELECT * FROM generated_emails").all() as GeneratedEmailRecord[],
-    exportedAt: new Date().toISOString()
-  };
+  // Use a read transaction to ensure atomic, consistent snapshot in WAL mode
+  const exportTransaction = db.transaction(() => {
+    return {
+      forks: db.prepare("SELECT * FROM forks").all() as ForkRecord[],
+      prs: db.prepare("SELECT * FROM prs").all() as PRRecord[],
+      analyses: db.prepare("SELECT * FROM pr_analyses").all() as PRAnalysisRecord[],
+      emails: db.prepare("SELECT * FROM generated_emails").all() as GeneratedEmailRecord[],
+      exportedAt: new Date().toISOString()
+    };
+  });
+
+  return exportTransaction();
 }
 
 /**
