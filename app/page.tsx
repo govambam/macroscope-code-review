@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 
-type MainTab = "create" | "forks" | "analysis";
+type MainTab = "create" | "forks";
 type CreateMode = "commit" | "pr";
 
 // PR Analysis types
@@ -137,6 +137,12 @@ export default function Home() {
   const [generatedEmail, setGeneratedEmail] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailCopied, setEmailCopied] = useState(false);
+
+  // Analysis Modal state
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [modalTab, setModalTab] = useState<"analysis" | "email">("analysis");
+  const [modalExpanded, setModalExpanded] = useState(false);
+  const [selectedPrTitle, setSelectedPrTitle] = useState("");
 
   // Load forks from database on mount
   useEffect(() => {
@@ -735,13 +741,15 @@ export default function Home() {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+    const date = new Date(dateString);
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const year = String(date.getFullYear()).slice(-2);
+    const hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const ampm = hours >= 12 ? "PM" : "AM";
+    const hour12 = hours % 12 || 12;
+    return `${month}/${day}/${year} ${hour12}:${minutes} ${ampm}`;
   };
 
   // PR Analysis functions
@@ -812,7 +820,7 @@ export default function Home() {
     }
   };
 
-  const startAnalysisFromForks = (prUrl: string, hasExistingAnalysis = false) => {
+  const startAnalysisFromForks = (prUrl: string, hasExistingAnalysis = false, prTitle = "") => {
     setAnalysisForkedUrl(prUrl);
     setAnalysisOriginalUrl("");
     setAnalysisResult(null);
@@ -821,7 +829,9 @@ export default function Home() {
     setCurrentAnalysisId(null);
     setIsViewingCached(false);
     setExpectingCachedResult(hasExistingAnalysis);
-    setMainTab("analysis");
+    setSelectedPrTitle(prTitle);
+    setModalTab("analysis");
+    setShowAnalysisModal(true);
 
     // If there's an existing analysis, auto-load it
     if (hasExistingAnalysis) {
@@ -833,6 +843,12 @@ export default function Home() {
         }
       }, 100);
     }
+  };
+
+  const closeAnalysisModal = () => {
+    setShowAnalysisModal(false);
+    setModalExpanded(false);
+    setModalTab("analysis");
   };
 
   const copyBugExplanation = async (text: string, index: number) => {
@@ -955,7 +971,7 @@ export default function Home() {
   return (
     <div className="min-h-screen flex">
       {/* Left Sidebar Navigation */}
-      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0">
+      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
           <Image
@@ -999,20 +1015,6 @@ export default function Home() {
               </svg>
               My Repos
             </button>
-            <button
-              type="button"
-              onClick={() => setMainTab("analysis")}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                mainTab === "analysis"
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
-              }`}
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              PR Analysis
-            </button>
           </div>
         </nav>
       </aside>
@@ -1023,14 +1025,12 @@ export default function Home() {
           {/* Page Header */}
           <div className="mb-10">
             <h1 className="text-2xl font-semibold text-accent tracking-tight">
-              {mainTab === "create" ? "Create PR" : mainTab === "forks" ? "My Repos" : "PR Analysis"}
+              {mainTab === "create" ? "Create PR" : "My Repos"}
             </h1>
             <p className="mt-2 text-text-secondary">
               {mainTab === "create"
                 ? "Automatically fork repositories and create PRs for code review"
-                : mainTab === "forks"
-                ? "Manage your repositories and analyze PRs"
-                : "Analyze PRs for meaningful bugs using Claude"}
+                : "Manage your repositories and analyze PRs"}
             </p>
           </div>
 
@@ -1312,37 +1312,41 @@ export default function Home() {
                         <div key={fork.repoName}>
                           {/* Repo Header - Clickable Accordion */}
                           <div
-                            className="flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                            className="flex items-center px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
                             onClick={() => toggleRepoExpand(fork.repoName)}
                           >
                             {/* Expand/Collapse Arrow */}
-                            <svg
-                              className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={2}
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                            </svg>
+                            <div className="w-6 flex-shrink-0">
+                              <svg
+                                className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
 
                             {/* Checkbox */}
-                            <input
-                              type="checkbox"
-                              checked={checkboxState === "checked"}
-                              ref={(el) => {
-                                if (el) el.indeterminate = checkboxState === "indeterminate";
-                              }}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                toggleRepoSelection(fork.repoName);
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                            />
+                            <div className="w-10 flex-shrink-0 flex justify-center">
+                              <input
+                                type="checkbox"
+                                checked={checkboxState === "checked"}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = checkboxState === "indeterminate";
+                                }}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  toggleRepoSelection(fork.repoName);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                              />
+                            </div>
 
                             {/* Repo Name and PR Count */}
-                            <div className="flex-1 flex items-center gap-3">
+                            <div className="flex-1 flex items-center gap-3 ml-2">
                               <a
                                 href={fork.forkUrl}
                                 target="_blank"
@@ -1362,13 +1366,14 @@ export default function Home() {
                           {isExpanded && fork.prs.length > 0 && (
                             <div className="bg-white">
                               {/* PR Table Header */}
-                              <div className="grid grid-cols-[44px_1fr_100px_80px_130px_130px] gap-3 px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <div></div>
-                                <div></div>
-                                <div>Action</div>
-                                <div className="text-center">Bugs</div>
-                                <div>Created</div>
-                                <div>Updated</div>
+                              <div className="flex items-center px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <div className="w-6 flex-shrink-0"></div>
+                                <div className="w-10 flex-shrink-0"></div>
+                                <div className="flex-1 ml-2"></div>
+                                <div className="w-[120px] text-center">Analysis</div>
+                                <div className="w-[100px] text-center">Bugs</div>
+                                <div className="w-[140px] text-center">Created</div>
+                                <div className="w-[140px] text-center">Updated</div>
                               </div>
 
                               {/* PR Rows */}
@@ -1387,10 +1392,13 @@ export default function Home() {
                                   return (
                                     <div
                                       key={`${fork.repoName}-${pr.prNumber}`}
-                                      className="grid grid-cols-[44px_1fr_100px_80px_130px_130px] gap-3 px-6 py-4 hover:bg-gray-50/50 transition-colors items-center"
+                                      className="flex items-center px-6 py-4 hover:bg-gray-50/50 transition-colors"
                                     >
+                                      {/* Empty space for arrow alignment */}
+                                      <div className="w-6 flex-shrink-0"></div>
+
                                       {/* Checkbox */}
-                                      <div className="flex items-center justify-center">
+                                      <div className="w-10 flex-shrink-0 flex justify-center">
                                         <input
                                           type="checkbox"
                                           checked={selection.prs.has(`${fork.repoName}:${pr.prNumber}`)}
@@ -1400,7 +1408,7 @@ export default function Home() {
                                       </div>
 
                                       {/* PR Title */}
-                                      <div className="min-w-0">
+                                      <div className="flex-1 min-w-0 ml-2">
                                         <a
                                           href={pr.prUrl}
                                           target="_blank"
@@ -1415,9 +1423,9 @@ export default function Home() {
                                       </div>
 
                                       {/* Action Button */}
-                                      <div>
+                                      <div className="w-[120px] flex-shrink-0 flex justify-center">
                                         <button
-                                          onClick={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis)}
+                                          onClick={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis, pr.prTitle)}
                                           className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
                                             pr.hasAnalysis
                                               ? "bg-green-50 text-green-700 hover:bg-green-100"
@@ -1445,19 +1453,19 @@ export default function Home() {
                                       </div>
 
                                       {/* Bug Count Badge */}
-                                      <div className="text-center">
+                                      <div className="w-[100px] flex-shrink-0 flex justify-center">
                                         <span className={`inline-flex items-center justify-center min-w-[28px] px-2 py-0.5 text-xs font-semibold rounded-full ${getBugBadgeStyle()}`}>
                                           {pr.hasAnalysis ? (pr.macroscopeBugs ?? 0) : "-"}
                                         </span>
                                       </div>
 
                                       {/* Created Date */}
-                                      <div className="text-sm text-gray-500">
+                                      <div className="w-[140px] flex-shrink-0 text-sm text-gray-500 text-center">
                                         {formatDate(pr.createdAt)}
                                       </div>
 
                                       {/* Updated Date */}
-                                      <div className="text-sm text-gray-500">
+                                      <div className="w-[140px] flex-shrink-0 text-sm text-gray-500 text-center">
                                         {pr.updatedAt ? formatDate(pr.updatedAt) : "-"}
                                       </div>
                                     </div>
@@ -1519,343 +1527,6 @@ export default function Home() {
                 </div>
               )}
             </>
-          ) : mainTab === "analysis" ? (
-            <>
-              {/* PR Analysis Card */}
-              <div className="bg-white border border-border rounded-xl shadow-sm p-8">
-                <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-accent">Analyze PR for Meaningful Bugs</h2>
-                  <p className="mt-1 text-sm text-text-secondary">
-                    Use Claude Opus 4.5 to analyze if Macroscope found any meaningful bugs in a PR.
-                  </p>
-                </div>
-
-                <form id="analysis-form" onSubmit={handleAnalysis} className="space-y-6">
-                  <div>
-                    <label htmlFor="analysisForkedUrl" className="block text-sm font-medium text-accent mb-2">
-                      Forked PR URL <span className="text-error">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      id="analysisForkedUrl"
-                      value={analysisForkedUrl}
-                      onChange={(e) => setAnalysisForkedUrl(e.target.value)}
-                      placeholder="https://github.com/your-username/repo/pull/1"
-                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                      required
-                      disabled={analysisLoading}
-                    />
-                    <p className="mt-2 text-sm text-text-muted">
-                      The PR in your fork that has Macroscope&apos;s review comments
-                    </p>
-                  </div>
-
-                  <div>
-                    <label htmlFor="analysisOriginalUrl" className="block text-sm font-medium text-accent mb-2">
-                      Original PR URL <span className="text-text-muted">(auto-extracted)</span>
-                    </label>
-                    <input
-                      type="text"
-                      id="analysisOriginalUrl"
-                      value={analysisOriginalUrl}
-                      onChange={(e) => setAnalysisOriginalUrl(e.target.value)}
-                      placeholder="Auto-extracted from PR description"
-                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                      disabled={analysisLoading}
-                    />
-                    <p className="mt-2 text-sm text-text-muted">
-                      Automatically extracted from the forked PR description. Only fill this if extraction fails.
-                    </p>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={analysisLoading || !analysisForkedUrl}
-                    className="w-full flex items-center justify-center py-3 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {analysisLoading ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        {expectingCachedResult ? "Loading..." : "Analyzing with Claude..."}
-                      </>
-                    ) : (
-                      <>
-                        <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                        Analyze PR
-                      </>
-                    )}
-                  </button>
-                </form>
-
-                {/* Analysis Results */}
-                {analysisResult && (
-                  <div className="mt-8">
-                    {analysisResult.success && analysisResult.result ? (
-                      analysisResult.result.meaningful_bugs_found ? (
-                        // Meaningful bugs found
-                        <div className="space-y-6">
-                          {/* Bug Summary Header */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-orange-100 rounded-lg">
-                                <svg className="h-6 w-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-lg font-semibold text-accent">Meaningful Bugs Found</h3>
-                                  {isViewingCached && (
-                                    <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
-                                      Cached
-                                    </span>
-                                  )}
-                                </div>
-                              <p className="text-sm text-text-secondary">
-                                {analysisResult.result.bugs.length} meaningful bug{analysisResult.result.bugs.length !== 1 ? "s" : ""} out of {analysisResult.result.total_macroscope_bugs_found} total issue{analysisResult.result.total_macroscope_bugs_found !== 1 ? "s" : ""} detected
-                              </p>
-                              </div>
-                            </div>
-                            {/* Regenerate button - always available */}
-                            <button
-                              onClick={(e) => handleAnalysis(e, true)}
-                              disabled={analysisLoading}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-text-secondary hover:text-accent hover:border-accent rounded-lg transition-colors disabled:opacity-50"
-                            >
-                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                              </svg>
-                              Regenerate
-                            </button>
-                          </div>
-
-                          {/* All Bugs List */}
-                          <div className="space-y-4">
-                            {analysisResult.result.bugs.map((bug, idx) => (
-                              <div
-                                key={idx}
-                                className={`border rounded-lg p-5 ${
-                                  bug.is_most_impactful
-                                    ? "border-orange-300 bg-orange-50 ring-2 ring-orange-200"
-                                    : "border-border bg-bg-subtle"
-                                }`}
-                              >
-                                <div className="flex items-start justify-between gap-4 mb-3">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      {bug.is_most_impactful && (
-                                        <span className="px-2 py-0.5 text-xs font-semibold bg-orange-500 text-white rounded">
-                                          MOST IMPACTFUL
-                                        </span>
-                                      )}
-                                    </div>
-                                    <h4 className="font-semibold text-accent">{bug.title}</h4>
-                                    <p className="text-sm text-text-muted mt-1 font-mono">
-                                      {bug.file_path}
-                                    </p>
-                                  </div>
-                                  <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border shrink-0 ${getSeverityColor(bug.severity)}`}>
-                                    {bug.severity.toUpperCase()}
-                                  </span>
-                                </div>
-
-                                {/* Explanation */}
-                                <div className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
-                                  {bug.explanation}
-                                </div>
-
-                                {/* Copy Button */}
-                                <div className="mt-3 pt-3 border-t border-border/50">
-                                  <button
-                                    onClick={() => copyBugExplanation(bug.explanation, idx)}
-                                    className="flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-accent hover:bg-white rounded transition-colors"
-                                  >
-                                    {copiedBugIndex === idx ? (
-                                      <>
-                                        <svg className="h-3.5 w-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Copied!
-                                      </>
-                                    ) : (
-                                      <>
-                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                        </svg>
-                                        Copy explanation
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Email Generation Section */}
-                          <div className="border-t border-border pt-6 mt-6">
-                            <div className="flex items-start justify-between mb-4">
-                              <div>
-                                <h4 className="text-base font-semibold text-accent">Generate Outreach Email</h4>
-                                <p className="text-sm text-text-secondary mt-1">
-                                  Generate an email using the most impactful bug. The email will include Attio merge fields for personalization.
-                                </p>
-                              </div>
-                              <div className="relative group">
-                                <svg className="h-5 w-5 text-text-muted cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <div className="absolute right-0 top-6 w-64 p-3 bg-accent text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
-                                  <p className="font-semibold mb-1">Attio Merge Fields</p>
-                                  <p>The email uses placeholders like {"{ First Name }"} that Attio will automatically replace with actual data when you send from a sequence.</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <button
-                              onClick={handleGenerateEmail}
-                              disabled={emailLoading}
-                              className="w-full flex items-center justify-center py-2.5 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {emailLoading ? (
-                                <>
-                                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                  </svg>
-                                  Generating Email...
-                                </>
-                              ) : (
-                                <>
-                                  <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                  </svg>
-                                  Generate Email
-                                </>
-                              )}
-                            </button>
-
-                            {/* Email Error */}
-                            {emailError && (
-                              <div className="mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
-                                {emailError}
-                              </div>
-                            )}
-
-                            {/* Generated Email Display */}
-                            {generatedEmail && (
-                              <div className="mt-4 border border-border rounded-lg bg-white">
-                                <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-subtle rounded-t-lg">
-                                  <span className="text-sm font-medium text-accent">Generated Email</span>
-                                  <button
-                                    onClick={copyEmail}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white hover:bg-primary-hover rounded transition-colors"
-                                  >
-                                    {emailCopied ? (
-                                      <>
-                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Copied!
-                                      </>
-                                    ) : (
-                                      <>
-                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                        </svg>
-                                        Copy Email
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                                <div
-                                  className="p-4 text-sm text-text-secondary whitespace-pre-wrap leading-relaxed"
-                                  dangerouslySetInnerHTML={{
-                                    __html: generatedEmail
-                                      .replace(/&/g, "&amp;")
-                                      .replace(/</g, "&lt;")
-                                      .replace(/>/g, "&gt;")
-                                      .replace(/\{ (First Name|Company Name|Sender Name) \}/g,
-                                        '<span class="px-1 py-0.5 bg-purple-100 text-purple-700 rounded font-medium">{ $1 }</span>')
-                                  }}
-                                />
-                                <div className="px-4 py-3 border-t border-border bg-purple-50 rounded-b-lg">
-                                  <p className="text-xs text-purple-700">
-                                    <span className="font-semibold">Attio merge fields:</span> The highlighted placeholders ({"{ First Name }"}, {"{ Company Name }"}, {"{ Sender Name }"}) will be automatically replaced with actual data when you paste this into an Attio sequence.
-                                  </p>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        // No meaningful bugs
-                        <div className="rounded-xl border border-border bg-bg-subtle p-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-gray-100 rounded-lg">
-                                <svg className="h-6 w-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-lg font-semibold text-accent">No Meaningful Bugs Found</h3>
-                                  {isViewingCached && (
-                                    <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
-                                      Cached
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-sm text-text-secondary">
-                                  The issues found don&apos;t meet the threshold for meaningful bugs.
-                                </p>
-                              </div>
-                            </div>
-                            {/* Regenerate button */}
-                            <button
-                              onClick={(e) => handleAnalysis(e, true)}
-                              disabled={analysisLoading}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-text-secondary hover:text-accent hover:border-accent rounded-lg transition-colors disabled:opacity-50"
-                            >
-                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                              </svg>
-                              Regenerate
-                            </button>
-                          </div>
-                          <p className="text-sm text-text-secondary bg-white border border-border rounded-lg p-4">
-                            {analysisResult.result.reason}
-                          </p>
-                        </div>
-                      )
-                    ) : (
-                      // Error
-                      <div className="rounded-xl border border-error/20 bg-error-light p-6">
-                        <div className="flex items-center gap-2 mb-3">
-                          <svg className="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <h3 className="text-lg font-semibold text-accent">Analysis Failed</h3>
-                        </div>
-                        <p className="text-sm text-text-secondary">{analysisResult.error}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="mt-8 text-center">
-                <p className="text-sm text-text-muted">
-                  Powered by Claude Opus 4.5 for intelligent bug analysis.
-                </p>
-              </div>
-            </>
           ) : null}
         </div>
       </main>
@@ -1889,6 +1560,317 @@ export default function Home() {
               >
                 Delete
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Analysis Modal */}
+      {showAnalysisModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div
+            className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ${
+              modalExpanded
+                ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
+                : "w-full max-w-2xl max-h-[80vh]"
+            }`}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-semibold text-accent truncate">
+                  {selectedPrTitle || "PR Analysis"}
+                </h2>
+                {analysisForkedUrl && (
+                  <a
+                    href={analysisForkedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline truncate block"
+                  >
+                    {analysisForkedUrl}
+                  </a>
+                )}
+              </div>
+              <div className="flex items-center gap-2 ml-4">
+                {/* Expand/Collapse Button */}
+                <button
+                  onClick={() => setModalExpanded(!modalExpanded)}
+                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  title={modalExpanded ? "Collapse" : "Expand"}
+                >
+                  {modalExpanded ? (
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                    </svg>
+                  ) : (
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                    </svg>
+                  )}
+                </button>
+                {/* Close Button */}
+                <button
+                  onClick={closeAnalysisModal}
+                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Tabs */}
+            <div className="flex border-b border-border px-6 shrink-0">
+              <button
+                onClick={() => setModalTab("analysis")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  modalTab === "analysis"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                }`}
+              >
+                Analysis
+              </button>
+              {generatedEmail && (
+                <button
+                  onClick={() => setModalTab("email")}
+                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                    modalTab === "email"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-text-secondary hover:text-accent"
+                  }`}
+                >
+                  Email
+                </button>
+              )}
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {modalTab === "analysis" ? (
+                <div className="space-y-6">
+                  {/* Hidden Analysis Form - auto-submits when modal opens for existing analysis */}
+                  <form id="analysis-form" onSubmit={handleAnalysis} className="hidden">
+                    <input type="hidden" value={analysisForkedUrl} />
+                  </form>
+
+                  {/* Loading State */}
+                  {analysisLoading && (
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <svg className="animate-spin h-8 w-8 text-primary mb-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <p className="text-text-secondary">
+                        {expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR..."}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* No Analysis Yet - Show Run Button */}
+                  {!analysisLoading && !analysisResult && (
+                    <div className="text-center py-12">
+                      <svg className="mx-auto h-12 w-12 text-text-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
+                      <h3 className="text-lg font-medium text-accent mb-2">Ready to Analyze</h3>
+                      <p className="text-sm text-text-secondary mb-6">
+                        Click the button below to analyze this PR for bugs found by Macroscope.
+                      </p>
+                      <button
+                        onClick={(e) => handleAnalysis(e as React.FormEvent)}
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Run Analysis
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Analysis Results */}
+                  {!analysisLoading && analysisResult && (
+                    <div className="space-y-6">
+                      {/* Cache indicator */}
+                      {isViewingCached && (
+                        <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                          <div className="flex items-center gap-2 text-blue-700">
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span className="text-sm font-medium">Viewing cached analysis</span>
+                          </div>
+                          <button
+                            onClick={(e) => handleAnalysis(e as React.FormEvent, true)}
+                            className="text-sm text-blue-700 hover:text-blue-800 font-medium underline"
+                          >
+                            Regenerate
+                          </button>
+                        </div>
+                      )}
+
+                      {analysisResult.success && analysisResult.result ? (
+                        analysisResult.result.meaningful_bugs_found ? (
+                          <>
+                            {/* Summary */}
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                              <div className="flex items-center gap-2 text-amber-800">
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <span className="font-semibold">
+                                  Found {analysisResult.result.total_macroscope_bugs_found} bug
+                                  {analysisResult.result.total_macroscope_bugs_found !== 1 ? "s" : ""}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Bug List */}
+                            <div className="space-y-4">
+                              {analysisResult.result.bugs.map((bug, index) => (
+                                <div
+                                  key={index}
+                                  className={`border rounded-lg overflow-hidden ${
+                                    bug.is_most_impactful ? "border-primary ring-1 ring-primary/20" : "border-border"
+                                  }`}
+                                >
+                                  <div className="px-4 py-3 bg-bg-subtle border-b border-border flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className={`px-2 py-0.5 text-xs font-medium rounded border ${getSeverityColor(bug.severity)}`}>
+                                        {bug.severity}
+                                      </span>
+                                      {bug.is_most_impactful && (
+                                        <span className="px-2 py-0.5 text-xs font-medium rounded bg-primary/10 text-primary border border-primary/20">
+                                          Most Impactful
+                                        </span>
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => copyBugExplanation(bug.explanation, index)}
+                                      className="text-xs text-text-secondary hover:text-accent flex items-center gap-1"
+                                    >
+                                      {copiedBugIndex === index ? (
+                                        <>
+                                          <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                          </svg>
+                                          Copied!
+                                        </>
+                                      ) : (
+                                        <>
+                                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                          </svg>
+                                          Copy
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                  <div className="p-4">
+                                    <h4 className="font-medium text-accent mb-2">{bug.title}</h4>
+                                    <p className="text-sm text-text-secondary mb-3">{bug.explanation}</p>
+                                    <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded inline-block">
+                                      {bug.file_path}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Generate Email Button - only show if no email exists */}
+                            {!generatedEmail && (
+                              <div className="border-t border-border pt-6">
+                                <h3 className="text-sm font-medium text-accent mb-3">Generate Outreach Email</h3>
+                                <button
+                                  onClick={handleGenerateEmail}
+                                  disabled={emailLoading}
+                                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                  {emailLoading ? (
+                                    <>
+                                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                      </svg>
+                                      Generating...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                      </svg>
+                                      Generate Email
+                                    </>
+                                  )}
+                                </button>
+                                {emailError && (
+                                  <p className="mt-2 text-sm text-error">{emailError}</p>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          /* No Meaningful Bugs Found */
+                          <div className="text-center py-8">
+                            <svg className="mx-auto h-12 w-12 text-success mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <h3 className="text-lg font-medium text-accent mb-2">No Meaningful Bugs Found</h3>
+                            <p className="text-sm text-text-secondary">{analysisResult.result.reason}</p>
+                          </div>
+                        )
+                      ) : (
+                        /* Error State */
+                        <div className="rounded-lg border border-error/20 bg-error-light p-4">
+                          <div className="flex items-center gap-2 text-error">
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span className="font-medium">Analysis Failed</span>
+                          </div>
+                          <p className="mt-2 text-sm text-text-secondary">{analysisResult.error}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Email Tab */
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-accent">Generated Email</h3>
+                    <button
+                      onClick={copyEmail}
+                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary-hover font-medium"
+                    >
+                      {emailCopied ? (
+                        <>
+                          <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Copy to Clipboard
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="bg-bg-subtle border border-border rounded-lg p-4">
+                    <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
+                      {generatedEmail}
+                    </pre>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
