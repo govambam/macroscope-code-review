@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
-import { getCachedPRBugs, setCachedPRBugs } from "@/lib/services/redis";
-import { getGitHubToken } from "@/lib/config/api-keys";
+import { getFork, getPR, updatePRBugCount } from "@/lib/services/database";
 
 // POST - Check bug count for a single PR
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      return NextResponse.json(
+        { success: false, error: "GitHub token not configured" },
+        { status: 500 }
+      );
+    }
+
+    const octokit = new Octokit({ auth: githubToken });
+    const { data: user } = await octokit.users.getAuthenticated();
+
     const body = await request.json();
     const { repoName, prNumber } = body as {
       repoName: string;
@@ -18,29 +28,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
-
-    // Check Redis cache first
-    const cachedBugCount = await getCachedPRBugs(repoName, prNumber);
-    if (cachedBugCount !== null) {
-      return NextResponse.json({
-        success: true,
-        repoName,
-        prNumber,
-        bugCount: cachedBugCount,
-        cached: true,
-      });
-    }
-
-    const githubToken = await getGitHubToken();
-    if (!githubToken) {
-      return NextResponse.json(
-        { success: false, error: "GitHub token not configured. Please configure it in Settings." },
-        { status: 500 }
-      );
-    }
-
-    const octokit = new Octokit({ auth: githubToken });
-    const { data: user } = await octokit.users.getAuthenticated();
 
     // Fetch review comments for this PR (comments on specific lines of code)
     const { data: reviewComments } = await octokit.pulls.listReviewComments({
@@ -60,8 +47,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const bugCount = macroscopeComments.length;
 
-    // Cache the result in Redis
-    await setCachedPRBugs(repoName, prNumber, bugCount);
+    // Save bug count to database with timestamp
+    try {
+      const fork = getFork(user.login, repoName);
+      if (fork) {
+        const pr = getPR(fork.id, prNumber);
+        if (pr) {
+          updatePRBugCount(pr.id, bugCount);
+        }
+      }
+    } catch (dbError) {
+      console.error("Failed to save bug count to database:", dbError);
+      // Continue anyway - we still have the count
+    }
 
     return NextResponse.json({
       success: true,

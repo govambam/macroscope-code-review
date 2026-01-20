@@ -1,4 +1,6 @@
-import { createClient, Client } from "@libsql/client";
+import Database from "better-sqlite3";
+import path from "path";
+import fs from "fs";
 
 // Types for database records
 export interface ForkRecord {
@@ -19,8 +21,10 @@ export interface PRRecord {
   original_pr_title: string | null;
   has_macroscope_bugs: boolean;
   bug_count: number | null;
+  state: string | null;
+  commit_count: number | null;
+  last_bug_check_at: string | null;
   created_at: string;
-  created_by_user: string | null;
 }
 
 export interface PRAnalysisRecord {
@@ -29,8 +33,6 @@ export interface PRAnalysisRecord {
   analyzed_at: string;
   meaningful_bugs_found: boolean;
   analysis_json: string;
-  created_by_user: string | null;
-  model: string | null;
 }
 
 export interface GeneratedEmailRecord {
@@ -42,36 +44,6 @@ export interface GeneratedEmailRecord {
   sender_name: string;
   email_content: string;
   generated_at: string;
-  created_by_user: string | null;
-  model: string | null;
-}
-
-// User management types
-export interface UserRecord {
-  id: number;
-  name: string;
-  initials: string;
-  is_active: boolean;
-  created_at: string;
-}
-
-// Settings types
-export interface SettingRecord {
-  key: string;
-  value: string;
-  updated_at: string;
-}
-
-// Prompt version types
-export interface PromptVersionRecord {
-  id: number;
-  prompt_type: "pr-analysis" | "email-generation";
-  content: string;
-  edited_by_user_id: number | null;
-  edited_by_user_name: string | null;  // Joined from users table
-  is_default: boolean;
-  model: string | null;
-  created_at: string;
 }
 
 // Extended types for API responses
@@ -82,48 +54,46 @@ export interface ForkWithPRs extends ForkRecord {
 export interface PRRecordWithAnalysis extends PRRecord {
   has_analysis: boolean;
   analysis_id: number | null;
-  analyzed_at: string | null;
 }
 
-// Singleton client instance
-let client: Client | null = null;
-let initialized = false;
+// Database path
+const DATA_DIR = path.join(process.cwd(), "data");
+const DB_PATH = path.join(DATA_DIR, "pr-creator.db");
+
+// Singleton database instance
+let db: Database.Database | null = null;
 
 /**
- * Get or create the Turso client instance.
+ * Get or create the database instance.
  */
-function getClient(): Client {
-  if (client) return client;
+function getDatabase(): Database.Database {
+  if (db) return db;
 
-  const url = process.env.TURSO_DATABASE_URL;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
-
-  if (!url) {
-    throw new Error(
-      "TURSO_DATABASE_URL is not configured. Please add it to your .env.local file.\n" +
-      "Get your database URL from: https://turso.tech/app"
-    );
+  // Ensure data directory exists
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  client = createClient({
-    url,
-    authToken, // Optional for local development with libsql
-  });
+  db = new Database(DB_PATH);
 
-  return client;
+  // Enable foreign keys
+  db.pragma("foreign_keys = ON");
+
+  // Use WAL mode for better concurrent access
+  db.pragma("journal_mode = WAL");
+
+  return db;
 }
 
 /**
  * Initialize the database schema.
  * Creates tables if they don't exist.
  */
-export async function initializeDatabase(): Promise<void> {
-  if (initialized) return;
-
-  const db = getClient();
+export function initializeDatabase(): void {
+  const db = getDatabase();
 
   // Create forks table
-  await db.execute(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS forks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       repo_owner TEXT NOT NULL,
@@ -135,7 +105,7 @@ export async function initializeDatabase(): Promise<void> {
   `);
 
   // Create PRs table
-  await db.execute(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS prs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fork_id INTEGER NOT NULL,
@@ -143,16 +113,37 @@ export async function initializeDatabase(): Promise<void> {
       pr_title TEXT,
       forked_pr_url TEXT NOT NULL,
       original_pr_url TEXT,
+      original_pr_title TEXT,
       has_macroscope_bugs BOOLEAN DEFAULT FALSE,
       bug_count INTEGER,
+      state TEXT DEFAULT 'open',
+      commit_count INTEGER,
+      last_bug_check_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (fork_id) REFERENCES forks(id) ON DELETE CASCADE,
       UNIQUE(fork_id, pr_number)
     )
   `);
 
+  // Migration: Add new columns to existing prs table if they don't exist
+  const columns = db.prepare("PRAGMA table_info(prs)").all() as { name: string }[];
+  const columnNames = columns.map(c => c.name);
+
+  if (!columnNames.includes("original_pr_title")) {
+    db.exec("ALTER TABLE prs ADD COLUMN original_pr_title TEXT");
+  }
+  if (!columnNames.includes("state")) {
+    db.exec("ALTER TABLE prs ADD COLUMN state TEXT DEFAULT 'open'");
+  }
+  if (!columnNames.includes("commit_count")) {
+    db.exec("ALTER TABLE prs ADD COLUMN commit_count INTEGER");
+  }
+  if (!columnNames.includes("last_bug_check_at")) {
+    db.exec("ALTER TABLE prs ADD COLUMN last_bug_check_at DATETIME");
+  }
+
   // Create PR analyses table
-  await db.execute(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS pr_analyses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       pr_id INTEGER NOT NULL,
@@ -164,7 +155,7 @@ export async function initializeDatabase(): Promise<void> {
   `);
 
   // Create generated emails table
-  await db.execute(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS generated_emails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       pr_analysis_id INTEGER NOT NULL,
@@ -178,141 +169,53 @@ export async function initializeDatabase(): Promise<void> {
     )
   `);
 
-  // Create users table for team management
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      initials TEXT NOT NULL,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create settings table for API config storage
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create prompt_versions table for version history
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS prompt_versions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      prompt_type TEXT NOT NULL,
-      content TEXT NOT NULL,
-      edited_by_user_id INTEGER,
-      is_default BOOLEAN DEFAULT FALSE,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (edited_by_user_id) REFERENCES users(id)
-    )
-  `);
-
   // Create indexes for common queries
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_prs_fork_id ON prs(fork_id)`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_pr_analyses_pr_id ON pr_analyses(pr_id)`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_generated_emails_analysis_id ON generated_emails(pr_analysis_id)`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active)`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_prompt_versions_type ON prompt_versions(prompt_type)`);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_prs_fork_id ON prs(fork_id);
+    CREATE INDEX IF NOT EXISTS idx_pr_analyses_pr_id ON pr_analyses(pr_id);
+    CREATE INDEX IF NOT EXISTS idx_generated_emails_analysis_id ON generated_emails(pr_analysis_id);
+  `);
 
-  // Migrations: Add created_by_user column to tables (safe if column already exists)
-  try {
-    await db.execute(`ALTER TABLE prs ADD COLUMN created_by_user TEXT`);
-  } catch {
-    // Column already exists
-  }
-  try {
-    await db.execute(`ALTER TABLE pr_analyses ADD COLUMN created_by_user TEXT`);
-  } catch {
-    // Column already exists
-  }
-  try {
-    await db.execute(`ALTER TABLE generated_emails ADD COLUMN created_by_user TEXT`);
-  } catch {
-    // Column already exists
-  }
-
-  // Migrations: Add model column to track which AI model was used
-  try {
-    await db.execute(`ALTER TABLE pr_analyses ADD COLUMN model TEXT`);
-  } catch {
-    // Column already exists
-  }
-  try {
-    await db.execute(`ALTER TABLE generated_emails ADD COLUMN model TEXT`);
-  } catch {
-    // Column already exists
-  }
-  try {
-    await db.execute(`ALTER TABLE prompt_versions ADD COLUMN model TEXT`);
-  } catch {
-    // Column already exists
-  }
-
-  // Migration: Add original_pr_title column to prs table
-  try {
-    await db.execute(`ALTER TABLE prs ADD COLUMN original_pr_title TEXT`);
-  } catch {
-    // Column already exists
-  }
-
-  initialized = true;
-  console.log("Turso database initialized successfully");
-}
-
-/**
- * Helper to convert a row to a typed object.
- */
-function rowToObject<T>(row: Record<string, unknown>): T {
-  return row as T;
+  console.log("Database initialized successfully at:", DB_PATH);
 }
 
 /**
  * Save or update a fork record.
  * Returns the fork ID.
  */
-export async function saveFork(repoOwner: string, repoName: string, forkUrl: string): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
+export function saveFork(repoOwner: string, repoName: string, forkUrl: string): number {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `
-      INSERT INTO forks (repo_owner, repo_name, fork_url)
-      VALUES (?, ?, ?)
-      ON CONFLICT(repo_owner, repo_name)
-      DO UPDATE SET fork_url = excluded.fork_url
-      RETURNING id
-    `,
-    args: [repoOwner, repoName, forkUrl],
-  });
+  const stmt = db.prepare(`
+    INSERT INTO forks (repo_owner, repo_name, fork_url)
+    VALUES (?, ?, ?)
+    ON CONFLICT(repo_owner, repo_name)
+    DO UPDATE SET fork_url = excluded.fork_url
+    RETURNING id
+  `);
 
-  return result.rows[0].id as number;
+  const result = stmt.get(repoOwner, repoName, forkUrl) as { id: number };
+  return result.id;
 }
 
 /**
  * Get a fork by owner and name.
  */
-export async function getFork(repoOwner: string, repoName: string): Promise<ForkRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
+export function getFork(repoOwner: string, repoName: string): ForkRecord | null {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `SELECT * FROM forks WHERE repo_owner = ? AND repo_name = ?`,
-    args: [repoOwner, repoName],
-  });
+  const stmt = db.prepare(`
+    SELECT * FROM forks WHERE repo_owner = ? AND repo_name = ?
+  `);
 
-  if (result.rows.length === 0) return null;
-  return rowToObject<ForkRecord>(result.rows[0] as Record<string, unknown>);
+  return stmt.get(repoOwner, repoName) as ForkRecord | null;
 }
 
 /**
  * Save or update a PR record.
  * Returns the PR ID.
  */
-export async function savePR(
+export function savePR(
   forkId: number,
   prNumber: number,
   prTitle: string | null,
@@ -320,417 +223,299 @@ export async function savePR(
   originalPrUrl: string | null,
   hasBugs: boolean,
   bugCount: number | null = null,
-  createdByUser: string | null = null,
-  originalPrTitle: string | null = null
-): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
+  options: {
+    originalPrTitle?: string | null;
+    state?: string | null;
+    commitCount?: number | null;
+    updateBugCheckTime?: boolean;
+  } = {}
+): number {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `
-      INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, created_by_user)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(fork_id, pr_number)
-      DO UPDATE SET
-        pr_title = COALESCE(excluded.pr_title, prs.pr_title),
-        forked_pr_url = excluded.forked_pr_url,
-        original_pr_url = COALESCE(excluded.original_pr_url, prs.original_pr_url),
-        original_pr_title = COALESCE(excluded.original_pr_title, prs.original_pr_title),
-        has_macroscope_bugs = excluded.has_macroscope_bugs,
-        bug_count = COALESCE(excluded.bug_count, prs.bug_count),
-        created_by_user = COALESCE(excluded.created_by_user, prs.created_by_user)
-      RETURNING id
-    `,
-    args: [forkId, prNumber, prTitle, forkedPrUrl, originalPrUrl, originalPrTitle, hasBugs ? 1 : 0, bugCount, createdByUser],
-  });
+  const stmt = db.prepare(`
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(fork_id, pr_number)
+    DO UPDATE SET
+      pr_title = COALESCE(excluded.pr_title, prs.pr_title),
+      forked_pr_url = excluded.forked_pr_url,
+      original_pr_url = COALESCE(excluded.original_pr_url, prs.original_pr_url),
+      original_pr_title = COALESCE(excluded.original_pr_title, prs.original_pr_title),
+      has_macroscope_bugs = excluded.has_macroscope_bugs,
+      bug_count = COALESCE(excluded.bug_count, prs.bug_count),
+      state = COALESCE(excluded.state, prs.state),
+      commit_count = COALESCE(excluded.commit_count, prs.commit_count),
+      last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at)
+    RETURNING id
+  `);
 
-  return result.rows[0].id as number;
+  const lastBugCheckAt = options.updateBugCheckTime ? new Date().toISOString() : null;
+
+  const result = stmt.get(
+    forkId,
+    prNumber,
+    prTitle,
+    forkedPrUrl,
+    originalPrUrl,
+    options.originalPrTitle ?? null,
+    hasBugs ? 1 : 0,
+    bugCount,
+    options.state ?? null,
+    options.commitCount ?? null,
+    lastBugCheckAt
+  ) as { id: number };
+  return result.id;
 }
 
 /**
  * Get a PR by fork ID and PR number.
  */
-export async function getPR(forkId: number, prNumber: number): Promise<PRRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
+export function getPR(forkId: number, prNumber: number): PRRecord | null {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `SELECT * FROM prs WHERE fork_id = ? AND pr_number = ?`,
-    args: [forkId, prNumber],
-  });
+  const stmt = db.prepare(`
+    SELECT * FROM prs WHERE fork_id = ? AND pr_number = ?
+  `);
 
-  if (result.rows.length === 0) return null;
-  return rowToObject<PRRecord>(result.rows[0] as Record<string, unknown>);
+  return stmt.get(forkId, prNumber) as PRRecord | null;
 }
 
 /**
  * Get a PR by its URL.
  */
-export async function getPRByUrl(forkedPrUrl: string): Promise<PRRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
+export function getPRByUrl(forkedPrUrl: string): PRRecord | null {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `SELECT * FROM prs WHERE forked_pr_url = ?`,
-    args: [forkedPrUrl],
-  });
+  const stmt = db.prepare(`
+    SELECT * FROM prs WHERE forked_pr_url = ?
+  `);
 
-  if (result.rows.length === 0) return null;
-  return rowToObject<PRRecord>(result.rows[0] as Record<string, unknown>);
+  return stmt.get(forkedPrUrl) as PRRecord | null;
 }
 
 /**
- * Update bug count for a PR.
+ * Update bug count for a PR (also updates last_bug_check_at timestamp).
  */
-export async function updatePRBugCount(prId: number, bugCount: number): Promise<void> {
-  await initializeDatabase();
-  const db = getClient();
+export function updatePRBugCount(prId: number, bugCount: number): void {
+  const db = getDatabase();
 
-  await db.execute({
-    sql: `UPDATE prs SET has_macroscope_bugs = ?, bug_count = ? WHERE id = ?`,
-    args: [bugCount > 0 ? 1 : 0, bugCount, prId],
-  });
+  const stmt = db.prepare(`
+    UPDATE prs SET has_macroscope_bugs = ?, bug_count = ?, last_bug_check_at = ? WHERE id = ?
+  `);
+
+  stmt.run(bugCount > 0 ? 1 : 0, bugCount, new Date().toISOString(), prId);
 }
 
 /**
- * Update the original PR URL and title for a PR record.
- * Used when the original URL/title is extracted later (e.g., during analysis).
+ * Update original PR title for a PR.
  */
-export async function updatePROriginalUrl(
-  prId: number,
-  originalPrUrl: string,
-  originalPrTitle: string | null = null
-): Promise<void> {
-  await initializeDatabase();
-  const db = getClient();
+export function updatePROriginalTitle(prId: number, originalPrTitle: string): void {
+  const db = getDatabase();
 
-  if (originalPrTitle) {
-    await db.execute({
-      sql: `UPDATE prs SET original_pr_url = ?, original_pr_title = ? WHERE id = ?`,
-      args: [originalPrUrl, originalPrTitle, prId],
-    });
-  } else {
-    await db.execute({
-      sql: `UPDATE prs SET original_pr_url = ? WHERE id = ?`,
-      args: [originalPrUrl, prId],
-    });
-  }
+  const stmt = db.prepare(`
+    UPDATE prs SET original_pr_title = ? WHERE id = ?
+  `);
+
+  stmt.run(originalPrTitle, prId);
+}
+
+/**
+ * Update original PR URL and title for a PR.
+ */
+export function updatePROriginalInfo(prId: number, originalPrUrl: string, originalPrTitle: string | null): void {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE prs SET original_pr_url = ?, original_pr_title = COALESCE(?, original_pr_title) WHERE id = ?
+  `);
+
+  stmt.run(originalPrUrl, originalPrTitle, prId);
 }
 
 /**
  * Save a PR analysis.
  * Returns the analysis ID.
  */
-export async function saveAnalysis(
+export function saveAnalysis(
   prId: number,
   meaningfulBugsFound: boolean,
-  analysisJson: string,
-  createdByUser: string | null = null,
-  model: string | null = null
-): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
+  analysisJson: string
+): number {
+  const db = getDatabase();
 
   // Delete any existing analysis for this PR (we only keep the latest)
-  await db.execute({
-    sql: `DELETE FROM pr_analyses WHERE pr_id = ?`,
-    args: [prId],
-  });
+  db.prepare(`DELETE FROM pr_analyses WHERE pr_id = ?`).run(prId);
 
-  const result = await db.execute({
-    sql: `
-      INSERT INTO pr_analyses (pr_id, meaningful_bugs_found, analysis_json, created_by_user, model)
-      VALUES (?, ?, ?, ?, ?)
-      RETURNING id
-    `,
-    args: [prId, meaningfulBugsFound ? 1 : 0, analysisJson, createdByUser, model],
-  });
+  const stmt = db.prepare(`
+    INSERT INTO pr_analyses (pr_id, meaningful_bugs_found, analysis_json)
+    VALUES (?, ?, ?)
+    RETURNING id
+  `);
 
-  return result.rows[0].id as number;
+  const result = stmt.get(prId, meaningfulBugsFound ? 1 : 0, analysisJson) as { id: number };
+  return result.id;
 }
 
 /**
  * Get the analysis for a PR.
  */
-export async function getAnalysis(prId: number): Promise<PRAnalysisRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
+export function getAnalysis(prId: number): PRAnalysisRecord | null {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `SELECT * FROM pr_analyses WHERE pr_id = ? ORDER BY analyzed_at DESC LIMIT 1`,
-    args: [prId],
-  });
+  const stmt = db.prepare(`
+    SELECT * FROM pr_analyses WHERE pr_id = ? ORDER BY analyzed_at DESC LIMIT 1
+  `);
 
-  if (result.rows.length === 0) return null;
-  return rowToObject<PRAnalysisRecord>(result.rows[0] as Record<string, unknown>);
+  return stmt.get(prId) as PRAnalysisRecord | null;
 }
 
 /**
  * Get analysis by PR URL.
  */
-export async function getAnalysisByPRUrl(forkedPrUrl: string): Promise<PRAnalysisRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
+export function getAnalysisByPRUrl(forkedPrUrl: string): PRAnalysisRecord | null {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `
-      SELECT a.* FROM pr_analyses a
-      JOIN prs p ON a.pr_id = p.id
-      WHERE p.forked_pr_url = ?
-      ORDER BY a.analyzed_at DESC LIMIT 1
-    `,
-    args: [forkedPrUrl],
-  });
+  const stmt = db.prepare(`
+    SELECT a.* FROM pr_analyses a
+    JOIN prs p ON a.pr_id = p.id
+    WHERE p.forked_pr_url = ?
+    ORDER BY a.analyzed_at DESC LIMIT 1
+  `);
 
-  if (result.rows.length === 0) return null;
-  return rowToObject<PRAnalysisRecord>(result.rows[0] as Record<string, unknown>);
-}
-
-/**
- * Combined result for cached analysis lookup.
- */
-export interface CachedAnalysisData {
-  analysis: PRAnalysisRecord;
-  pr: PRRecord;
-  latestEmail: GeneratedEmailRecord | null;
-}
-
-/**
- * Get cached analysis with all related data in optimized queries.
- * Returns analysis, PR record, and latest email in minimal database calls.
- */
-export async function getCachedAnalysisData(forkedPrUrl: string): Promise<CachedAnalysisData | null> {
-  await initializeDatabase();
-  const db = getClient();
-
-  // Single query to get analysis and PR data joined
-  const result = await db.execute({
-    sql: `
-      SELECT
-        a.id as analysis_id,
-        a.pr_id,
-        a.analyzed_at,
-        a.meaningful_bugs_found,
-        a.analysis_json,
-        a.created_by_user as analysis_created_by_user,
-        a.model as analysis_model,
-        p.id as pr_id,
-        p.fork_id,
-        p.pr_number,
-        p.pr_title,
-        p.forked_pr_url,
-        p.original_pr_url,
-        p.original_pr_title,
-        p.has_macroscope_bugs,
-        p.bug_count,
-        p.created_at as pr_created_at,
-        p.created_by_user as pr_created_by_user
-      FROM pr_analyses a
-      JOIN prs p ON a.pr_id = p.id
-      WHERE p.forked_pr_url = ?
-      ORDER BY a.analyzed_at DESC LIMIT 1
-    `,
-    args: [forkedPrUrl],
-  });
-
-  if (result.rows.length === 0) return null;
-
-  const row = result.rows[0];
-
-  const analysis: PRAnalysisRecord = {
-    id: row.analysis_id as number,
-    pr_id: row.pr_id as number,
-    analyzed_at: row.analyzed_at as string,
-    meaningful_bugs_found: Boolean(row.meaningful_bugs_found),
-    analysis_json: row.analysis_json as string,
-    created_by_user: row.analysis_created_by_user as string | null,
-    model: row.analysis_model as string | null,
-  };
-
-  const pr: PRRecord = {
-    id: row.pr_id as number,
-    fork_id: row.fork_id as number,
-    pr_number: row.pr_number as number,
-    pr_title: row.pr_title as string | null,
-    forked_pr_url: row.forked_pr_url as string,
-    original_pr_url: row.original_pr_url as string | null,
-    original_pr_title: row.original_pr_title as string | null,
-    has_macroscope_bugs: Boolean(row.has_macroscope_bugs),
-    bug_count: row.bug_count as number | null,
-    created_at: row.pr_created_at as string,
-    created_by_user: row.pr_created_by_user as string | null,
-  };
-
-  // Get latest email for this analysis
-  const emailResult = await db.execute({
-    sql: `SELECT * FROM generated_emails WHERE pr_analysis_id = ? ORDER BY generated_at DESC LIMIT 1`,
-    args: [analysis.id],
-  });
-
-  const latestEmail = emailResult.rows.length > 0
-    ? rowToObject<GeneratedEmailRecord>(emailResult.rows[0] as Record<string, unknown>)
-    : null;
-
-  return { analysis, pr, latestEmail };
+  return stmt.get(forkedPrUrl) as PRAnalysisRecord | null;
 }
 
 /**
  * Check if a PR has an analysis.
  */
-export async function hasAnalysis(prId: number): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
+export function hasAnalysis(prId: number): boolean {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `SELECT COUNT(*) as count FROM pr_analyses WHERE pr_id = ?`,
-    args: [prId],
-  });
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count FROM pr_analyses WHERE pr_id = ?
+  `);
 
-  return (result.rows[0].count as number) > 0;
+  const result = stmt.get(prId) as { count: number };
+  return result.count > 0;
 }
 
 /**
  * Save a generated email.
  * Returns the email ID.
  */
-export async function saveGeneratedEmail(
+export function saveGeneratedEmail(
   analysisId: number,
   recipientName: string,
   recipientTitle: string | null,
   companyName: string | null,
   senderName: string,
-  emailContent: string,
-  createdByUser: string | null = null,
-  model: string | null = null
-): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
+  emailContent: string
+): number {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `
-      INSERT INTO generated_emails (pr_analysis_id, recipient_name, recipient_title, company_name, sender_name, email_content, created_by_user, model)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      RETURNING id
-    `,
-    args: [analysisId, recipientName, recipientTitle, companyName, senderName, emailContent, createdByUser, model],
-  });
+  const stmt = db.prepare(`
+    INSERT INTO generated_emails (pr_analysis_id, recipient_name, recipient_title, company_name, sender_name, email_content)
+    VALUES (?, ?, ?, ?, ?, ?)
+    RETURNING id
+  `);
 
-  return result.rows[0].id as number;
+  const result = stmt.get(analysisId, recipientName, recipientTitle, companyName, senderName, emailContent) as { id: number };
+  return result.id;
 }
 
 /**
  * Get all emails for an analysis.
  */
-export async function getEmailsForAnalysis(analysisId: number): Promise<GeneratedEmailRecord[]> {
-  await initializeDatabase();
-  const db = getClient();
+export function getEmailsForAnalysis(analysisId: number): GeneratedEmailRecord[] {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `SELECT * FROM generated_emails WHERE pr_analysis_id = ? ORDER BY generated_at DESC`,
-    args: [analysisId],
-  });
+  const stmt = db.prepare(`
+    SELECT * FROM generated_emails WHERE pr_analysis_id = ? ORDER BY generated_at DESC
+  `);
 
-  return result.rows.map((row) => rowToObject<GeneratedEmailRecord>(row as Record<string, unknown>));
+  return stmt.all(analysisId) as GeneratedEmailRecord[];
 }
 
 /**
  * Get all forks with their PRs and analysis status.
  */
-export async function getAllForksWithPRs(): Promise<ForkWithPRs[]> {
-  await initializeDatabase();
-  const db = getClient();
+export function getAllForksWithPRs(): ForkWithPRs[] {
+  const db = getDatabase();
 
   // Get all forks
-  const forksResult = await db.execute(`SELECT * FROM forks ORDER BY created_at DESC`);
-  const forks = forksResult.rows.map((row) => rowToObject<ForkRecord>(row as Record<string, unknown>));
+  const forks = db.prepare(`SELECT * FROM forks ORDER BY created_at DESC`).all() as ForkRecord[];
 
-  // Get PRs with analysis status for each fork
-  const result: ForkWithPRs[] = [];
-  for (const fork of forks) {
-    const prsResult = await db.execute({
-      sql: `
-        SELECT
-          p.*,
-          CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
-          a.id as analysis_id,
-          a.analyzed_at
-        FROM prs p
-        LEFT JOIN pr_analyses a ON p.id = a.pr_id
-        WHERE p.fork_id = ?
-        ORDER BY p.created_at DESC
-      `,
-      args: [fork.id],
-    });
+  // Get all PRs with analysis status
+  const prsStmt = db.prepare(`
+    SELECT
+      p.*,
+      CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+      a.id as analysis_id
+    FROM prs p
+    LEFT JOIN pr_analyses a ON p.id = a.pr_id
+    WHERE p.fork_id = ?
+    ORDER BY p.created_at DESC
+  `);
 
-    result.push({
-      ...fork,
-      prs: prsResult.rows.map((row) => rowToObject<PRRecordWithAnalysis>(row as Record<string, unknown>)),
-    });
-  }
-
-  return result;
+  return forks.map(fork => ({
+    ...fork,
+    prs: prsStmt.all(fork.id) as PRRecordWithAnalysis[]
+  }));
 }
 
 /**
  * Get PRs for a specific fork.
  */
-export async function getPRsForFork(forkId: number): Promise<PRRecordWithAnalysis[]> {
-  await initializeDatabase();
-  const db = getClient();
+export function getPRsForFork(forkId: number): PRRecordWithAnalysis[] {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `
-      SELECT
-        p.*,
-        CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
-        a.id as analysis_id,
-        a.analyzed_at
-      FROM prs p
-      LEFT JOIN pr_analyses a ON p.id = a.pr_id
-      WHERE p.fork_id = ?
-      ORDER BY p.created_at DESC
-    `,
-    args: [forkId],
-  });
+  const stmt = db.prepare(`
+    SELECT
+      p.*,
+      CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+      a.id as analysis_id
+    FROM prs p
+    LEFT JOIN pr_analyses a ON p.id = a.pr_id
+    WHERE p.fork_id = ?
+    ORDER BY p.created_at DESC
+  `);
 
-  return result.rows.map((row) => rowToObject<PRRecordWithAnalysis>(row as Record<string, unknown>));
+  return stmt.all(forkId) as PRRecordWithAnalysis[];
 }
 
 /**
  * Delete a fork and all its PRs (cascade).
  */
-export async function deleteFork(repoOwner: string, repoName: string): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
+export function deleteFork(repoOwner: string, repoName: string): boolean {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `DELETE FROM forks WHERE repo_owner = ? AND repo_name = ?`,
-    args: [repoOwner, repoName],
-  });
+  const stmt = db.prepare(`
+    DELETE FROM forks WHERE repo_owner = ? AND repo_name = ?
+  `);
 
-  return result.rowsAffected > 0;
+  const result = stmt.run(repoOwner, repoName);
+  return result.changes > 0;
 }
 
 /**
  * Delete a PR.
  */
-export async function deletePR(forkId: number, prNumber: number): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
+export function deletePR(forkId: number, prNumber: number): boolean {
+  const db = getDatabase();
 
-  const result = await db.execute({
-    sql: `DELETE FROM prs WHERE fork_id = ? AND pr_number = ?`,
-    args: [forkId, prNumber],
-  });
+  const stmt = db.prepare(`
+    DELETE FROM prs WHERE fork_id = ? AND pr_number = ?
+  `);
 
-  return result.rowsAffected > 0;
+  const result = stmt.run(forkId, prNumber);
+  return result.changes > 0;
 }
 
 /**
  * Sync forks from GitHub API response to database.
  * This merges GitHub data with existing database records.
  */
-export async function syncForksFromGitHub(
+export function syncForksFromGitHub(
   githubForks: Array<{
     repoName: string;
     forkUrl: string;
@@ -746,87 +531,82 @@ export async function syncForksFromGitHub(
       macroscopeBugs?: number;
     }>;
   }>
-): Promise<void> {
-  await initializeDatabase();
+): void {
+  const db = getDatabase();
 
-  for (const ghFork of githubForks) {
-    // Parse owner from fork URL: https://github.com/owner/repo
-    const urlMatch = ghFork.forkUrl.match(/github\.com\/([^/]+)\//);
-    const repoOwner = urlMatch ? urlMatch[1] : "unknown";
+  // Use a transaction for atomic updates
+  const syncTransaction = db.transaction(() => {
+    for (const ghFork of githubForks) {
+      // Parse owner from fork URL: https://github.com/owner/repo
+      const urlMatch = ghFork.forkUrl.match(/github\.com\/([^/]+)\//);
+      const repoOwner = urlMatch ? urlMatch[1] : "unknown";
 
-    // Save or update fork
-    const forkId = await saveFork(repoOwner, ghFork.repoName, ghFork.forkUrl);
+      // Save or update fork
+      const forkId = saveFork(repoOwner, ghFork.repoName, ghFork.forkUrl);
 
-    // Save or update each PR
-    for (const ghPR of ghFork.prs) {
-      await savePR(
-        forkId,
-        ghPR.prNumber,
-        ghPR.prTitle,
-        ghPR.prUrl,
-        null, // original PR URL not available from GitHub API
-        ghPR.macroscopeBugs !== undefined && ghPR.macroscopeBugs > 0,
-        ghPR.macroscopeBugs ?? null
-      );
+      // Save or update each PR
+      for (const ghPR of ghFork.prs) {
+        savePR(
+          forkId,
+          ghPR.prNumber,
+          ghPR.prTitle,
+          ghPR.prUrl,
+          null, // original PR URL not available from GitHub API
+          ghPR.macroscopeBugs !== undefined && ghPR.macroscopeBugs > 0,
+          ghPR.macroscopeBugs ?? null,
+          {
+            state: ghPR.state,
+            commitCount: ghPR.commitCount,
+            updateBugCheckTime: ghPR.macroscopeBugs !== undefined, // Only update if we actually checked bugs
+          }
+        );
+      }
     }
-  }
+  });
+
+  syncTransaction();
 }
 
 /**
  * Get database statistics.
  */
-export async function getStats(): Promise<{
+export function getStats(): {
   forks: number;
   prs: number;
   analyses: number;
   emails: number;
-}> {
-  await initializeDatabase();
-  const db = getClient();
+} {
+  const db = getDatabase();
 
-  const result = await db.execute(`
+  const stats = db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM forks) as forks,
       (SELECT COUNT(*) FROM prs) as prs,
       (SELECT COUNT(*) FROM pr_analyses) as analyses,
       (SELECT COUNT(*) FROM generated_emails) as emails
-  `);
+  `).get() as { forks: number; prs: number; analyses: number; emails: number };
 
-  const row = result.rows[0];
-  return {
-    forks: row.forks as number,
-    prs: row.prs as number,
-    analyses: row.analyses as number,
-    emails: row.emails as number,
-  };
+  return stats;
 }
 
 /**
  * Export database to JSON for backup.
  */
-export async function exportToJSON(): Promise<{
+export function exportToJSON(): {
   forks: ForkRecord[];
   prs: PRRecord[];
   analyses: PRAnalysisRecord[];
   emails: GeneratedEmailRecord[];
   exportedAt: string;
-}> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const [forksRes, prsRes, analysesRes, emailsRes] = await Promise.all([
-    db.execute("SELECT * FROM forks"),
-    db.execute("SELECT * FROM prs"),
-    db.execute("SELECT * FROM pr_analyses"),
-    db.execute("SELECT * FROM generated_emails"),
-  ]);
+} {
+  const db = getDatabase();
 
   return {
-    forks: forksRes.rows.map((row) => rowToObject<ForkRecord>(row as Record<string, unknown>)),
-    prs: prsRes.rows.map((row) => rowToObject<PRRecord>(row as Record<string, unknown>)),
-    analyses: analysesRes.rows.map((row) => rowToObject<PRAnalysisRecord>(row as Record<string, unknown>)),
-    emails: emailsRes.rows.map((row) => rowToObject<GeneratedEmailRecord>(row as Record<string, unknown>)),
-    exportedAt: new Date().toISOString(),
+    forks: db.prepare("SELECT * FROM forks").all() as ForkRecord[],
+    prs: db.prepare("SELECT * FROM prs").all() as PRRecord[],
+    analyses: db.prepare("SELECT * FROM pr_analyses").all() as PRAnalysisRecord[],
+    emails: db.prepare("SELECT * FROM generated_emails").all() as GeneratedEmailRecord[],
+    exportedAt: new Date().toISOString()
   };
 }
 
@@ -834,405 +614,59 @@ export async function exportToJSON(): Promise<{
  * Import database from JSON backup.
  * Warning: This will replace all existing data!
  */
-export async function importFromJSON(backup: {
+export function importFromJSON(backup: {
   forks: ForkRecord[];
   prs: PRRecord[];
   analyses: PRAnalysisRecord[];
   emails: GeneratedEmailRecord[];
-}): Promise<void> {
-  await initializeDatabase();
-  const db = getClient();
+}): void {
+  const db = getDatabase();
 
-  // Clear existing data (in reverse order due to foreign keys)
-  await db.execute("DELETE FROM generated_emails");
-  await db.execute("DELETE FROM pr_analyses");
-  await db.execute("DELETE FROM prs");
-  await db.execute("DELETE FROM forks");
+  const importTransaction = db.transaction(() => {
+    // Clear existing data (in reverse order due to foreign keys)
+    db.exec("DELETE FROM generated_emails");
+    db.exec("DELETE FROM pr_analyses");
+    db.exec("DELETE FROM prs");
+    db.exec("DELETE FROM forks");
 
-  // Insert forks
-  for (const fork of backup.forks) {
-    await db.execute({
-      sql: `INSERT INTO forks (id, repo_owner, repo_name, fork_url, created_at) VALUES (?, ?, ?, ?, ?)`,
-      args: [fork.id, fork.repo_owner, fork.repo_name, fork.fork_url, fork.created_at],
-    });
-  }
+    // Insert forks
+    const forkStmt = db.prepare(`
+      INSERT INTO forks (id, repo_owner, repo_name, fork_url, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    for (const fork of backup.forks) {
+      forkStmt.run(fork.id, fork.repo_owner, fork.repo_name, fork.fork_url, fork.created_at);
+    }
 
-  // Insert PRs
-  for (const pr of backup.prs) {
-    await db.execute({
-      sql: `INSERT INTO prs (id, fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, has_macroscope_bugs, bug_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [pr.id, pr.fork_id, pr.pr_number, pr.pr_title, pr.forked_pr_url, pr.original_pr_url, pr.has_macroscope_bugs ? 1 : 0, pr.bug_count, pr.created_at],
-    });
-  }
+    // Insert PRs
+    const prStmt = db.prepare(`
+      INSERT INTO prs (id, fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, has_macroscope_bugs, bug_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const pr of backup.prs) {
+      prStmt.run(pr.id, pr.fork_id, pr.pr_number, pr.pr_title, pr.forked_pr_url, pr.original_pr_url, pr.has_macroscope_bugs ? 1 : 0, pr.bug_count, pr.created_at);
+    }
 
-  // Insert analyses
-  for (const analysis of backup.analyses) {
-    await db.execute({
-      sql: `INSERT INTO pr_analyses (id, pr_id, analyzed_at, meaningful_bugs_found, analysis_json) VALUES (?, ?, ?, ?, ?)`,
-      args: [analysis.id, analysis.pr_id, analysis.analyzed_at, analysis.meaningful_bugs_found ? 1 : 0, analysis.analysis_json],
-    });
-  }
+    // Insert analyses
+    const analysisStmt = db.prepare(`
+      INSERT INTO pr_analyses (id, pr_id, analyzed_at, meaningful_bugs_found, analysis_json)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    for (const analysis of backup.analyses) {
+      analysisStmt.run(analysis.id, analysis.pr_id, analysis.analyzed_at, analysis.meaningful_bugs_found ? 1 : 0, analysis.analysis_json);
+    }
 
-  // Insert emails
-  for (const email of backup.emails) {
-    await db.execute({
-      sql: `INSERT INTO generated_emails (id, pr_analysis_id, recipient_name, recipient_title, company_name, sender_name, email_content, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [email.id, email.pr_analysis_id, email.recipient_name, email.recipient_title, email.company_name, email.sender_name, email.email_content, email.generated_at],
-    });
-  }
-}
-
-// ==================== User Management ====================
-
-/**
- * Get all users, optionally filtered by active status.
- */
-export async function getUsers(activeOnly: boolean = true): Promise<UserRecord[]> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const sql = activeOnly
-    ? `SELECT * FROM users WHERE is_active = 1 ORDER BY name ASC`
-    : `SELECT * FROM users ORDER BY name ASC`;
-
-  const result = await db.execute(sql);
-  return result.rows.map((row) => rowToObject<UserRecord>(row as Record<string, unknown>));
-}
-
-/**
- * Get a user by ID.
- */
-export async function getUserById(id: number): Promise<UserRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `SELECT * FROM users WHERE id = ?`,
-    args: [id],
+    // Insert emails
+    const emailStmt = db.prepare(`
+      INSERT INTO generated_emails (id, pr_analysis_id, recipient_name, recipient_title, company_name, sender_name, email_content, generated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const email of backup.emails) {
+      emailStmt.run(email.id, email.pr_analysis_id, email.recipient_name, email.recipient_title, email.company_name, email.sender_name, email.email_content, email.generated_at);
+    }
   });
 
-  if (result.rows.length === 0) return null;
-  return rowToObject<UserRecord>(result.rows[0] as Record<string, unknown>);
-}
-
-/**
- * Create a new user.
- * Returns the new user ID.
- */
-export async function createUser(name: string, initials: string): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `INSERT INTO users (name, initials, is_active) VALUES (?, ?, 1) RETURNING id`,
-    args: [name, initials.toUpperCase()],
-  });
-
-  return result.rows[0].id as number;
-}
-
-/**
- * Update a user.
- */
-export async function updateUser(id: number, name: string, initials: string): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `UPDATE users SET name = ?, initials = ? WHERE id = ?`,
-    args: [name, initials.toUpperCase(), id],
-  });
-
-  return result.rowsAffected > 0;
-}
-
-/**
- * Soft delete a user (set is_active to false).
- */
-export async function deactivateUser(id: number): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `UPDATE users SET is_active = 0 WHERE id = ?`,
-    args: [id],
-  });
-
-  return result.rowsAffected > 0;
-}
-
-/**
- * Check if initials are already taken by another active user.
- */
-export async function isInitialsTaken(initials: string, excludeUserId?: number): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const sql = excludeUserId
-    ? `SELECT COUNT(*) as count FROM users WHERE initials = ? AND is_active = 1 AND id != ?`
-    : `SELECT COUNT(*) as count FROM users WHERE initials = ? AND is_active = 1`;
-
-  const args = excludeUserId ? [initials.toUpperCase(), excludeUserId] : [initials.toUpperCase()];
-
-  const result = await db.execute({ sql, args });
-  return (result.rows[0].count as number) > 0;
-}
-
-// ==================== Settings Management ====================
-
-/**
- * Get a setting value by key.
- */
-export async function getSetting(key: string): Promise<string | null> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `SELECT value FROM settings WHERE key = ?`,
-    args: [key],
-  });
-
-  if (result.rows.length === 0) return null;
-  return result.rows[0].value as string;
-}
-
-/**
- * Get multiple settings by keys.
- */
-export async function getSettings(keys: string[]): Promise<Record<string, string>> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const placeholders = keys.map(() => '?').join(', ');
-  const result = await db.execute({
-    sql: `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
-    args: keys,
-  });
-
-  const settings: Record<string, string> = {};
-  for (const row of result.rows) {
-    settings[row.key as string] = row.value as string;
-  }
-  return settings;
-}
-
-/**
- * Set a setting value (upsert).
- */
-export async function setSetting(key: string, value: string): Promise<void> {
-  await initializeDatabase();
-  const db = getClient();
-
-  await db.execute({
-    sql: `
-      INSERT INTO settings (key, value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `,
-    args: [key, value],
-  });
-}
-
-/**
- * Set multiple settings at once.
- */
-export async function setSettings(settings: Record<string, string>): Promise<void> {
-  await initializeDatabase();
-  const db = getClient();
-
-  for (const [key, value] of Object.entries(settings)) {
-    await db.execute({
-      sql: `
-        INSERT INTO settings (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-      `,
-      args: [key, value],
-    });
-  }
-}
-
-/**
- * Delete a setting.
- */
-export async function deleteSetting(key: string): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `DELETE FROM settings WHERE key = ?`,
-    args: [key],
-  });
-
-  return result.rowsAffected > 0;
-}
-
-// ==================== Prompt Version Management ====================
-
-/**
- * Save a new prompt version.
- * Returns the new version ID.
- */
-export async function savePromptVersion(
-  promptType: "pr-analysis" | "email-generation",
-  content: string,
-  editedByUserId: number | null,
-  isDefault: boolean = false,
-  model: string | null = null
-): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `INSERT INTO prompt_versions (prompt_type, content, edited_by_user_id, is_default, model) VALUES (?, ?, ?, ?, ?) RETURNING id`,
-    args: [promptType, content, editedByUserId, isDefault ? 1 : 0, model],
-  });
-
-  return result.rows[0].id as number;
-}
-
-/**
- * Get all versions for a prompt type (newest first).
- */
-export async function getPromptVersions(
-  promptType: "pr-analysis" | "email-generation"
-): Promise<PromptVersionRecord[]> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `
-      SELECT
-        pv.*,
-        u.name as edited_by_user_name
-      FROM prompt_versions pv
-      LEFT JOIN users u ON pv.edited_by_user_id = u.id
-      WHERE pv.prompt_type = ?
-      ORDER BY pv.created_at DESC
-    `,
-    args: [promptType],
-  });
-
-  return result.rows.map((row) => ({
-    ...rowToObject<PromptVersionRecord>(row as Record<string, unknown>),
-    is_default: Boolean(row.is_default),
-  }));
-}
-
-/**
- * Get the latest (current) version for a prompt type.
- */
-export async function getLatestPromptVersion(
-  promptType: "pr-analysis" | "email-generation"
-): Promise<PromptVersionRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `
-      SELECT
-        pv.*,
-        u.name as edited_by_user_name
-      FROM prompt_versions pv
-      LEFT JOIN users u ON pv.edited_by_user_id = u.id
-      WHERE pv.prompt_type = ?
-      ORDER BY pv.created_at DESC
-      LIMIT 1
-    `,
-    args: [promptType],
-  });
-
-  if (result.rows.length === 0) return null;
-  return {
-    ...rowToObject<PromptVersionRecord>(result.rows[0] as Record<string, unknown>),
-    is_default: Boolean(result.rows[0].is_default),
-  };
-}
-
-/**
- * Get the default version for a prompt type.
- */
-export async function getDefaultPromptVersion(
-  promptType: "pr-analysis" | "email-generation"
-): Promise<PromptVersionRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `
-      SELECT
-        pv.*,
-        u.name as edited_by_user_name
-      FROM prompt_versions pv
-      LEFT JOIN users u ON pv.edited_by_user_id = u.id
-      WHERE pv.prompt_type = ? AND pv.is_default = 1
-      LIMIT 1
-    `,
-    args: [promptType],
-  });
-
-  if (result.rows.length === 0) return null;
-  return {
-    ...rowToObject<PromptVersionRecord>(result.rows[0] as Record<string, unknown>),
-    is_default: true,
-  };
-}
-
-/**
- * Get a specific prompt version by ID.
- */
-export async function getPromptVersion(id: number): Promise<PromptVersionRecord | null> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `
-      SELECT
-        pv.*,
-        u.name as edited_by_user_name
-      FROM prompt_versions pv
-      LEFT JOIN users u ON pv.edited_by_user_id = u.id
-      WHERE pv.id = ?
-    `,
-    args: [id],
-  });
-
-  if (result.rows.length === 0) return null;
-  return {
-    ...rowToObject<PromptVersionRecord>(result.rows[0] as Record<string, unknown>),
-    is_default: Boolean(result.rows[0].is_default),
-  };
-}
-
-/**
- * Get the version count for a prompt type.
- */
-export async function getPromptVersionCount(
-  promptType: "pr-analysis" | "email-generation"
-): Promise<number> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute({
-    sql: `SELECT COUNT(*) as count FROM prompt_versions WHERE prompt_type = ?`,
-    args: [promptType],
-  });
-
-  return result.rows[0].count as number;
-}
-
-/**
- * Check if default versions have been seeded.
- */
-export async function hasDefaultPromptVersions(): Promise<boolean> {
-  await initializeDatabase();
-  const db = getClient();
-
-  const result = await db.execute(
-    `SELECT COUNT(*) as count FROM prompt_versions WHERE is_default = 1`
-  );
-
-  return (result.rows[0].count as number) >= 2; // Both prompts should have defaults
+  importTransaction();
 }
 
 /**
@@ -1240,9 +674,11 @@ export async function hasDefaultPromptVersions(): Promise<boolean> {
  * Call this when shutting down the application.
  */
 export function closeDatabase(): void {
-  if (client) {
-    client.close();
-    client = null;
-    initialized = false;
+  if (db) {
+    db.close();
+    db = null;
   }
 }
+
+// Initialize database on module load
+initializeDatabase();
