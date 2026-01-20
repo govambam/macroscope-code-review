@@ -582,22 +582,17 @@ export default function Home() {
       const newPrs = new Set(prev.prs);
       const newRepos = new Set(prev.repos);
       const prKey = `${repoName}:${prNumber}`;
-      const fork = forks.find((f) => f.repoName === repoName);
 
       if (newPrs.has(prKey)) {
         newPrs.delete(prKey);
-        // If no PRs selected for this repo, deselect the repo
-        const hasOtherPrs = fork?.prs.some((pr) => newPrs.has(`${repoName}:${pr.prNumber}`));
-        if (!hasOtherPrs) {
-          newRepos.delete(repoName);
-        }
       } else {
         newPrs.add(prKey);
-        // Check if all PRs are now selected
-        const allSelected = fork?.prs.every((pr) => newPrs.has(`${repoName}:${pr.prNumber}`));
-        if (allSelected) {
-          newRepos.add(repoName);
-        }
+      }
+
+      // If repo was selected and we're unchecking a PR, deselect the repo
+      // (user is now selecting individual PRs, not the whole fork)
+      if (newRepos.has(repoName)) {
+        newRepos.delete(repoName);
       }
 
       return { repos: newRepos, prs: newPrs };
@@ -605,34 +600,27 @@ export default function Home() {
   };
 
   const getRepoCheckboxState = (repoName: string): "checked" | "unchecked" | "indeterminate" => {
+    // Repo is checked only if explicitly selected (will delete the whole fork)
+    if (selection.repos.has(repoName)) return "checked";
+
+    // Check if any PRs are selected (show indeterminate)
     const fork = forks.find((f) => f.repoName === repoName);
     if (!fork) return "unchecked";
 
-    const selectedCount = fork.prs.filter((pr) => selection.prs.has(`${repoName}:${pr.prNumber}`)).length;
-
-    if (selectedCount === 0) return "unchecked";
-    if (selectedCount === fork.prs.length) return "checked";
-    return "indeterminate";
+    const hasSelectedPrs = fork.prs.some((pr) => selection.prs.has(`${repoName}:${pr.prNumber}`));
+    return hasSelectedPrs ? "indeterminate" : "unchecked";
   };
 
   const getSelectedCounts = () => {
-    const reposToDelete = new Set<string>();
+    // Only delete repos that are explicitly selected (not just because all PRs are selected)
+    const reposToDelete = Array.from(selection.repos);
+
+    // Find individual PRs to delete (from repos not being deleted)
     const prsToDelete: { repo: string; prNumber: number; branchName: string }[] = [];
-
-    // Find repos where all PRs are selected (delete the whole repo)
-    forks.forEach((fork) => {
-      const allPrsSelected = fork.prs.every((pr) =>
-        selection.prs.has(`${fork.repoName}:${pr.prNumber}`)
-      );
-      if (allPrsSelected && fork.prs.length > 0) {
-        reposToDelete.add(fork.repoName);
-      }
-    });
-
-    // Find individual PRs to delete (from repos not being fully deleted)
     selection.prs.forEach((prKey) => {
       const [repoName, prNumberStr] = prKey.split(":");
-      if (!reposToDelete.has(repoName)) {
+      // Don't include PRs from repos being deleted (they'll be deleted with the repo)
+      if (!selection.repos.has(repoName)) {
         const fork = forks.find((f) => f.repoName === repoName);
         const pr = fork?.prs.find((p) => p.prNumber === parseInt(prNumberStr));
         if (pr) {
@@ -641,7 +629,7 @@ export default function Home() {
       }
     });
 
-    return { reposToDelete: Array.from(reposToDelete), prsToDelete };
+    return { reposToDelete, prsToDelete };
   };
 
   const handleDelete = async () => {
@@ -1375,6 +1363,15 @@ export default function Home() {
                                       </div>
                                     </div>
                                   ))}
+                                </div>
+                              )}
+
+                              {/* Empty state for forks with no PRs */}
+                              {fork.prs.length === 0 && (
+                                <div className="mt-3 ml-2 border-l-2 border-border pl-4">
+                                  <p className="text-sm text-text-muted italic">
+                                    No review PRs in this fork
+                                  </p>
                                 </div>
                               )}
                             </div>
