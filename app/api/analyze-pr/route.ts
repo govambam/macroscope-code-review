@@ -6,27 +6,19 @@ import {
   PRAnalysisResult,
 } from "@/lib/services/pr-analyzer";
 import {
+  getAnalysisByPRUrl,
   saveAnalysis,
   saveFork,
   savePR,
   getPRByUrl,
-  getLatestPromptVersion,
-  updatePROriginalUrl,
-  getCachedAnalysisData,
+  getEmailsForAnalysis,
+  updatePROriginalInfo,
 } from "@/lib/services/database";
-import {
-  getCachedAnalysis,
-  setCachedAnalysis,
-  invalidateForksCache,
-} from "@/lib/services/redis";
-import { DEFAULT_MODEL } from "@/lib/config/models";
-import { getGitHubToken, getAnthropicApiKey } from "@/lib/config/api-keys";
 
 interface AnalyzeRequest {
   forkedPrUrl: string;
   originalPrUrl?: string; // Optional - will try to extract from PR body if not provided
   forceRefresh?: boolean; // Force re-analysis even if cached
-  createdByUser?: string; // User ID of who triggered the analysis
 }
 
 interface AnalyzeResponse {
@@ -39,8 +31,6 @@ interface AnalyzeResponse {
   cached?: boolean; // Whether the result was loaded from cache
   analysisId?: number; // Database ID of the analysis
   cachedEmail?: string; // Previously generated email content
-  analysisModel?: string; // Model used for analysis
-  emailModel?: string; // Model used for email generation
 }
 
 /**
@@ -67,21 +57,20 @@ function parsePrUrl(
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    // Check for required API keys (from database settings or environment variables)
-    const anthropicKey = await getAnthropicApiKey();
-    if (!anthropicKey) {
+    // Check for required environment variables
+    if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json<AnalyzeResponse>(
         {
           success: false,
           error:
-            "ANTHROPIC_API_KEY is not configured. Please configure it in Settings or add it to your .env.local file.",
+            "ANTHROPIC_API_KEY is not configured. Please add it to your .env.local file.",
         },
         { status: 500 }
       );
     }
 
     const body: AnalyzeRequest = await request.json();
-    const { forkedPrUrl, forceRefresh, createdByUser } = body;
+    const { forkedPrUrl, forceRefresh } = body;
     let { originalPrUrl } = body;
 
     // Validate forked PR URL
@@ -107,39 +96,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // CHECK CACHE FIRST - before any GitHub API calls
     // This ensures "View Analysis" returns instantly for cached results
     if (!forceRefresh) {
-      // Check Redis cache first (fastest)
-      const redisCached = await getCachedAnalysis<AnalyzeResponse>(forkedPrUrl);
-      if (redisCached) {
-        return NextResponse.json<AnalyzeResponse>({
-          ...redisCached,
-          cached: true,
-        });
-      }
-
-      // Fall back to database cache - optimized single query
       try {
-        const cachedData = await getCachedAnalysisData(forkedPrUrl);
-        if (cachedData) {
-          const { analysis, pr, latestEmail } = cachedData;
-          const result = JSON.parse(analysis.analysis_json) as PRAnalysisResult;
+        const cachedAnalysis = getAnalysisByPRUrl(forkedPrUrl);
+        if (cachedAnalysis) {
+          const result = JSON.parse(cachedAnalysis.analysis_json) as PRAnalysisResult;
 
-          const response: AnalyzeResponse = {
+          // Get the stored PR record to retrieve originalPrUrl and originalPrTitle
+          const prRecord = getPRByUrl(forkedPrUrl);
+          const storedOriginalUrl = prRecord?.original_pr_url || originalPrUrl;
+          // Use stored title - no GitHub API call needed!
+          const originalPrTitle = prRecord?.original_pr_title || undefined;
+
+          // Get any previously generated email for this analysis
+          let cachedEmail: string | undefined;
+          try {
+            const emails = getEmailsForAnalysis(cachedAnalysis.id);
+            if (emails.length > 0) {
+              // Return the most recent email
+              cachedEmail = emails[0].email_content;
+            }
+          } catch {
+            // Continue without cached email
+          }
+
+          return NextResponse.json<AnalyzeResponse>({
             success: true,
             result,
             forkedPrUrl,
-            originalPrUrl: pr.original_pr_url || originalPrUrl,
-            originalPrTitle: pr.original_pr_title || undefined,
+            originalPrUrl: storedOriginalUrl,
+            originalPrTitle,
             cached: true,
-            analysisId: analysis.id,
-            cachedEmail: latestEmail?.email_content,
-            analysisModel: analysis.model || undefined,
-            emailModel: latestEmail?.model || undefined,
-          };
-
-          // Cache in Redis for faster future access (don't await)
-          setCachedAnalysis(forkedPrUrl, response).catch(() => {});
-
-          return NextResponse.json<AnalyzeResponse>(response);
+            analysisId: cachedAnalysis.id,
+            cachedEmail,
+          });
         }
       } catch (dbError) {
         console.error("Failed to check for cached analysis:", dbError);
@@ -148,12 +137,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // No cached result - need to fetch from GitHub and run analysis
-    const githubToken = await getGitHubToken();
+    const githubToken = process.env.GITHUB_TOKEN;
     if (!githubToken) {
       return NextResponse.json<AnalyzeResponse>(
         {
           success: false,
-          error: "GITHUB_TOKEN is not configured. Please configure it in Settings or add it to your .env.local file.",
+          error: "GITHUB_TOKEN is not configured. Required to fetch PR details.",
         },
         { status: 500 }
       );
@@ -229,22 +218,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Continue without the title - email generation will use a default
     }
 
-    // Get the model from prompt settings
-    let analysisModel = DEFAULT_MODEL;
-    try {
-      const promptVersion = await getLatestPromptVersion("pr-analysis");
-      if (promptVersion?.model) {
-        analysisModel = promptVersion.model;
-      }
-    } catch {
-      // Use default model if settings can't be fetched
-    }
-
     // Perform the analysis
     const result = await analyzePR({
       forkedPrUrl,
       originalPrUrl,
-      model: analysisModel,
     });
 
     // Save the analysis to the database
@@ -252,47 +229,46 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       // Ensure PR exists in database
       let prId: number;
-      const existingPR = await getPRByUrl(forkedPrUrl);
+      const existingPR = getPRByUrl(forkedPrUrl);
       if (existingPR) {
         prId = existingPR.id;
-        // Update the original PR URL and title if not stored before
-        if ((!existingPR.original_pr_url && originalPrUrl) || (!existingPR.original_pr_title && originalPrTitle)) {
-          await updatePROriginalUrl(prId, originalPrUrl || existingPR.original_pr_url || "", originalPrTitle);
+        // Update original PR info if we have it
+        if (originalPrUrl) {
+          updatePROriginalInfo(prId, originalPrUrl, originalPrTitle || null);
         }
       } else {
         // Create fork and PR records
-        const forkId = await saveFork(
+        const forkId = saveFork(
           parsedForkedPr.owner,
           parsedForkedPr.repo,
           `https://github.com/${parsedForkedPr.owner}/${parsedForkedPr.repo}`
         );
-        prId = await savePR(
+        prId = savePR(
           forkId,
           parsedForkedPr.prNumber,
-          null, // forked PR title not known
+          null, // title not known
           forkedPrUrl,
           originalPrUrl,
           result.meaningful_bugs_found,
           result.meaningful_bugs_found ? result.total_macroscope_bugs_found : 0,
-          createdByUser,
-          originalPrTitle // Store the original PR title
+          {
+            originalPrTitle: originalPrTitle || null,
+          }
         );
       }
 
-      // Save the analysis with the model used
-      analysisId = await saveAnalysis(
+      // Save the analysis
+      analysisId = saveAnalysis(
         prId,
         result.meaningful_bugs_found,
-        JSON.stringify(result),
-        createdByUser,
-        analysisModel
+        JSON.stringify(result)
       );
     } catch (dbError) {
       console.error("Failed to save analysis to database:", dbError);
       // Continue anyway - the analysis was still successful
     }
 
-    const response: AnalyzeResponse = {
+    return NextResponse.json<AnalyzeResponse>({
       success: true,
       result,
       forkedPrUrl,
@@ -300,16 +276,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       originalPrTitle,
       cached: false,
       analysisId,
-      analysisModel,
-    };
-
-    // Cache in Redis for faster future access
-    await setCachedAnalysis(forkedPrUrl, response);
-
-    // Invalidate forks cache since analysis status changed
-    await invalidateForksCache("default");
-
-    return NextResponse.json<AnalyzeResponse>(response);
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("PR Analysis error:", errorMessage);
