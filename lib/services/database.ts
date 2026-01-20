@@ -489,6 +489,7 @@ export function getPRsForFork(forkId: number): PRRecordWithAnalysis[] {
  */
 export function deleteFork(repoOwner: string, repoName: string): boolean {
   const db = getDatabase();
+  initializeDatabase();
 
   const stmt = db.prepare(`
     DELETE FROM forks WHERE repo_owner = ? AND repo_name = ?
