@@ -1,8 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { getAnthropicApiKey } from "@/lib/config/api-keys";
 
 // Default model for PR analysis
-export const DEFAULT_MODEL = "claude-opus-4-5-20250514";
+export const DEFAULT_MODEL = "claude-opus-4-20250514";
 
 // Retry configuration
 const MAX_RETRIES = 3;
@@ -10,16 +9,15 @@ const INITIAL_RETRY_DELAY_MS = 1000;
 
 /**
  * Creates and returns an Anthropic client instance.
- * Fetches API key from database settings first, then falls back to environment variable.
  * Throws an error if the API key is not configured.
  */
-export async function getAnthropicClient(): Promise<Anthropic> {
-  const apiKey = await getAnthropicApiKey();
+export function getAnthropicClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
     throw new Error(
-      "ANTHROPIC_API_KEY is not configured. " +
-        "Please configure it in Settings or add it to your .env.local file."
+      "ANTHROPIC_API_KEY environment variable is not set. " +
+        "Please add it to your .env.local file."
     );
   }
 
@@ -63,7 +61,7 @@ export async function sendMessage(
     temperature?: number;
   } = {}
 ): Promise<string> {
-  const client = await getAnthropicClient();
+  const client = getAnthropicClient();
   const model = options.model || DEFAULT_MODEL;
   const maxTokens = options.maxTokens || 4096;
   const temperature = options.temperature ?? 0;

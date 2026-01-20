@@ -1,5 +1,5 @@
 # Email Generation Prompt
-Model: claude-sonnet-4-5-20250514
+Model: claude-sonnet-4-20250514
 Purpose: Generate personalized outreach email incorporating bug analysis
 
 ---
