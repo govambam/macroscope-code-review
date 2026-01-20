@@ -601,13 +601,18 @@ export function exportToJSON(): {
 } {
   const db = getDatabase();
 
-  return {
-    forks: db.prepare("SELECT * FROM forks").all() as ForkRecord[],
-    prs: db.prepare("SELECT * FROM prs").all() as PRRecord[],
-    analyses: db.prepare("SELECT * FROM pr_analyses").all() as PRAnalysisRecord[],
-    emails: db.prepare("SELECT * FROM generated_emails").all() as GeneratedEmailRecord[],
-    exportedAt: new Date().toISOString()
-  };
+  // Use a read transaction to ensure atomic, consistent snapshot in WAL mode
+  const exportTransaction = db.transaction(() => {
+    return {
+      forks: db.prepare("SELECT * FROM forks").all() as ForkRecord[],
+      prs: db.prepare("SELECT * FROM prs").all() as PRRecord[],
+      analyses: db.prepare("SELECT * FROM pr_analyses").all() as PRAnalysisRecord[],
+      emails: db.prepare("SELECT * FROM generated_emails").all() as GeneratedEmailRecord[],
+      exportedAt: new Date().toISOString()
+    };
+  });
+
+  return exportTransaction();
 }
 
 /**
