@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 
 type MainTab = "create" | "forks" | "analysis";
@@ -71,6 +71,7 @@ interface PRRecord {
   prUrl: string;
   prTitle: string;
   createdAt: string;
+  updatedAt?: string | null;
   commitCount: number;
   state: string;
   branchName: string;
@@ -116,8 +117,10 @@ export default function Home() {
   const [deleteResult, setDeleteResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showOnlyWithIssues, setShowOnlyWithIssues] = useState(false);
   const [checkingPR, setCheckingPR] = useState<{ repo: string; pr: number } | null>(null);
+  const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
   const forksLoadedRef = useRef(false);
   const checkedPRsRef = useRef<Set<string>>(new Set());
+  const expandedReposInitialized = useRef(false);
 
   // PR Analysis tab state
   const [analysisForkedUrl, setAnalysisForkedUrl] = useState("");
@@ -173,6 +176,34 @@ export default function Home() {
 
     loadForksFromDatabase();
   }, []);
+
+  // Initialize expanded repos from localStorage and auto-expand all repos
+  useEffect(() => {
+    if (forks.length > 0 && !expandedReposInitialized.current) {
+      // Try to load from localStorage first
+      const stored = localStorage.getItem("macroscope-expanded-repos");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          setExpandedRepos(new Set(parsed));
+        } catch {
+          // If invalid, expand all repos by default
+          setExpandedRepos(new Set(forks.map(f => f.repoName)));
+        }
+      } else {
+        // Default: expand all repos
+        setExpandedRepos(new Set(forks.map(f => f.repoName)));
+      }
+      expandedReposInitialized.current = true;
+    }
+  }, [forks]);
+
+  // Save expanded repos to localStorage when it changes
+  useEffect(() => {
+    if (expandedReposInitialized.current) {
+      localStorage.setItem("macroscope-expanded-repos", JSON.stringify([...expandedRepos]));
+    }
+  }, [expandedRepos]);
 
   // Auto-check missing bug counts when switching to My Forks tab
   useEffect(() => {
@@ -557,6 +588,18 @@ export default function Home() {
     return result;
   }, [forks, searchQuery, showOnlyWithIssues]);
 
+  const toggleRepoExpand = (repoName: string) => {
+    setExpandedRepos((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(repoName)) {
+        newSet.delete(repoName);
+      } else {
+        newSet.add(repoName);
+      }
+      return newSet;
+    });
+  };
+
   const toggleRepoSelection = (repoName: string) => {
     setSelection((prev) => {
       const newRepos = new Set(prev.repos);
@@ -910,69 +953,85 @@ export default function Home() {
   const { reposToDelete, prsToDelete } = getSelectedCounts();
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-border bg-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-16">
-            <Image
-              src="/Macroscope-text-logo.png"
-              alt="Macroscope"
-              width={160}
-              height={32}
-              className="h-8 w-auto"
-              priority
-            />
-          </div>
+    <div className="min-h-screen flex">
+      {/* Left Sidebar Navigation */}
+      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0">
+        {/* Logo */}
+        <div className="h-16 flex items-center px-6 border-b border-border">
+          <Image
+            src="/Macroscope-text-logo.png"
+            alt="Macroscope"
+            width={140}
+            height={28}
+            className="h-7 w-auto"
+            priority
+          />
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="flex-1 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-xl mx-auto">
-          {/* Page Header */}
-          <div className="mb-10">
-            <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Creator</h1>
-            <p className="mt-2 text-text-secondary">
-              Automatically fork repositories and create PRs for code review
-            </p>
-          </div>
-
-          {/* Main Tabs */}
-          <div className="flex mb-6 border-b border-border">
+        {/* Navigation Links */}
+        <nav className="flex-1 px-4 py-6">
+          <div className="space-y-1">
             <button
               type="button"
               onClick={() => setMainTab("create")}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
                 mainTab === "create"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-text-secondary hover:text-accent"
+                  ? "bg-primary/10 text-primary"
+                  : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
               }`}
             >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
               Create PR
             </button>
             <button
               type="button"
               onClick={() => setMainTab("forks")}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
                 mainTab === "forks"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-text-secondary hover:text-accent"
+                  ? "bg-primary/10 text-primary"
+                  : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
               }`}
             >
-              My Forks
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              My Repos
             </button>
             <button
               type="button"
               onClick={() => setMainTab("analysis")}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
                 mainTab === "analysis"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-text-secondary hover:text-accent"
+                  ? "bg-primary/10 text-primary"
+                  : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
               }`}
             >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
               PR Analysis
             </button>
+          </div>
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 bg-bg-subtle min-h-screen overflow-auto">
+        <div className={`py-12 px-8 ${mainTab === "forks" ? "" : "max-w-xl mx-auto"}`}>
+          {/* Page Header */}
+          <div className="mb-10">
+            <h1 className="text-2xl font-semibold text-accent tracking-tight">
+              {mainTab === "create" ? "Create PR" : mainTab === "forks" ? "My Repos" : "PR Analysis"}
+            </h1>
+            <p className="mt-2 text-text-secondary">
+              {mainTab === "create"
+                ? "Automatically fork repositories and create PRs for code review"
+                : mainTab === "forks"
+                ? "Manage your repositories and analyze PRs"
+                : "Analyze PRs for meaningful bugs using Claude"}
+            </p>
           </div>
 
           {mainTab === "create" ? (
@@ -1182,200 +1241,238 @@ export default function Home() {
             </>
           ) : mainTab === "forks" ? (
             <>
-              {/* My Forks Card */}
-              <div className="bg-white border border-border rounded-xl shadow-sm p-6">
-                {/* Search and Refresh */}
-                <div className="flex gap-3 mb-6">
-                  <div className="flex-1 relative">
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search repos or PR titles..."
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                    />
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+              {/* My Repos Section */}
+              <div className="bg-white border border-border rounded-xl shadow-sm">
+                {/* Header with Search and Refresh */}
+                <div className="p-6 border-b border-border">
+                  <div className="flex gap-3">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search repos or PR titles..."
+                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      />
+                      <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
+                    <button
+                      onClick={refreshFromGitHub}
+                      disabled={forksLoading}
+                      className="px-4 py-2.5 bg-white border border-border rounded-lg text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {forksLoading ? (
+                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      )}
+                      Refresh
+                    </button>
                   </div>
-                  <button
-                    onClick={refreshFromGitHub}
-                    disabled={forksLoading}
-                    className="px-4 py-2.5 bg-white border border-border rounded-lg text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {forksLoading ? (
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                    ) : (
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                    )}
-                    Refresh
-                  </button>
-                </div>
-
-                {/* Filter options */}
-                <div className="flex items-center mb-4">
-                  <input
-                    type="checkbox"
-                    id="showOnlyWithIssues"
-                    checked={showOnlyWithIssues}
-                    onChange={(e) => setShowOnlyWithIssues(e.target.checked)}
-                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                  />
-                  <label
-                    htmlFor="showOnlyWithIssues"
-                    className="ml-2 text-sm text-text-secondary cursor-pointer select-none"
-                  >
-                    Show only PRs with issues
-                  </label>
                 </div>
 
                 {/* Error display */}
                 {forksError && (
-                  <div className="mb-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
+                  <div className="mx-6 mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
                     {forksError}
                   </div>
                 )}
 
                 {/* Delete result */}
                 {deleteResult && (
-                  <div className={`mb-4 p-3 rounded-lg border text-sm ${deleteResult.success ? "bg-success-light border-success/20 text-success" : "bg-error-light border-error/20 text-error"}`}>
+                  <div className={`mx-6 mt-4 p-3 rounded-lg border text-sm ${deleteResult.success ? "bg-success-light border-success/20 text-success" : "bg-error-light border-error/20 text-error"}`}>
                     {deleteResult.message}
                   </div>
                 )}
 
-                {/* Forks list */}
+                {/* Repos List */}
                 {forks.length === 0 ? (
                   <div className="text-center py-12">
                     <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                     </svg>
-                    <h3 className="mt-4 text-sm font-medium text-accent">No forks tracked yet</h3>
+                    <h3 className="mt-4 text-sm font-medium text-accent">No repos tracked yet</h3>
                     <p className="mt-2 text-sm text-text-muted">
-                      Create a PR to get started, or click &quot;Refresh&quot; to load existing forks from GitHub.
+                      Create a PR to get started, or click &quot;Refresh&quot; to load existing repos from GitHub.
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="divide-y divide-border">
                     {filteredForks().map((fork) => {
                       const checkboxState = getRepoCheckboxState(fork.repoName);
+                      const isExpanded = expandedRepos.has(fork.repoName);
                       return (
-                        <div key={fork.repoName} className="border border-border rounded-lg p-4">
-                          {/* Repo header */}
-                          <div className="flex items-start gap-3">
+                        <div key={fork.repoName}>
+                          {/* Repo Header - Clickable Accordion */}
+                          <div
+                            className="flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                            onClick={() => toggleRepoExpand(fork.repoName)}
+                          >
+                            {/* Expand/Collapse Arrow */}
+                            <svg
+                              className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                            </svg>
+
+                            {/* Checkbox */}
                             <input
                               type="checkbox"
                               checked={checkboxState === "checked"}
                               ref={(el) => {
                                 if (el) el.indeterminate = checkboxState === "indeterminate";
                               }}
-                              onChange={() => toggleRepoSelection(fork.repoName)}
-                              className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                toggleRepoSelection(fork.repoName);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
                             />
-                            <div className="flex-1 min-w-0">
+
+                            {/* Repo Name and PR Count */}
+                            <div className="flex-1 flex items-center gap-3">
                               <a
                                 href={fork.forkUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-primary hover:underline font-medium"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-base font-semibold text-gray-900 hover:text-primary hover:underline"
                               >
                                 {fork.repoName}
                               </a>
-                              <p className="text-xs text-text-muted mt-0.5">
-                                Created: {formatDate(fork.createdAt)}
-                              </p>
-
-                              {/* PRs list */}
-                              {fork.prs.length > 0 && (
-                                <div className="mt-3 ml-2 border-l-2 border-border pl-4 space-y-2">
-                                  {fork.prs.map((pr, idx) => (
-                                    <div key={pr.prNumber} className="flex items-start gap-3">
-                                      <div className="flex items-center gap-2 text-text-muted">
-                                        {idx === fork.prs.length - 1 ? "└" : "├"}
-                                      </div>
-                                      <input
-                                        type="checkbox"
-                                        checked={selection.prs.has(`${fork.repoName}:${pr.prNumber}`)}
-                                        onChange={() => togglePrSelection(fork.repoName, pr.prNumber)}
-                                        className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                                      />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-start gap-1.5">
-                                          <a
-                                            href={pr.prUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-primary hover:underline text-sm"
-                                          >
-                                            PR #{pr.prNumber}: {pr.prTitle}
-                                          </a>
-                                          {/* Bug icon - aligned with first line of PR title */}
-                                          {pr.macroscopeBugs !== undefined && pr.macroscopeBugs > 0 && (
-                                            <svg className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                        {/* Bug count */}
-                                        <div className="flex items-center gap-1.5 text-xs mt-1">
-                                          <span className="text-gray-600">Bug Count:</span>
-                                          {checkingPR?.repo === fork.repoName && checkingPR?.pr === pr.prNumber ? (
-                                            <svg className="w-4 h-4 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24">
-                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                            </svg>
-                                          ) : pr.macroscopeBugs === undefined ? (
-                                            <button
-                                              onClick={() => checkSinglePRBugs(fork.repoName, pr.prNumber)}
-                                              className="text-gray-400 hover:text-primary transition-colors"
-                                              title="Check for bugs"
-                                            >
-                                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                              </svg>
-                                            </button>
-                                          ) : (
-                                            <span className="text-gray-600">{pr.macroscopeBugs}</span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-1">
-                                          <span className="text-xs text-text-muted">
-                                            {formatDate(pr.createdAt)}
-                                          </span>
-                                          {/* Analyze PR / View Analysis button - show for PRs with bugs */}
-                                          {pr.macroscopeBugs !== undefined && pr.macroscopeBugs > 0 && (
-                                            <button
-                                              onClick={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis)}
-                                              className={`text-xs px-2 py-0.5 rounded transition-colors ${
-                                                pr.hasAnalysis
-                                                  ? "bg-success/10 text-success hover:bg-success/20"
-                                                  : "bg-primary/10 text-primary hover:bg-primary/20"
-                                              }`}
-                                            >
-                                              {pr.hasAnalysis ? "View Analysis" : "Analyze PR"}
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {/* Empty state for forks with no PRs */}
-                              {fork.prs.length === 0 && (
-                                <div className="mt-3 ml-2 border-l-2 border-border pl-4">
-                                  <p className="text-sm text-text-muted italic">
-                                    No review PRs in this fork
-                                  </p>
-                                </div>
-                              )}
+                              <span className="text-sm text-gray-500">
+                                ({fork.prs.length} PR{fork.prs.length !== 1 ? "s" : ""})
+                              </span>
                             </div>
                           </div>
+
+                          {/* PR List - Collapsible */}
+                          {isExpanded && fork.prs.length > 0 && (
+                            <div className="bg-white">
+                              {/* PR Table Header */}
+                              <div className="grid grid-cols-[44px_1fr_100px_80px_130px_130px] gap-3 px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <div></div>
+                                <div></div>
+                                <div>Action</div>
+                                <div className="text-center">Bugs</div>
+                                <div>Created</div>
+                                <div>Updated</div>
+                              </div>
+
+                              {/* PR Rows */}
+                              <div className="divide-y divide-gray-100">
+                                {fork.prs.map((pr) => {
+                                  // Bug count badge styling - softer pastel colors
+                                  const getBugBadgeStyle = () => {
+                                    if (!pr.hasAnalysis) return "bg-gray-100 text-gray-500";
+                                    const bugs = pr.macroscopeBugs ?? 0;
+                                    if (bugs === 0) return "bg-gray-100 text-gray-600";
+                                    if (bugs === 1) return "bg-orange-50 text-orange-700 border border-orange-200";
+                                    if (bugs === 2) return "bg-amber-50 text-amber-700 border border-amber-200";
+                                    return "bg-red-50 text-red-700 border border-red-200";
+                                  };
+
+                                  return (
+                                    <div
+                                      key={`${fork.repoName}-${pr.prNumber}`}
+                                      className="grid grid-cols-[44px_1fr_100px_80px_130px_130px] gap-3 px-6 py-4 hover:bg-gray-50/50 transition-colors items-center"
+                                    >
+                                      {/* Checkbox */}
+                                      <div className="flex items-center justify-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={selection.prs.has(`${fork.repoName}:${pr.prNumber}`)}
+                                          onChange={() => togglePrSelection(fork.repoName, pr.prNumber)}
+                                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                                        />
+                                      </div>
+
+                                      {/* PR Title */}
+                                      <div className="min-w-0">
+                                        <a
+                                          href={pr.prUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-sm text-primary hover:underline font-medium"
+                                        >
+                                          #{pr.prNumber}
+                                        </a>
+                                        <span className="text-sm text-gray-700 ml-2">
+                                          {pr.prTitle}
+                                        </span>
+                                      </div>
+
+                                      {/* Action Button */}
+                                      <div>
+                                        <button
+                                          onClick={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis)}
+                                          className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
+                                            pr.hasAnalysis
+                                              ? "bg-green-50 text-green-700 hover:bg-green-100"
+                                              : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                                          }`}
+                                        >
+                                          {pr.hasAnalysis ? (
+                                            <>
+                                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                              </svg>
+                                              View
+                                            </>
+                                          ) : (
+                                            <>
+                                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                              </svg>
+                                              Run
+                                            </>
+                                          )}
+                                        </button>
+                                      </div>
+
+                                      {/* Bug Count Badge */}
+                                      <div className="text-center">
+                                        <span className={`inline-flex items-center justify-center min-w-[28px] px-2 py-0.5 text-xs font-semibold rounded-full ${getBugBadgeStyle()}`}>
+                                          {pr.hasAnalysis ? (pr.macroscopeBugs ?? 0) : "-"}
+                                        </span>
+                                      </div>
+
+                                      {/* Created Date */}
+                                      <div className="text-sm text-gray-500">
+                                        {formatDate(pr.createdAt)}
+                                      </div>
+
+                                      {/* Updated Date */}
+                                      <div className="text-sm text-gray-500">
+                                        {pr.updatedAt ? formatDate(pr.updatedAt) : "-"}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Empty state for repos with no PRs */}
+                          {isExpanded && fork.prs.length === 0 && (
+                            <div className="px-6 py-6 bg-white">
+                              <p className="text-sm text-gray-500 italic">No review PRs in this repository</p>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1384,7 +1481,7 @@ export default function Home() {
 
                 {/* Delete button */}
                 {totalSelected > 0 && (
-                  <div className="mt-6 pt-4 border-t border-border">
+                  <div className="p-6 border-t border-border">
                     <button
                       onClick={() => setShowDeleteConfirm(true)}
                       disabled={deleteLoading}
@@ -1415,7 +1512,7 @@ export default function Home() {
               {forks.length > 0 && (
                 <div className="mt-4 text-center">
                   <p className="text-sm text-text-muted">
-                    Showing {filteredForks().length} fork{filteredForks().length !== 1 ? "s" : ""} with{" "}
+                    Showing {filteredForks().length} repo{filteredForks().length !== 1 ? "s" : ""} with{" "}
                     {filteredForks().reduce((acc, f) => acc + f.prs.length, 0)} PR
                     {filteredForks().reduce((acc, f) => acc + f.prs.length, 0) !== 1 ? "s" : ""}
                   </p>

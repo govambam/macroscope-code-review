@@ -25,6 +25,7 @@ export interface PRRecord {
   commit_count: number | null;
   last_bug_check_at: string | null;
   created_at: string;
+  updated_at: string | null;
 }
 
 export interface PRAnalysisRecord {
@@ -141,6 +142,9 @@ export function initializeDatabase(): void {
   if (!columnNames.includes("last_bug_check_at")) {
     db.exec("ALTER TABLE prs ADD COLUMN last_bug_check_at DATETIME");
   }
+  if (!columnNames.includes("updated_at")) {
+    db.exec("ALTER TABLE prs ADD COLUMN updated_at DATETIME");
+  }
 
   // Create PR analyses table
   db.exec(`
@@ -231,10 +235,11 @@ export function savePR(
   } = {}
 ): number {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
@@ -245,11 +250,12 @@ export function savePR(
       bug_count = COALESCE(excluded.bug_count, prs.bug_count),
       state = COALESCE(excluded.state, prs.state),
       commit_count = COALESCE(excluded.commit_count, prs.commit_count),
-      last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at)
+      last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at),
+      updated_at = ?
     RETURNING id
   `);
 
-  const lastBugCheckAt = options.updateBugCheckTime ? new Date().toISOString() : null;
+  const lastBugCheckAt = options.updateBugCheckTime ? now : null;
 
   const result = stmt.get(
     forkId,
@@ -262,7 +268,9 @@ export function savePR(
     bugCount,
     options.state ?? null,
     options.commitCount ?? null,
-    lastBugCheckAt
+    lastBugCheckAt,
+    now, // updated_at for insert
+    now  // updated_at for update
   ) as { id: number };
   return result.id;
 }
@@ -294,16 +302,17 @@ export function getPRByUrl(forkedPrUrl: string): PRRecord | null {
 }
 
 /**
- * Update bug count for a PR (also updates last_bug_check_at timestamp).
+ * Update bug count for a PR (also updates last_bug_check_at and updated_at timestamps).
  */
 export function updatePRBugCount(prId: number, bugCount: number): void {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    UPDATE prs SET has_macroscope_bugs = ?, bug_count = ?, last_bug_check_at = ? WHERE id = ?
+    UPDATE prs SET has_macroscope_bugs = ?, bug_count = ?, last_bug_check_at = ?, updated_at = ? WHERE id = ?
   `);
 
-  stmt.run(bugCount > 0 ? 1 : 0, bugCount, new Date().toISOString(), prId);
+  stmt.run(bugCount > 0 ? 1 : 0, bugCount, now, now, prId);
 }
 
 /**
@@ -311,12 +320,13 @@ export function updatePRBugCount(prId: number, bugCount: number): void {
  */
 export function updatePROriginalTitle(prId: number, originalPrTitle: string): void {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    UPDATE prs SET original_pr_title = ? WHERE id = ?
+    UPDATE prs SET original_pr_title = ?, updated_at = ? WHERE id = ?
   `);
 
-  stmt.run(originalPrTitle, prId);
+  stmt.run(originalPrTitle, now, prId);
 }
 
 /**
@@ -324,12 +334,13 @@ export function updatePROriginalTitle(prId: number, originalPrTitle: string): vo
  */
 export function updatePROriginalInfo(prId: number, originalPrUrl: string, originalPrTitle: string | null): void {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    UPDATE prs SET original_pr_url = ?, original_pr_title = COALESCE(?, original_pr_title) WHERE id = ?
+    UPDATE prs SET original_pr_url = ?, original_pr_title = COALESCE(?, original_pr_title), updated_at = ? WHERE id = ?
   `);
 
-  stmt.run(originalPrUrl, originalPrTitle, prId);
+  stmt.run(originalPrUrl, originalPrTitle, now, prId);
 }
 
 /**
