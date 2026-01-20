@@ -382,7 +382,8 @@ export function getAnalysisByPRUrl(forkedPrUrl: string): PRAnalysisRecord | null
     ORDER BY a.analyzed_at DESC LIMIT 1
   `);
 
-  return stmt.get(forkedPrUrl) as PRAnalysisRecord | null;
+  const row = stmt.get(forkedPrUrl) as any;
+  return row ? ({ ...row, meaningful_bugs_found: Boolean(row.meaningful_bugs_found) } as PRAnalysisRecord) : null;
 }
 
 /**
