@@ -13,6 +13,7 @@ interface PRRecord {
   prUrl: string;
   prTitle: string;
   createdAt: string;
+  updatedAt?: string | null;
   commitCount: number;
   state: string;
   branchName: string;
@@ -96,6 +97,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           prUrl: dbPR.forked_pr_url,
           prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
           createdAt: dbPR.created_at,
+          updatedAt: dbPR.updated_at ?? null,
           commitCount: dbPR.commit_count ?? 0,
           state: dbPR.state || "open",
           branchName: `review-pr-${dbPR.pr_number}`, // Reconstructed from convention
@@ -230,6 +232,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           const dbPR = dbFork?.prs.find(p => p.pr_number === ghPR.prNumber);
           return {
             ...ghPR,
+            updatedAt: dbPR?.updated_at ?? null,
             hasAnalysis: Boolean(dbPR?.has_analysis),
             analysisId: dbPR?.analysis_id ?? null,
           };
