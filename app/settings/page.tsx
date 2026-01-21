@@ -86,6 +86,7 @@ export default function SettingsPage() {
   const fetchVersions = async (promptName: string, forceRefresh = false) => {
     if (!forceRefresh && versionCache.current[promptName]) {
       setVersions(versionCache.current[promptName]);
+      setLoadingVersions(false);
       return;
     }
 
