@@ -118,6 +118,10 @@ function syncPromptsFromFiles(): void {
   for (const file of files) {
     const name = file.replace(".md", "");
     const filePath = path.join(promptsDir, file);
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      continue;
+    }
     const content = fs.readFileSync(filePath, "utf-8");
     const { model, purpose, body } = parsePromptFile(content);
 
