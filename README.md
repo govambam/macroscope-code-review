@@ -1,128 +1,159 @@
-# Macroscope PR Creator
+# Macroscope Code Review Tool
 
-A Next.js web application that automatically forks GitHub repositories and recreates commits or pull requests for [Macroscope](https://macroscope.dev) code reviews.
+A Next.js web application for reviewing code with [Macroscope](https://macroscope.dev). This tool helps you get Macroscope code reviews on any GitHub pull request or commit, and analyze the findings with AI.
 
 ## Overview
 
-When you want Macroscope to review code from any public GitHub repository, this tool automates the entire workflow. It supports three main features:
+This tool supports two main workflows:
 
-**Latest Commit Mode**: Review the latest commit (or a specific commit) from any repository
+### 1. PR Simulation (for external repositories)
+When you want Macroscope to review code from a repository where you can't install the Macroscope GitHub app, this tool simulates the PR in your own fork:
 - Forks the repository to your GitHub account
-- Creates a new branch from the commit's parent
-- Cherry-picks the target commit onto that branch
-- Creates a pull request within your fork
+- Recreates the PR commits in your fork
+- Creates a new PR that Macroscope can review
 
-**Recreate PR Mode**: Recreate any existing GitHub PR for review
-- Paste any GitHub PR URL directly
-- Automatically fetches all commits from the original PR
-- Recreates the PR in your fork with all original commits preserved
+### 2. Internal PR Analysis (for your own repositories)
+When you have repositories with Macroscope already installed, you can directly analyze PRs that Macroscope has already reviewed:
+- Paste any PR URL from a repo with Macroscope installed
+- Instantly analyze the Macroscope findings with Claude
+- No forking or simulation required
 
-**PR Analysis**: Analyze Macroscope findings with AI
-- Uses Claude to identify the most impactful bugs from Macroscope reviews
-- Classifies bugs by severity (critical, high, medium)
-- Generates outreach emails with Attio merge fields
+Both workflows lead to AI-powered analysis that identifies meaningful bugs and generates outreach emails.
 
-This gives Macroscope a clean PR to analyze, containing exactly the changes you want to review.
+## Features
 
-### Why This Exists
-
-Macroscope reviews pull requests, but sometimes you want to review:
-- Commits that were pushed directly to main
-- Commits that were merged without a PR
-- PRs from repositories you don't have access to
-- Historical PRs that have already been merged
-
-This tool bridges that gap by recreating any commit or PR as a reviewable PR in your own fork.
+- **Simulate PR**: Recreate any GitHub PR in your fork for Macroscope review
+- **Simulate Commit**: Review individual commits (latest or specific hash)
+- **Analyze Internal PRs**: Analyze PRs from repos where Macroscope is already installed
+- **AI Bug Analysis**: Claude identifies the most impactful bugs from Macroscope reviews
+- **Email Generation**: Generate outreach emails with Attio merge fields
+- **Fork Management**: View, search, and manage all your review PRs in one place
 
 ## How to Use
 
-### Mode 1: Latest Commit
+### Simulating a PR (External Repositories)
 
-Use this mode to review commits from any repository.
-
-1. Open the web interface at `http://localhost:3000`
-
-2. Select the **Latest Commit** tab
-
-3. Enter the **original repository URL** (not your fork):
-   ```
-   https://github.com/getsentry/sentry-python
-   ```
-
-4. Choose your commit:
-   - **Default**: Leave "Specify commit" unchecked to review the latest commit on main
-   - **Specific commit**: Check the box and enter a commit hash to review a particular commit
-
-5. Click **Create Pull Request**
-
-6. Wait for the process to complete
-
-7. Click the PR link or copy it to your clipboard
-
-### Mode 2: Recreate PR
-
-Use this mode to recreate any existing GitHub PR.
+Use this when you want Macroscope to review a PR from a repository where you can't install the Macroscope app.
 
 1. Open the web interface at `http://localhost:3000`
-
-2. Select the **Recreate PR** tab
-
-3. Paste the **PR URL** you want to recreate:
+2. Click **Simulate PR** to open the creation modal
+3. Select the **Recreate PR** tab
+4. Paste the GitHub PR URL:
    ```
    https://github.com/owner/repo/pull/123
    ```
+5. Click **Create Pull Request**
+6. Wait for the simulation to complete (you'll see real-time progress)
+7. Once complete, Macroscope will automatically review the PR in your fork
 
-4. Click **Create Pull Request**
+### Analyzing Internal PRs (Your Repositories)
 
-5. The tool will:
-   - Fetch all commits from the original PR
-   - Fork the repository (if not already forked)
-   - Create a branch from the correct base commit
-   - Cherry-pick all PR commits in order
-   - Create a new PR with a detailed description
+Use this when Macroscope has already reviewed a PR in one of your repositories.
 
-6. Click the PR link or copy it to your clipboard
+1. Open the web interface at `http://localhost:3000`
+2. Click **Analyze PR**
+3. Paste the PR URL and ensure **"This is an internal PR"** is checked
+4. Click **Analyze**
+5. View the AI analysis of Macroscope's findings
 
-The recreated PR includes:
-- Title prefixed with `[Review]`
-- Link to the original PR
-- Original author and PR status
-- List of all commits included
+### My Repos Tab
 
-### My Forks Tab
+The **My Repos** section shows all your review activity:
 
-The **My Forks** tab helps you manage all your review PRs in one place:
+- **Simulated PRs**: Forks created by the PR simulation feature
+- **Internal PRs**: PRs from your own repos that you've analyzed (marked with "Internal" badge)
+- **Bug Counts**: See how many issues Macroscope found in each PR
+- **Quick Actions**: Run analysis or view cached results directly from the list
+- **Bulk Delete**: Select and delete repos or individual PRs
 
-1. Click **Refresh** to fetch all your forked repositories from GitHub
-2. View a hierarchical list of forks and their review PRs
-3. **Search** by repository name or PR title
-4. **Bug Count**: See how many issues Macroscope found in each PR
-   - Click the refresh icon on unchecked PRs to fetch the bug count
-   - PRs with bugs show an orange warning icon
-   - Use "Show only PRs with issues" filter to focus on PRs that need attention
-5. **Bulk Delete**: Select repos or individual PRs and delete them
-   - Selecting a repo selects all its PRs
-   - Deleting a repo removes the entire fork from GitHub
-   - Deleting individual PRs closes them and removes their branches
+Data is cached locally in SQLite for instant loading. Click **Refresh** to sync with GitHub.
 
-Data is cached locally in SQLite for quick access between sessions. On page load, forks are retrieved from the database without GitHub API calls. Click **Refresh** to sync with GitHub and update the cache.
+### PR Analysis
 
-### PR Analysis Tab
+After Macroscope reviews a PR, run the AI analysis to:
 
-The **PR Analysis** tab uses Claude to analyze Macroscope findings and generate outreach emails:
+1. **Identify Meaningful Bugs**: Filter out style suggestions and minor issues
+2. **Classify by Severity**: Critical, High, or Medium impact
+3. **Find Most Impactful**: Highlight the single best bug for outreach
+4. **Generate Emails**: Create outreach emails with Attio merge fields
 
-1. Select a PR from your forks that has Macroscope review comments
-2. Click **Analyze PR** to run Claude analysis on the findings
-3. View the analysis results:
-   - **Meaningful Bugs**: Bugs that represent real issues (not style/minor concerns)
-   - **Severity Classification**: Critical, High, or Medium impact
-   - **Most Impactful Bug**: The single most significant finding for outreach
-4. Click **Generate Email** to create an outreach email
-   - Includes Attio merge fields (`{{first_name}}`, `{{company}}`, etc.)
-   - Pre-populated with the most impactful bug as the hook
-   - Copy to clipboard for use in your email client
+## How PR Simulation Works
 
-Analysis results are cached locally in SQLite, including the original PR title and URL. This means viewing a cached analysis requires no GitHub API calls - all data is retrieved instantly from the database.
+The PR simulation feature recreates external PRs in your fork using a carefully designed process that avoids merge conflicts.
+
+### The Challenge
+
+When recreating a PR that has already been merged:
+- The fork's `main` branch contains the merged commits
+- Cherry-picking the same commits onto `main` would create conflicts
+- The original PR's base commit may be outdated
+
+### The Solution: Two-Branch Strategy
+
+The tool creates two branches to ensure a clean PR:
+
+```
+Original Repository (upstream)
+│
+├── main ──────────────────────────────────────► (contains merged PR)
+│         │
+│         └── PR #123 commits: A → B → C
+│                    │
+│                    └── base commit (parent of first PR commit)
+│
+Your Fork
+│
+├── main ──────────────────────────────────────► (synced, contains merged PR)
+│
+├── base-for-pr-123 ──────────────────────────► (created at base commit)
+│         │
+│         └── review-pr-123 ──────────────────► (cherry-picked commits A → B → C)
+│
+└── PR: review-pr-123 → base-for-pr-123 (clean diff, no conflicts)
+```
+
+### Step-by-Step Process
+
+1. **Parse PR URL**: Extract owner, repo, and PR number
+
+2. **Fetch PR Details**: Get title, author, state, and all commits via GitHub API
+
+3. **Find True Base Commit**:
+   - Get the first commit in the PR
+   - Use its parent as the base (the exact state before the PR started)
+   - This ensures commits apply cleanly regardless of what's been merged since
+
+4. **Check/Create Fork**:
+   - Check if you already have a fork
+   - If not, create one and wait for GitHub to process it
+
+5. **Disable GitHub Actions**: Prevent workflows from running on your fork
+
+6. **Clone Repository**: Clone your fork to a temporary directory
+
+7. **Fetch Upstream Commits**: Add upstream remote and fetch all needed commits
+
+8. **Create Base Branch**:
+   - Create `base-for-pr-{N}` at the true base commit
+   - This branch represents the state of the repo before the PR
+
+9. **Create Review Branch**:
+   - Create `review-pr-{N}` from the same base commit
+   - Cherry-pick all PR commits (excluding merge commits) onto this branch
+
+10. **Push Both Branches**: Push to your fork with force (handles re-simulations)
+
+11. **Create Pull Request**:
+    - PR goes from `review-pr-{N}` to `base-for-pr-{N}`
+    - This creates a clean diff with exactly the PR's changes
+    - No conflicts from other merged commits
+
+### Why This Works
+
+- **Isolated Base**: The base branch is frozen at the pre-PR state
+- **Clean Diff**: PR only shows the actual changes from the original PR
+- **Re-runnable**: Force push allows re-simulating the same PR
+- **Merge Commits Skipped**: Only actual code changes are included
 
 ## Setup Guide
 
@@ -130,246 +161,94 @@ Analysis results are cached locally in SQLite, including the original PR title a
 
 - [Node.js](https://nodejs.org/) 18 or later
 - [Git](https://git-scm.com/) installed and configured
-- A GitHub account
-- A GitHub Personal Access Token
-- An Anthropic API Key (for PR Analysis feature)
+- A GitHub account with a Personal Access Token
+- An Anthropic API Key (for AI analysis)
 
-### 1. Clone this Repository
-
-
-### 2. Install Dependencies
+### 1. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Create a GitHub Personal Access Token
+### 2. Create a GitHub Personal Access Token
 
 1. Go to [GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)](https://github.com/settings/tokens)
-
 2. Click **Generate new token (classic)**
+3. Select the `repo` scope (full control of private repositories)
+4. Copy the token
 
-3. Give it a descriptive name (e.g., "Macroscope PR Creator")
-
-4. Select the following scope:
-   - `repo` - Full control of private repositories (required for forking and creating PRs)
-
-5. Click **Generate token**
-
-6. Copy the token immediately (you won't see it again)
-
-### 4. Get an Anthropic API Key (for PR Analysis)
+### 3. Get an Anthropic API Key
 
 1. Go to [Anthropic Console](https://console.anthropic.com/settings/keys)
-
 2. Create an account or sign in
-
 3. Click **Create Key**
+4. Copy the API key
 
-4. Copy the API key (starts with `sk-ant-`)
-
-### 5. Configure Environment Variables
-
-Create a `.env.local` file in the project root:
+### 4. Configure Environment Variables
 
 ```bash
 cp .env.local.example .env.local
 ```
 
-Edit `.env.local` and add your tokens:
+Edit `.env.local`:
 
 ```
 GITHUB_TOKEN=ghp_your_token_here
 ANTHROPIC_API_KEY=sk-ant-your_key_here
 ```
 
-### 6. Run the Application
+### 5. Run the Application
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000)
 
-## How It Works
-
-### Latest Commit Mode
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Input                               │
-│  Repository: https://github.com/owner/repo                      │
-│  Commit: (latest) or specific hash                              │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  1. Check/Create Fork                                           │
-│     - Check if github.com/YOUR_USERNAME/repo exists             │
-│     - If not, fork from upstream                                │
-│     - Wait for GitHub to complete the fork                      │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  2. Get Commit Info                                             │
-│     - Fetch target commit (latest or specified)                 │
-│     - Get parent commit hash automatically                      │
-│     - Detect if it's a merge commit from a PR                   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  3. Git Operations (local)                                      │
-│     - Clone your fork to temp directory                         │
-│     - Fetch from upstream to get all commits                    │
-│     - Create branch: review-{short-hash} from parent            │
-│     - Cherry-pick the target commit(s)                          │
-│     - Push branch to your fork                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  4. Create Pull Request                                         │
-│     - PR created in YOUR fork (not upstream)                    │
-│     - Base: main, Head: review-{hash}                           │
-│     - Title: Original commit message                            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Result: https://github.com/YOUR_USERNAME/repo/pull/1           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Recreate PR Mode
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Input                               │
-│  PR URL: https://github.com/owner/repo/pull/123                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  1. Fetch PR Details                                            │
-│     - Get PR title, author, and status                          │
-│     - Get all commits from the PR                               │
-│     - Determine correct base commit:                            │
-│       • Merged PR: Use parent of merge commit                   │
-│       • Open PR: Use original base commit                       │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  2. Check/Create Fork                                           │
-│     - Check if github.com/YOUR_USERNAME/repo exists             │
-│     - If not, fork from upstream                                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  3. Git Operations (local)                                      │
-│     - Clone your fork to temp directory                         │
-│     - Fetch commits from upstream                               │
-│     - Create branch: review-pr-{number} from base commit        │
-│     - Cherry-pick ALL PR commits in order                       │
-│     - Push branch to your fork                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  4. Create Pull Request                                         │
-│     - PR created in YOUR fork                                   │
-│     - Title: [Review] Original PR title                         │
-│     - Body: Links to original PR, author, commit list           │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Result: https://github.com/YOUR_USERNAME/repo/pull/2           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Smart Base Commit Detection
-
-For merged PRs, the tool uses intelligent base commit detection:
-
-- **Problem**: Using the PR's original base commit can cause conflicts if other commits were merged to main between PR creation and merge.
-- **Solution**: For merged PRs, the tool uses the parent of the merge commit (the state of main right before the PR was merged), ensuring all commits apply cleanly.
-
-### Technical Details
+## Technical Details
 
 - **Framework**: Next.js 16 with App Router
 - **UI**: React 19, Tailwind CSS v4
-- **Git Operations**: [simple-git](https://github.com/steveukx/git-js) npm package
+- **Git Operations**: [simple-git](https://github.com/steveukx/git-js)
 - **GitHub API**: [@octokit/rest](https://github.com/octokit/rest.js)
 - **AI Analysis**: [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) with Claude
-- **Database**: SQLite via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) for local caching
+- **Database**: SQLite via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)
 
-The API routes handle all operations server-side:
-- `/api/create-pr` - PR creation with SSE streaming for real-time status updates
-- `/api/forks` - Fork management and synchronization
-- `/api/forks/check-bugs` - Count Macroscope review comments
-- `/api/analyze-pr` - Claude-powered bug analysis
-- `/api/generate-email` - Outreach email generation
+### API Routes
 
-Repositories are cloned to a temporary directory and cleaned up after the PR is created.
-
-**Note**: GitHub Actions are automatically disabled on forked repositories to prevent workflows from running on your forks.
+| Route | Description |
+|-------|-------------|
+| `/api/create-pr` | PR simulation with SSE streaming |
+| `/api/analyze-pr` | Analyze simulated PR findings |
+| `/api/analyze-internal-pr` | Analyze internal PR findings |
+| `/api/forks` | Fork management and sync |
+| `/api/forks/check-bugs` | Count Macroscope comments |
+| `/api/generate-email` | Generate outreach emails |
+| `/api/prompts` | Manage analysis prompts |
 
 ## Troubleshooting
 
 ### "GitHub token not configured"
-
-Make sure you have created `.env.local` with your `GITHUB_TOKEN`. Restart the dev server after adding it.
-
-### "Fork already exists" but PR fails
-
-Your fork may be out of sync with upstream. The tool fetches from upstream to get the latest commits, but if there are significant issues with your fork, you may need to manually sync or delete and recreate it on GitHub.
+Create `.env.local` with your `GITHUB_TOKEN` and restart the dev server.
 
 ### "Cherry-pick failed" / Merge conflicts
+The commit cannot be cleanly applied. This can happen if:
+- The commit depends on other commits not in the PR
+- There are actual conflicts requiring manual resolution
+- Files referenced don't exist at the base commit
 
-This happens when the commit cannot be cleanly applied to its base. Common causes:
-- The commit depends on changes from other commits not included
-- There are actual merge conflicts that require manual resolution
-- The commit references files that don't exist at the base commit
+### "No Macroscope review found"
+For internal PR analysis, ensure:
+- The Macroscope GitHub app is installed on the repository
+- Macroscope has actually reviewed the PR (check for review comments)
 
-The tool attempts to fetch commits directly from upstream if they're not available locally, but some edge cases may still fail.
-
-### "Could not find main or master branch"
-
-The repository uses a different default branch name. Currently, the tool only checks for `main` and `master`. If the repo uses a different branch (e.g., `develop`), this will fail.
-
-### PR is created but empty
-
-This can happen if:
-- The commit was already on the base branch
-- The cherry-pick resulted in no changes
-
-### Token permission errors
-
-Make sure your GitHub token has the `repo` scope. Tokens with only `public_repo` scope cannot fork private repositories or push to forks.
+### PR simulation creates conflicts
+This shouldn't happen with the two-branch strategy. If it does:
+- Try deleting the existing branches in your fork
+- Re-run the simulation
 
 ### Rate limiting
-
-GitHub API has rate limits. If you're creating many PRs in quick succession, you may hit the limit. Wait a few minutes and try again.
-
-### Large repositories take too long
-
-Cloning large repositories can be slow. The tool fetches from upstream to ensure all commits are available. For very large repos, the first run may take longer.
-
-### "PR not found" error
-
-Make sure the PR URL is correct and the PR exists. Private repositories require your token to have access to that repository.
-
-### "Anthropic API key not configured"
-
-Make sure you have added `ANTHROPIC_API_KEY` to your `.env.local` file. Restart the dev server after adding it. The PR Analysis feature requires this key.
-
-### "No meaningful bugs found" in analysis
-
-The Claude analysis filters out style suggestions, minor issues, and non-bugs. If the PR only has these types of comments, the analysis may return no meaningful bugs. This is expected behavior.
+GitHub API has rate limits. Wait a few minutes and try again if you're creating many PRs quickly.
 
 ## Development
 
