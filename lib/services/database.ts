@@ -47,6 +47,16 @@ export interface GeneratedEmailRecord {
   generated_at: string;
 }
 
+export interface PromptRecord {
+  id: number;
+  name: string;
+  content: string;
+  model: string | null;
+  purpose: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -170,6 +180,19 @@ export function initializeDatabase(): void {
       email_content TEXT NOT NULL,
       generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (pr_analysis_id) REFERENCES pr_analyses(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create prompts table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS prompts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      content TEXT NOT NULL,
+      model TEXT,
+      purpose TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -678,6 +701,62 @@ export function importFromJSON(backup: {
   });
 
   importTransaction();
+}
+
+/**
+ * Get all prompts from the database.
+ */
+export function getAllPrompts(): PromptRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM prompts ORDER BY name ASC
+  `);
+
+  return stmt.all() as PromptRecord[];
+}
+
+/**
+ * Get a prompt by name.
+ * Returns null if not found (normalizes undefined from better-sqlite3).
+ */
+export function getPrompt(name: string): PromptRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM prompts WHERE name = ?
+  `);
+
+  return (stmt.get(name) as PromptRecord | undefined) ?? null;
+}
+
+/**
+ * Save or update a prompt.
+ * Returns the prompt ID.
+ */
+export function savePrompt(
+  name: string,
+  content: string,
+  model: string | null = null,
+  purpose: string | null = null
+): number {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO prompts (name, content, model, purpose, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(name)
+    DO UPDATE SET
+      content = excluded.content,
+      model = excluded.model,
+      purpose = excluded.purpose,
+      updated_at = ?
+    RETURNING id
+  `);
+
+  const result = stmt.get(name, content, model, purpose, now, now, now) as { id: number };
+  return result.id;
 }
 
 /**
