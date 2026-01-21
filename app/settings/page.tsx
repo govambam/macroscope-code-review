@@ -38,7 +38,7 @@ export default function SettingsPage() {
   const [selectedVersion, setSelectedVersion] = useState<PromptVersion | null>(null);
   const [reverting, setReverting] = useState(false);
   const [showRevertConfirm, setShowRevertConfirm] = useState<number | null>(null);
-  const versionCache = useRef<Record<string, PromptVersion[]>>({});
+const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null));
 
   // Load prompts on mount
   useEffect(() => {
