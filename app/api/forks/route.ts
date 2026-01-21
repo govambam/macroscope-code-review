@@ -105,6 +105,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           hasAnalysis: Boolean(dbPR.has_analysis),
           analysisId: dbPR.analysis_id ?? null,
           lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
+          originalPrUrl: dbPR.original_pr_url ?? null,
         })),
       }));
 
