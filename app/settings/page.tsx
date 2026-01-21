@@ -96,12 +96,16 @@ export default function SettingsPage() {
 
       if (data.success) {
         versionCache.current[promptName] = data.versions;
-        setVersions(data.versions);
+        if (selectedPrompt?.name === promptName) {
+          setVersions(data.versions);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch versions:", err);
     } finally {
-      setLoadingVersions(false);
+      if (selectedPrompt?.name === promptName) {
+        setLoadingVersions(false);
+      }
     }
   };
 
