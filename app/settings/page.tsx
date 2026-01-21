@@ -86,6 +86,7 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
   const fetchVersions = async (promptName: string, forceRefresh = false) => {
     if (!forceRefresh && versionCache.current[promptName]) {
       setVersions(versionCache.current[promptName]);
+      setLoadingVersions(false);
       return;
     }
 
