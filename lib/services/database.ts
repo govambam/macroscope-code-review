@@ -8,6 +8,7 @@ export interface ForkRecord {
   repo_owner: string;
   repo_name: string;
   fork_url: string;
+  is_internal: boolean;
   created_at: string;
 }
 
@@ -24,6 +25,7 @@ export interface PRRecord {
   state: string | null;
   commit_count: number | null;
   last_bug_check_at: string | null;
+  is_internal: boolean;
   created_at: string;
   updated_at: string | null;
 }
@@ -165,6 +167,16 @@ export function initializeDatabase(): void {
   if (!columnNames.includes("updated_at")) {
     db.exec("ALTER TABLE prs ADD COLUMN updated_at DATETIME");
   }
+  if (!columnNames.includes("is_internal")) {
+    db.exec("ALTER TABLE prs ADD COLUMN is_internal BOOLEAN DEFAULT FALSE");
+  }
+
+  // Migration: Add is_internal column to forks table if it doesn't exist
+  const forkColumns = db.prepare("PRAGMA table_info(forks)").all() as { name: string }[];
+  const forkColumnNames = forkColumns.map(c => c.name);
+  if (!forkColumnNames.includes("is_internal")) {
+    db.exec("ALTER TABLE forks ADD COLUMN is_internal BOOLEAN DEFAULT FALSE");
+  }
 
   // Create PR analyses table
   db.exec(`
@@ -239,18 +251,18 @@ export function initializeDatabase(): void {
  * Save or update a fork record.
  * Returns the fork ID.
  */
-export function saveFork(repoOwner: string, repoName: string, forkUrl: string): number {
+export function saveFork(repoOwner: string, repoName: string, forkUrl: string, isInternal: boolean = false): number {
   const db = getDatabase();
 
   const stmt = db.prepare(`
-    INSERT INTO forks (repo_owner, repo_name, fork_url)
-    VALUES (?, ?, ?)
+    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal)
+    VALUES (?, ?, ?, ?)
     ON CONFLICT(repo_owner, repo_name)
-    DO UPDATE SET fork_url = excluded.fork_url
+    DO UPDATE SET fork_url = excluded.fork_url, is_internal = excluded.is_internal
     RETURNING id
   `);
 
-  const result = stmt.get(repoOwner, repoName, forkUrl) as { id: number };
+  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0) as { id: number };
   return result.id;
 }
 
@@ -284,14 +296,15 @@ export function savePR(
     state?: string | null;
     commitCount?: number | null;
     updateBugCheckTime?: boolean;
+    isInternal?: boolean;
   } = {}
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
@@ -303,6 +316,7 @@ export function savePR(
       state = COALESCE(excluded.state, prs.state),
       commit_count = COALESCE(excluded.commit_count, prs.commit_count),
       last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at),
+      is_internal = COALESCE(excluded.is_internal, prs.is_internal),
       updated_at = ?
     RETURNING id
   `);
@@ -321,6 +335,7 @@ export function savePR(
     options.state ?? null,
     options.commitCount ?? null,
     lastBugCheckAt,
+    options.isInternal ? 1 : 0,
     now, // updated_at for insert
     now  // updated_at for update
   ) as { id: number };

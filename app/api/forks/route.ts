@@ -21,12 +21,15 @@ interface PRRecord {
   hasAnalysis?: boolean;
   analysisId?: number | null;
   lastBugCheckAt?: string;
+  originalPrUrl?: string | null;
+  isInternal?: boolean;
 }
 
 interface ForkRecord {
   repoName: string;
   forkUrl: string;
   createdAt: string;
+  isInternal?: boolean;
   prs: PRRecord[];
 }
 
@@ -92,6 +95,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         repoName: dbFork.repo_name,
         forkUrl: dbFork.fork_url,
         createdAt: dbFork.created_at,
+        isInternal: Boolean(dbFork.is_internal),
         prs: dbFork.prs.map(dbPR => ({
           prNumber: dbPR.pr_number,
           prUrl: dbPR.forked_pr_url,
@@ -106,6 +110,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           analysisId: dbPR.analysis_id ?? null,
           lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
           originalPrUrl: dbPR.original_pr_url ?? null,
+          isInternal: Boolean(dbPR.is_internal),
         })),
       }));
 
@@ -225,10 +230,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const dbForks = getAllForksWithPRs();
 
     // Merge GitHub data with database analysis status
-    const mergedForks = forkRecords.map(ghFork => {
+    const mergedForks: ForkRecord[] = forkRecords.map(ghFork => {
       const dbFork = dbForks.find(f => f.repo_name === ghFork.repoName);
       return {
         ...ghFork,
+        isInternal: false,
         prs: ghFork.prs.map(ghPR => {
           const dbPR = dbFork?.prs.find(p => p.pr_number === ghPR.prNumber);
           return {
@@ -236,14 +242,44 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             updatedAt: dbPR?.updated_at ?? null,
             hasAnalysis: Boolean(dbPR?.has_analysis),
             analysisId: dbPR?.analysis_id ?? null,
+            isInternal: false,
           };
         }),
       };
     });
 
+    // Add internal repos from database (not GitHub forks)
+    const internalForks = dbForks
+      .filter(dbFork => dbFork.is_internal)
+      .map(dbFork => ({
+        repoName: dbFork.repo_name,
+        forkUrl: dbFork.fork_url,
+        createdAt: dbFork.created_at,
+        isInternal: true,
+        prs: dbFork.prs.map(dbPR => ({
+          prNumber: dbPR.pr_number,
+          prUrl: dbPR.forked_pr_url,
+          prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
+          createdAt: dbPR.created_at,
+          updatedAt: dbPR.updated_at ?? null,
+          commitCount: dbPR.commit_count ?? 0,
+          state: dbPR.state || "open",
+          branchName: `pr-${dbPR.pr_number}`,
+          macroscopeBugs: dbPR.bug_count ?? undefined,
+          hasAnalysis: Boolean(dbPR.has_analysis),
+          analysisId: dbPR.analysis_id ?? null,
+          lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
+          originalPrUrl: dbPR.original_pr_url ?? null,
+          isInternal: true,
+        })),
+      }));
+
+    // Combine GitHub forks with internal repos
+    const allForks = [...mergedForks, ...internalForks];
+
     return NextResponse.json({
       success: true,
-      forks: mergedForks,
+      forks: allForks,
       username: user.login,
       source: "github",
       debug: allDebugInfo,

@@ -79,12 +79,14 @@ interface PRRecord {
   hasAnalysis?: boolean;
   analysisId?: number | null;
   originalPrUrl?: string | null;
+  isInternal?: boolean;
 }
 
 interface ForkRecord {
   repoName: string;
   forkUrl: string;
   createdAt: string;
+  isInternal?: boolean;
   prs: PRRecord[];
 }
 
@@ -143,6 +145,13 @@ export default function Home() {
   const [modalTab, setModalTab] = useState<"analysis" | "email">("analysis");
   const [modalExpanded, setModalExpanded] = useState(false);
   const [selectedPrTitle, setSelectedPrTitle] = useState("");
+
+  // Analyze Internal PR state
+  const [showAnalyzeCard, setShowAnalyzeCard] = useState(false);
+  const [analyzeInternalUrl, setAnalyzeInternalUrl] = useState("");
+  const [isInternalPR, setIsInternalPR] = useState(true);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   // Load forks from database on mount
   useEffect(() => {
@@ -409,6 +418,85 @@ export default function Home() {
   const closeCreatePRModal = () => {
     setShowCreatePRModal(false);
     setCreatePRModalExpanded(false);
+  };
+
+  // Analyze Internal PR function
+  const analyzeInternalPR = async () => {
+    if (!analyzeInternalUrl.trim()) {
+      setAnalyzeError("Please enter a PR URL");
+      return;
+    }
+
+    // Validate URL format
+    const prUrlMatch = analyzeInternalUrl.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/);
+    if (!prUrlMatch) {
+      setAnalyzeError("Invalid GitHub PR URL format. Expected: https://github.com/owner/repo/pull/123");
+      return;
+    }
+
+    setAnalyzeLoading(true);
+    setAnalyzeError(null);
+
+    try {
+      if (isInternalPR) {
+        // Call the internal PR analysis endpoint
+        const response = await fetch("/api/analyze-internal-pr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prUrl: analyzeInternalUrl.trim() }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Refresh forks to show the new internal repo/PR
+          await refreshFromGitHub();
+
+          // Set up the analysis modal with the result
+          setAnalysisResult(data);
+          setAnalysisForkedUrl(data.forkedPrUrl || data.prUrl);
+          setAnalysisOriginalUrl(data.originalPrUrl || data.prUrl);
+          setSelectedPrTitle(data.prTitle || "");
+          setCurrentAnalysisId(data.analysisId || null);
+          setIsViewingCached(data.cached || false);
+          setShowAnalysisModal(true);
+          setShowAnalyzeCard(false);
+          setAnalyzeInternalUrl("");
+        } else {
+          setAnalyzeError(data.error || "Failed to analyze PR");
+        }
+      } else {
+        // For external PRs, check if it's already simulated
+        const normalizedUrl = analyzeInternalUrl.trim().toLowerCase().replace(/\/+$/, "");
+        let foundPR: PRRecord | null = null;
+        let foundFork: ForkRecord | null = null;
+
+        for (const fork of forks) {
+          for (const pr of fork.prs) {
+            if (pr.originalPrUrl && pr.originalPrUrl.toLowerCase().replace(/\/+$/, "") === normalizedUrl) {
+              foundPR = pr;
+              foundFork = fork;
+              break;
+            }
+          }
+          if (foundPR) break;
+        }
+
+        if (foundPR && foundFork) {
+          // Found existing simulated PR - open analysis
+          startAnalysisFromForks(foundPR.prUrl, foundPR.hasAnalysis || false, foundPR.prTitle);
+          setShowAnalyzeCard(false);
+          setAnalyzeInternalUrl("");
+        } else {
+          // Not simulated yet - prompt to simulate
+          setAnalyzeError("This PR hasn't been simulated yet. Check 'This is an internal PR' if Macroscope has already reviewed it, or click 'Simulate PR' to create a simulated version.");
+        }
+      }
+    } catch (error) {
+      setAnalyzeError(error instanceof Error ? error.message : "Failed to analyze PR");
+    } finally {
+      setAnalyzeLoading(false);
+    }
   };
 
   // My Forks functions
@@ -1070,6 +1158,19 @@ export default function Home() {
                 </button>
               )}
               <button
+                onClick={() => setShowAnalyzeCard(!showAnalyzeCard)}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 font-medium rounded-lg transition-colors ${
+                  showAnalyzeCard
+                    ? "bg-primary text-white"
+                    : "bg-white border border-border text-accent hover:bg-bg-subtle"
+                }`}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+                Analyze PR
+              </button>
+              <button
                 onClick={openCreatePRModal}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
               >
@@ -1080,6 +1181,93 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {/* Analyze PR Card */}
+          {showAnalyzeCard && (
+            <div className="mb-6 bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+              <div className="p-6">
+                <h3 className="text-lg font-semibold text-accent mb-4">Analyze PR</h3>
+
+                {/* PR URL Input */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-text-secondary mb-2">
+                    GitHub PR URL
+                  </label>
+                  <input
+                    type="text"
+                    value={analyzeInternalUrl}
+                    onChange={(e) => {
+                      setAnalyzeInternalUrl(e.target.value);
+                      setAnalyzeError(null);
+                    }}
+                    placeholder="https://github.com/owner/repo/pull/123"
+                    className="w-full px-4 py-2.5 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                  />
+                </div>
+
+                {/* Internal PR Checkbox */}
+                <div className="mb-4">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isInternalPR}
+                      onChange={(e) => setIsInternalPR(e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-accent">This is an internal PR (I own this repo)</span>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        Check this if Macroscope has already reviewed this PR. Uncheck to look up a previously simulated PR.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Error Message */}
+                {analyzeError && (
+                  <div className="mb-4 p-3 bg-error-light border border-error/20 rounded-lg text-sm text-error">
+                    {analyzeError}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={analyzeInternalPR}
+                    disabled={analyzeLoading || !analyzeInternalUrl.trim()}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {analyzeLoading ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                        </svg>
+                        Analyze PR
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAnalyzeCard(false);
+                      setAnalyzeInternalUrl("");
+                      setAnalyzeError(null);
+                    }}
+                    className="px-4 py-2.5 text-text-secondary hover:text-accent font-medium rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Search and Refresh */}
           <div className="flex gap-3">
@@ -1235,6 +1423,11 @@ export default function Home() {
                               >
                                 {fork.repoName}
                               </a>
+                              {fork.isInternal && (
+                                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                  Internal
+                                </span>
+                              )}
                               <span className="text-sm text-gray-500">
                                 ({fork.prs.length} PR{fork.prs.length !== 1 ? "s" : ""})
                               </span>
