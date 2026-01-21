@@ -78,6 +78,7 @@ interface PRRecord {
   macroscopeBugs?: number;
   hasAnalysis?: boolean;
   analysisId?: number | null;
+  originalPrUrl?: string | null;
 }
 
 interface ForkRecord {
@@ -552,26 +553,53 @@ export default function Home() {
     []
   );
 
+  // Helper to check if a string looks like a GitHub PR URL
+  const isPrUrl = useCallback((query: string): boolean => {
+    return /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i.test(query.trim());
+  }, []);
+
+  // Helper to normalize a PR URL for comparison (remove trailing slashes, lowercase)
+  const normalizePrUrl = useCallback((url: string): string => {
+    return url.trim().toLowerCase().replace(/\/+$/, "");
+  }, []);
+
   const filteredForks = useCallback(() => {
     let result = forks;
 
     // Apply search filter
     if (searchQuery.trim()) {
-      const lowerQuery = searchQuery.toLowerCase();
-      result = result
-        .filter((fork) => {
-          if (fork.repoName.toLowerCase().includes(lowerQuery)) return true;
-          if (fork.prs.some((pr) => pr.prTitle.toLowerCase().includes(lowerQuery))) return true;
-          return false;
-        })
-        .map((fork) => ({
-          ...fork,
-          prs: fork.prs.filter(
-            (pr) =>
-              fork.repoName.toLowerCase().includes(lowerQuery) ||
-              pr.prTitle.toLowerCase().includes(lowerQuery)
-          ),
-        }));
+      const lowerQuery = searchQuery.toLowerCase().trim();
+      const isUrlSearch = isPrUrl(searchQuery);
+
+      if (isUrlSearch) {
+        // Search by original PR URL
+        const normalizedSearchUrl = normalizePrUrl(searchQuery);
+        result = result
+          .map((fork) => ({
+            ...fork,
+            prs: fork.prs.filter((pr) => {
+              if (!pr.originalPrUrl) return false;
+              return normalizePrUrl(pr.originalPrUrl) === normalizedSearchUrl;
+            }),
+          }))
+          .filter((fork) => fork.prs.length > 0);
+      } else {
+        // Regular text search
+        result = result
+          .filter((fork) => {
+            if (fork.repoName.toLowerCase().includes(lowerQuery)) return true;
+            if (fork.prs.some((pr) => pr.prTitle.toLowerCase().includes(lowerQuery))) return true;
+            return false;
+          })
+          .map((fork) => ({
+            ...fork,
+            prs: fork.prs.filter(
+              (pr) =>
+                fork.repoName.toLowerCase().includes(lowerQuery) ||
+                pr.prTitle.toLowerCase().includes(lowerQuery)
+            ),
+          }));
+      }
     }
 
     // Apply "show only with issues" filter
@@ -585,7 +613,7 @@ export default function Home() {
     }
 
     return result;
-  }, [forks, searchQuery, showOnlyWithIssues]);
+  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl]);
 
   const toggleRepoExpand = (repoName: string) => {
     setExpandedRepos((prev) => {
@@ -1115,6 +1143,44 @@ export default function Home() {
                 <p className="mt-2 text-sm text-text-muted">
                   Create a PR to get started, or click &quot;Refresh&quot; to load existing repos from GitHub.
                 </p>
+              </div>
+            ) : filteredForks().length === 0 && searchQuery.trim() ? (
+              <div className="text-center py-12">
+                {isPrUrl(searchQuery) ? (
+                  <>
+                    <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <h3 className="mt-4 text-sm font-medium text-accent">PR not found in simulated PRs</h3>
+                    <p className="mt-2 text-sm text-text-muted">
+                      This PR hasn&apos;t been simulated yet. Would you like to simulate it now?
+                    </p>
+                    <button
+                      onClick={() => {
+                        setPrUrl(searchQuery.trim());
+                        setSearchQuery("");
+                        setCreateMode("pr");
+                        openCreatePRModal();
+                      }}
+                      className="mt-4 inline-flex items-center px-4 py-2 rounded-lg bg-primary text-white font-medium text-sm hover:bg-primary-hover transition-colors"
+                    >
+                      <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Simulate PR
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <h3 className="mt-4 text-sm font-medium text-accent">No matching repos or PRs</h3>
+                    <p className="mt-2 text-sm text-text-muted">
+                      Try a different search term, or paste a PR URL to check if it&apos;s been simulated.
+                    </p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-border">
