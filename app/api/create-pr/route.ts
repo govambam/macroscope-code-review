@@ -15,6 +15,7 @@ interface ApiResponse {
   error?: string;
   commitCount?: number;
   originalPrNumber?: number;
+  prTitle?: string;
 }
 
 // Commit info from PR
@@ -173,38 +174,8 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "success", message: `Found PR: "${prTitle}" by @${prAuthor}` });
           sendStatus({ type: "info", message: `Status: ${prState}${prMerged ? " (merged)" : " (open)"}` });
 
-          // Step 3: Analyze PR and determine base commit
-          sendStatus({ type: "info", step: 3, totalSteps: 10, message: "Analyzing PR structure..." });
-
-          let baseCommit: string;
-
-          if (prMerged && mergeCommitSha) {
-            sendStatus({ type: "info", message: "PR was merged - finding optimal base commit..." });
-            try {
-              const { data: mergeCommit } = await octokit.repos.getCommit({
-                owner: upstreamOwner,
-                repo: repoName,
-                ref: mergeCommitSha,
-              });
-
-              if (mergeCommit.parents && mergeCommit.parents.length > 0) {
-                baseCommit = mergeCommit.parents[0].sha;
-                sendStatus({ type: "success", message: `Using pre-merge state as base (${getShortHash(baseCommit)})` });
-              } else {
-                baseCommit = prData.base.sha;
-                sendStatus({ type: "info", message: `Using original PR base commit (${getShortHash(baseCommit)})` });
-              }
-            } catch {
-              baseCommit = prData.base.sha;
-              sendStatus({ type: "info", message: `Using original PR base commit (${getShortHash(baseCommit)})` });
-            }
-          } else {
-            baseCommit = prData.base.sha;
-            sendStatus({ type: "info", message: `PR is open - using original base commit (${getShortHash(baseCommit)})` });
-          }
-
-          // Step 4: Fetch PR commits
-          sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Fetching commits from PR..." });
+          // Step 3: Fetch PR commits first (we need them to find the true base)
+          sendStatus({ type: "info", step: 3, totalSteps: 10, message: "Fetching commits from PR..." });
 
           const { data: prCommitsList } = await octokit.pulls.listCommits({
             owner: upstreamOwner,
@@ -219,11 +190,45 @@ export async function POST(request: NextRequest): Promise<Response> {
             isMergeCommit: (c.parents?.length || 0) > 1,
           }));
 
+          sendStatus({ type: "success", message: `Found ${prCommits.length} commit(s) in PR` });
+
+          // Step 4: Determine the true base commit
+          // The correct base is the parent of the first commit in the PR
+          // This ensures we're recreating the PR on the exact same base it was originally created from
+          sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Finding original base commit..." });
+
+          let baseCommit: string;
+
+          if (prCommitsList.length > 0) {
+            const firstPrCommitSha = prCommitsList[0].sha;
+            try {
+              const { data: firstCommitData } = await octokit.repos.getCommit({
+                owner: upstreamOwner,
+                repo: repoName,
+                ref: firstPrCommitSha,
+              });
+
+              if (firstCommitData.parents && firstCommitData.parents.length > 0) {
+                baseCommit = firstCommitData.parents[0].sha;
+                sendStatus({ type: "success", message: `Using true PR base commit (${getShortHash(baseCommit)})` });
+              } else {
+                baseCommit = prData.base.sha;
+                sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+              }
+            } catch {
+              baseCommit = prData.base.sha;
+              sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+            }
+          } else {
+            baseCommit = prData.base.sha;
+            sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+          }
+
+          // Filter out merge commits from the list
           const mergeCommitCount = prCommits.filter(c => c.isMergeCommit).length;
           const commitsToApply = prCommits.filter(c => !c.isMergeCommit);
           const regularCommitCount = commitsToApply.length;
 
-          sendStatus({ type: "success", message: `Found ${prCommits.length} commit(s) in PR` });
           if (mergeCommitCount > 0) {
             sendStatus({ type: "info", message: `${mergeCommitCount} merge commit(s) will be skipped, ${regularCommitCount} commit(s) to apply` });
           }
@@ -304,6 +309,7 @@ export async function POST(request: NextRequest): Promise<Response> {
                 forkUrl,
                 commitCount: regularCommitCount,
                 originalPrNumber: prNumber,
+                prTitle: existingPRs[0].title,
               });
               return;
             }
@@ -346,29 +352,42 @@ export async function POST(request: NextRequest): Promise<Response> {
 
           sendStatus({ type: "success", message: "All commits fetched" });
 
-          // Step 8: Create branch
-          sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating review branch: ${branchName}...` });
+          // Step 8: Create base branch and review branch
+          // We need a base branch at the original base commit to create a clean PR
+          // (the fork's main branch contains the merged PR, which would cause conflicts)
+          const baseBranchName = `base-for-pr-${prNumber}`;
+          sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from base commit ${getShortHash(baseCommit)}...` });
 
+          // First create the base branch at the base commit
           try {
-            await repoGit.checkout(["-b", branchName, baseCommit]);
-            sendStatus({ type: "success", message: `Branch created from commit ${getShortHash(baseCommit)}` });
+            await repoGit.checkout(["-b", baseBranchName, baseCommit]);
+            sendStatus({ type: "success", message: `Base branch created at ${getShortHash(baseCommit)}` });
           } catch {
             try {
-              if (mergeCommitSha) {
-                await repoGit.raw(["fetch", "upstream", mergeCommitSha, "--depth=100"]);
-              }
-              await repoGit.checkout(["-b", branchName, baseCommit]);
-              sendStatus({ type: "success", message: `Branch created from commit ${getShortHash(baseCommit)}` });
+              // Branch might exist, try to reset it
+              await repoGit.checkout([baseBranchName]);
+              await repoGit.reset(["--hard", baseCommit]);
+              sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(baseCommit)}` });
             } catch {
-              try {
-                await repoGit.checkout([branchName]);
-                await repoGit.reset(["--hard", baseCommit]);
-                sendStatus({ type: "success", message: `Branch reset to commit ${getShortHash(baseCommit)}` });
-              } catch {
-                await cleanup(tmpDir);
-                sendError("Failed to create review branch", `Could not create branch from base commit ${getShortHash(baseCommit)}`);
-                return;
-              }
+              await cleanup(tmpDir);
+              sendError("Failed to create base branch", `Could not create branch at base commit ${getShortHash(baseCommit)}`);
+              return;
+            }
+          }
+
+          // Now create the review branch from the same base
+          try {
+            await repoGit.checkout(["-b", branchName, baseCommit]);
+            sendStatus({ type: "success", message: `Review branch created from commit ${getShortHash(baseCommit)}` });
+          } catch {
+            try {
+              await repoGit.checkout([branchName]);
+              await repoGit.reset(["--hard", baseCommit]);
+              sendStatus({ type: "success", message: `Review branch reset to commit ${getShortHash(baseCommit)}` });
+            } catch {
+              await cleanup(tmpDir);
+              sendError("Failed to create review branch", `Could not create branch from base commit ${getShortHash(baseCommit)}`);
+              return;
             }
           }
 
@@ -407,14 +426,17 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "success", message: `All ${commitsToApply.length} commit(s) applied successfully` });
 
           // Step 10: Push and create PR
-          sendStatus({ type: "info", step: 10, totalSteps: 10, message: "Pushing branch to GitHub..." });
+          sendStatus({ type: "info", step: 10, totalSteps: 10, message: "Pushing branches to GitHub..." });
 
           try {
+            // Push the base branch first
+            await repoGit.push(["origin", baseBranchName, "--force"]);
+            // Then push the review branch
             await repoGit.push(["origin", branchName, "--force"]);
-            sendStatus({ type: "success", message: "Branch pushed successfully" });
+            sendStatus({ type: "success", message: "Branches pushed successfully" });
           } catch (pushError) {
             await cleanup(tmpDir);
-            sendError("Failed to push branch", `Could not push to repository: ${pushError instanceof Error ? pushError.message : String(pushError)}`);
+            sendError("Failed to push branches", `Could not push to repository: ${pushError instanceof Error ? pushError.message : String(pushError)}`);
             return;
           }
 
@@ -434,13 +456,15 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
 
           let newPrUrl: string;
           try {
+            // Create PR from review branch to base branch (not main)
+            // This ensures a clean diff without conflicts from merged commits
             const { data: pr } = await octokit.pulls.create({
               owner: forkOwner,
               repo: repoName,
               title: newPrTitle,
               body: newPrBody,
               head: branchName,
-              base: "main",
+              base: baseBranchName,
             });
             newPrUrl = pr.html_url;
           } catch (prError) {
@@ -464,27 +488,15 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
                   forkUrl,
                   commitCount: commitsToApply.length,
                   originalPrNumber: prNumber,
+                  prTitle: existingPRs[0].title,
                 });
                 return;
               }
             }
 
-            // Try with master
-            try {
-              const { data: pr } = await octokit.pulls.create({
-                owner: forkOwner,
-                repo: repoName,
-                title: newPrTitle,
-                body: newPrBody,
-                head: branchName,
-                base: "master",
-              });
-              newPrUrl = pr.html_url;
-            } catch {
-              await cleanup(tmpDir);
-              sendError("Failed to create PR", `GitHub API error: ${errorMessage}`);
-              return;
-            }
+            await cleanup(tmpDir);
+            sendError("Failed to create PR", `GitHub API error: ${errorMessage}`);
+            return;
           }
 
           await cleanup(tmpDir);
@@ -497,6 +509,7 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
             forkUrl,
             commitCount: commitsToApply.length,
             originalPrNumber: prNumber,
+            prTitle: `[Review] ${prTitle}`,
           });
 
         } else if (repoUrl) {
@@ -735,6 +748,7 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
                 forkUrl,
                 commitCount: prCommits.length || 1,
                 originalPrNumber: originalPrNumber || undefined,
+                prTitle: existingPRs[0].title,
               });
               return;
             }
@@ -909,6 +923,7 @@ ${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1
                   forkUrl,
                   commitCount: commitsToApplyInCommitMode.length || 1,
                   originalPrNumber: originalPrNumber || undefined,
+                  prTitle: existingPRs[0].title,
                 });
                 return;
               }
@@ -950,6 +965,7 @@ ${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1
             forkUrl,
             commitCount: commitsToApplyInCommitMode.length || 1,
             originalPrNumber: originalPrNumber || undefined,
+            prTitle,
           });
 
         } else {

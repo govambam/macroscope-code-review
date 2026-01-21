@@ -368,8 +368,8 @@ export default function Home() {
                 addStatus("PR created successfully!", "success");
                 // Add the PR to My Forks tab
                 if (data.prUrl && data.forkUrl) {
-                  // Extract PR title from message (format: "PR created: <title>")
-                  const prTitle = data.message?.replace(/^PR created:\s*/i, "") || "Review PR";
+                  // Use the PR title from the API response
+                  const prTitle = data.prTitle || "Review PR";
                   addCreatedPRToForks(data.prUrl, data.forkUrl, prTitle, data.commitCount || 1);
                 }
               }
