@@ -57,6 +57,16 @@ export interface PromptRecord {
   updated_at: string;
 }
 
+export interface PromptVersionRecord {
+  id: number;
+  prompt_name: string;
+  version_number: number;
+  content: string;
+  model: string | null;
+  purpose: string | null;
+  created_at: string;
+}
+
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -194,6 +204,25 @@ export function initializeDatabase(): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // Create prompt versions table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS prompt_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      prompt_name TEXT NOT NULL,
+      version_number INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      model TEXT,
+      purpose TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(prompt_name, version_number)
+    )
+  `);
+
+  // Create index for prompt versions
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_prompt_versions_name ON prompt_versions(prompt_name)
   `);
 
   // Create indexes for common queries
@@ -731,7 +760,7 @@ export function getPrompt(name: string): PromptRecord | null {
 }
 
 /**
- * Save or update a prompt.
+ * Save or update a prompt and create a version record atomically.
  * Returns the prompt ID.
  */
 export function savePrompt(
@@ -743,20 +772,70 @@ export function savePrompt(
   const db = getDatabase();
   const now = new Date().toISOString();
 
+  let promptId: number = 0;
+
+  const saveTransaction = db.transaction(() => {
+    // 1. Get next version number atomically
+    const lastVersion = db.prepare(
+      "SELECT MAX(version_number) as max_version FROM prompt_versions WHERE prompt_name = ?"
+    ).get(name) as { max_version: number | null } | undefined;
+    const nextVersion = (lastVersion?.max_version ?? 0) + 1;
+
+    // 2. Insert version record
+    db.prepare(
+      "INSERT INTO prompt_versions (prompt_name, version_number, content, model, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(name, nextVersion, content, model, purpose, now);
+
+    // 3. Update main prompts table
+    const stmt = db.prepare(`
+      INSERT INTO prompts (name, content, model, purpose, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(name)
+      DO UPDATE SET
+        content = excluded.content,
+        model = excluded.model,
+        purpose = excluded.purpose,
+        updated_at = ?
+      RETURNING id
+    `);
+
+    const result = stmt.get(name, content, model, purpose, now, now, now) as { id: number };
+    promptId = result.id;
+  });
+
+  saveTransaction();
+  return promptId;
+}
+
+/**
+ * Get all versions for a prompt, ordered by version_number DESC (newest first).
+ * Returns empty array if no versions exist.
+ */
+export function getPromptVersions(promptName: string): PromptVersionRecord[] {
+  const db = getDatabase();
+
   const stmt = db.prepare(`
-    INSERT INTO prompts (name, content, model, purpose, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(name)
-    DO UPDATE SET
-      content = excluded.content,
-      model = excluded.model,
-      purpose = excluded.purpose,
-      updated_at = ?
-    RETURNING id
+    SELECT * FROM prompt_versions
+    WHERE prompt_name = ?
+    ORDER BY version_number DESC
   `);
 
-  const result = stmt.get(name, content, model, purpose, now, now, now) as { id: number };
-  return result.id;
+  return stmt.all(promptName) as PromptVersionRecord[];
+}
+
+/**
+ * Get a specific version of a prompt.
+ * Returns null if not found (normalizes undefined from better-sqlite3).
+ */
+export function getPromptVersion(promptName: string, versionNumber: number): PromptVersionRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM prompt_versions
+    WHERE prompt_name = ? AND version_number = ?
+  `);
+
+  return (stmt.get(promptName, versionNumber) as PromptVersionRecord | undefined) ?? null;
 }
 
 /**
