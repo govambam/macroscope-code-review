@@ -182,7 +182,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     const body = await request.json();
     const { name, content, model, purpose } = body as PromptData;
 
-    if (!name || !content) {
+    if (typeof name !== "string" || typeof content !== "string" || !name || !content) {
       return NextResponse.json(
         { success: false, error: "Name and content are required" },
         { status: 400 }
