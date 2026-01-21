@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -10,6 +10,14 @@ interface Prompt {
   model: string | null;
   purpose: string | null;
   updatedAt: string;
+}
+
+interface PromptVersion {
+  version_number: number;
+  content: string;
+  model: string | null;
+  purpose: string | null;
+  created_at: string;
 }
 
 export default function SettingsPage() {
@@ -22,6 +30,15 @@ export default function SettingsPage() {
   const [editedPurpose, setEditedPurpose] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Version history state
+  const [versions, setVersions] = useState<PromptVersion[]>([]);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [selectedVersion, setSelectedVersion] = useState<PromptVersion | null>(null);
+  const [reverting, setReverting] = useState(false);
+  const [showRevertConfirm, setShowRevertConfirm] = useState<number | null>(null);
+const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null));
 
   // Load prompts on mount
   useEffect(() => {
@@ -62,6 +79,35 @@ export default function SettingsPage() {
     setEditedModel(prompt.model || "");
     setEditedPurpose(prompt.purpose || "");
     setSaveResult(null);
+    setSelectedVersion(null);
+    setShowVersionHistory(false);
+  };
+
+  const fetchVersions = async (promptName: string, forceRefresh = false) => {
+    if (!forceRefresh && versionCache.current[promptName]) {
+      setVersions(versionCache.current[promptName]);
+      setLoadingVersions(false);
+      return;
+    }
+
+    setLoadingVersions(true);
+    try {
+      const response = await fetch(`/api/prompts/versions?name=${encodeURIComponent(promptName)}`);
+      const data = await response.json();
+
+      if (data.success) {
+        versionCache.current[promptName] = data.versions;
+        if (selectedPrompt?.name === promptName) {
+          setVersions(data.versions);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch versions:", err);
+    } finally {
+      if (selectedPrompt?.name === promptName) {
+        setLoadingVersions(false);
+      }
+    }
   };
 
   const handleSave = async () => {
@@ -89,11 +135,19 @@ export default function SettingsPage() {
       if (data.success) {
         setSaveResult({ success: true, message: "Prompt saved successfully" });
 
+        // Invalidate version cache for this prompt
+        delete versionCache.current[currentName];
+
         // Reload prompts and re-select from fresh data
         const freshPrompts = await loadPrompts();
         const freshSelected = freshPrompts.find(p => p.name === currentName);
         if (freshSelected) {
           setSelectedPrompt(freshSelected);
+        }
+
+        // Refresh versions if panel is open
+        if (showVersionHistory) {
+          await fetchVersions(currentName, true);
         }
 
         // Auto-hide success message after 3 seconds
@@ -109,6 +163,65 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRevert = async (versionNumber: number) => {
+    if (!selectedPrompt) return;
+
+    const promptName = selectedPrompt.name;
+
+    try {
+      setReverting(true);
+      const response = await fetch("/api/prompts/versions/revert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: promptName, versionNumber }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Invalidate version cache
+        delete versionCache.current[promptName];
+
+        // Reload prompts and re-select from fresh data
+        const freshPrompts = await loadPrompts();
+        const freshSelected = freshPrompts.find(p => p.name === promptName);
+        if (freshSelected) {
+          setSelectedPrompt(freshSelected);
+          setEditedContent(freshSelected.content);
+          setEditedModel(freshSelected.model || "");
+          setEditedPurpose(freshSelected.purpose || "");
+        }
+
+        // Refresh versions
+        await fetchVersions(promptName, true);
+
+        // Clear selected version preview
+        setSelectedVersion(null);
+
+        setSaveResult({ success: true, message: `Reverted to version ${versionNumber}` });
+        setTimeout(() => setSaveResult(null), 3000);
+      } else {
+        setSaveResult({ success: false, message: data.error || "Failed to revert" });
+      }
+    } catch (err) {
+      setSaveResult({
+        success: false,
+        message: err instanceof Error ? err.message : "Failed to revert",
+      });
+    } finally {
+      setReverting(false);
+      setShowRevertConfirm(null);
+    }
+  };
+
+  const toggleVersionHistory = () => {
+    if (!showVersionHistory && selectedPrompt) {
+      fetchVersions(selectedPrompt.name);
+    }
+    setShowVersionHistory(!showVersionHistory);
+    setSelectedVersion(null);
   };
 
   const hasChanges = selectedPrompt && (
@@ -134,6 +247,21 @@ export default function SettingsPage() {
     const ampm = hours >= 12 ? "PM" : "AM";
     const hour12 = hours % 12 || 12;
     return `${month}/${day}/${year} ${hour12}:${minutes} ${ampm}`;
+  };
+
+  const formatRelativeTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? "" : "s"} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+    return formatDate(dateString);
   };
 
   return (
@@ -329,6 +457,137 @@ export default function SettingsPage() {
                         <p className="text-xs text-text-muted mt-2">
                           Use {"{VARIABLE_NAME}"} syntax for variables that will be interpolated at runtime.
                         </p>
+                      </div>
+
+                      {/* Version History Section */}
+                      <div className="border-t border-border pt-6">
+                        <button
+                          onClick={toggleVersionHistory}
+                          className="flex items-center gap-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
+                        >
+                          <svg
+                            className={`h-4 w-4 transition-transform ${showVersionHistory ? "rotate-90" : ""}`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          Version History
+                          {versions.length > 0 && (
+                            <span className="text-xs text-text-muted">({versions.length} versions)</span>
+                          )}
+                        </button>
+
+                        {showVersionHistory && (
+                          <div className="mt-4 space-y-4">
+                            {loadingVersions ? (
+                              <div className="flex items-center justify-center py-8">
+                                <svg className="animate-spin h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                              </div>
+                            ) : versions.length === 0 ? (
+                              <p className="text-sm text-text-muted py-4">No version history yet. Save changes to create the first version.</p>
+                            ) : (
+                              <>
+                                {/* Version List */}
+                                <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
+                                  {versions.map((version) => (
+                                    <div
+                                      key={version.version_number}
+                                      className={`flex items-center justify-between px-4 py-3 ${
+                                        selectedVersion?.version_number === version.version_number
+                                          ? "bg-primary/5"
+                                          : "hover:bg-bg-subtle"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-sm font-medium text-accent">
+                                          Version {version.version_number}
+                                        </span>
+                                        <span className="text-xs text-text-muted">
+                                          {formatRelativeTime(version.created_at)}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => setSelectedVersion(
+                                            selectedVersion?.version_number === version.version_number
+                                              ? null
+                                              : version
+                                          )}
+                                          className="text-xs text-primary hover:text-primary-hover font-medium"
+                                        >
+                                          {selectedVersion?.version_number === version.version_number ? "Hide" : "View"}
+                                        </button>
+                                        {showRevertConfirm === version.version_number ? (
+                                          <div className="flex items-center gap-1">
+                                            <button
+                                              onClick={() => handleRevert(version.version_number)}
+                                              disabled={reverting}
+                                              className="text-xs text-error hover:text-error/80 font-medium"
+                                            >
+                                              {reverting ? "Reverting..." : "Confirm"}
+                                            </button>
+                                            <button
+                                              onClick={() => setShowRevertConfirm(null)}
+                                              className="text-xs text-text-muted hover:text-text-secondary font-medium"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={() => setShowRevertConfirm(version.version_number)}
+                                            className="text-xs text-text-secondary hover:text-accent font-medium"
+                                          >
+                                            Revert
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Version Preview */}
+                                {selectedVersion && (
+                                  <div className="border border-border rounded-lg p-4 bg-bg-subtle">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <h4 className="text-sm font-medium text-accent">
+                                        Version {selectedVersion.version_number} Preview
+                                      </h4>
+                                      <span className="text-xs text-text-muted">
+                                        {formatDate(selectedVersion.created_at)}
+                                      </span>
+                                    </div>
+                                    {selectedVersion.model && (
+                                      <p className="text-xs text-text-muted mb-1">
+                                        <span className="font-medium">Model:</span> {selectedVersion.model}
+                                      </p>
+                                    )}
+                                    {selectedVersion.purpose && (
+                                      <p className="text-xs text-text-muted mb-3">
+                                        <span className="font-medium">Purpose:</span> {selectedVersion.purpose}
+                                      </p>
+                                    )}
+                                    <textarea
+                                      value={selectedVersion.content}
+                                      readOnly
+                                      rows={20}
+                                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-sm text-black font-mono resize-none"
+                                    />
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
