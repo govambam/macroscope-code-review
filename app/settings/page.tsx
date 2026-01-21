@@ -12,16 +12,6 @@ interface Prompt {
   updatedAt: string;
 }
 
-interface PromptVersion {
-  id: number;
-  versionNumber: number;
-  content: string;
-  model: string | null;
-  purpose: string | null;
-  createdAt: string;
-  isCurrent: boolean;
-}
-
 export default function SettingsPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,12 +22,6 @@ export default function SettingsPage() {
   const [editedPurpose, setEditedPurpose] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
-
-  // Version history state
-  const [showVersionModal, setShowVersionModal] = useState(false);
-  const [versions, setVersions] = useState<PromptVersion[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
-  const [reverting, setReverting] = useState(false);
 
   // Load prompts on mount
   useEffect(() => {
@@ -120,73 +104,6 @@ export default function SettingsPage() {
       });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const loadVersionHistory = async () => {
-    if (!selectedPrompt) return;
-
-    try {
-      setVersionsLoading(true);
-      const response = await fetch(`/api/prompts/versions?name=${encodeURIComponent(selectedPrompt.name)}`);
-      const data = await response.json();
-
-      if (data.success) {
-        setVersions(data.versions);
-      } else {
-        console.error("Failed to load versions:", data.error);
-      }
-    } catch (err) {
-      console.error("Failed to load versions:", err);
-    } finally {
-      setVersionsLoading(false);
-    }
-  };
-
-  const openVersionModal = async () => {
-    setShowVersionModal(true);
-    await loadVersionHistory();
-  };
-
-  const revertToVersion = async (versionNumber: number) => {
-    if (!selectedPrompt) return;
-
-    try {
-      setReverting(true);
-      const response = await fetch("/api/prompts/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: selectedPrompt.name,
-          versionNumber,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Reload prompts and update editor
-        await loadPrompts();
-        // Get the version content to update the editor
-        const version = versions.find(v => v.versionNumber === versionNumber);
-        if (version) {
-          setEditedContent(version.content);
-          setEditedModel(version.model || "");
-          setEditedPurpose(version.purpose || "");
-          setSelectedPrompt({
-            ...selectedPrompt,
-            content: version.content,
-            model: version.model,
-            purpose: version.purpose,
-          });
-        }
-        // Reload version history to update current badge
-        await loadVersionHistory();
-      }
-    } catch (err) {
-      console.error("Failed to revert:", err);
-    } finally {
-      setReverting(false);
     }
   };
 
@@ -328,15 +245,6 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={openVersionModal}
-                            className="inline-flex items-center gap-2 px-4 py-2 text-text-secondary hover:text-accent hover:bg-bg-subtle font-medium rounded-lg transition-colors border border-border"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Version History
-                          </button>
-                          <button
                             onClick={handleSave}
                             disabled={saving || !hasChanges}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -430,103 +338,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </main>
-
-      {/* Version History Modal */}
-      {showVersionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-lg max-w-lg w-full max-h-[80vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-              <div>
-                <h2 className="text-lg font-semibold text-accent">Version History</h2>
-                {selectedPrompt && (
-                  <p className="text-sm text-text-muted mt-1">
-                    {formatPromptName(selectedPrompt.name)}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={() => setShowVersionModal(false)}
-                className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {versionsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <svg className="animate-spin h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                </div>
-              ) : versions.length === 0 ? (
-                <div className="text-center py-8 text-text-muted">
-                  <svg className="mx-auto h-10 w-10 text-text-muted mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p>No version history yet</p>
-                  <p className="text-sm mt-1">Versions are created when you save changes</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {versions.map((version) => (
-                    <div
-                      key={version.id}
-                      className={`flex items-center justify-between p-4 rounded-lg border ${
-                        version.isCurrent
-                          ? "border-primary/30 bg-primary/5"
-                          : "border-border hover:bg-bg-subtle"
-                      } transition-colors`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-accent">
-                            Version {version.versionNumber}
-                          </span>
-                          {version.isCurrent && (
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-primary text-white">
-                              Current
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm text-text-muted">
-                          {formatDate(version.createdAt)}
-                        </span>
-                        {!version.isCurrent && (
-                          <button
-                            onClick={() => revertToVersion(version.versionNumber)}
-                            disabled={reverting}
-                            className="text-sm text-primary hover:text-primary-hover font-medium disabled:opacity-50"
-                          >
-                            {reverting ? "Reverting..." : "Revert"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-border shrink-0">
-              <button
-                onClick={() => setShowVersionModal(false)}
-                className="w-full px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -57,17 +57,6 @@ export interface PromptRecord {
   updated_at: string;
 }
 
-export interface PromptVersionRecord {
-  id: number;
-  prompt_id: number;
-  version_number: number;
-  content: string;
-  model: string | null;
-  purpose: string | null;
-  created_at: string;
-  is_current: boolean;
-}
-
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -205,27 +194,6 @@ export function initializeDatabase(): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
-  `);
-
-  // Create prompt versions table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS prompt_versions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      prompt_id INTEGER NOT NULL,
-      version_number INTEGER NOT NULL,
-      content TEXT NOT NULL,
-      model TEXT,
-      purpose TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      is_current BOOLEAN DEFAULT FALSE,
-      FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE,
-      UNIQUE(prompt_id, version_number)
-    )
-  `);
-
-  // Create index for prompt versions
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_prompt_versions_prompt_id ON prompt_versions(prompt_id);
   `);
 
   // Create indexes for common queries
@@ -762,25 +730,17 @@ export function getPrompt(name: string): PromptRecord | null {
 }
 
 /**
- * Save or update a prompt and create a new version.
+ * Save or update a prompt.
  * Returns the prompt ID.
  */
 export function savePrompt(
   name: string,
   content: string,
   model: string | null = null,
-  purpose: string | null = null,
-  createVersion: boolean = true
+  purpose: string | null = null
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
-
-  // Check if prompt exists and if content has changed
-  const existing = getPrompt(name);
-  const contentChanged = !existing ||
-    existing.content !== content ||
-    existing.model !== model ||
-    existing.purpose !== purpose;
 
   const stmt = db.prepare(`
     INSERT INTO prompts (name, content, model, purpose, created_at, updated_at)
@@ -795,14 +755,7 @@ export function savePrompt(
   `);
 
   const result = stmt.get(name, content, model, purpose, now, now, now) as { id: number };
-  const promptId = result.id;
-
-  // Create a new version if content changed and versioning is enabled
-  if (createVersion && contentChanged) {
-    createPromptVersion(promptId, content, model, purpose);
-  }
-
-  return promptId;
+  return result.id;
 }
 
 /**
@@ -817,126 +770,6 @@ export function deletePrompt(name: string): boolean {
 
   const result = stmt.run(name);
   return result.changes > 0;
-}
-
-/**
- * Create a new version of a prompt.
- * Marks all previous versions as not current.
- */
-export function createPromptVersion(
-  promptId: number,
-  content: string,
-  model: string | null,
-  purpose: string | null
-): number {
-  const db = getDatabase();
-
-  // Get the next version number
-  const versionStmt = db.prepare(`
-    SELECT COALESCE(MAX(version_number), 0) + 1 as next_version
-    FROM prompt_versions WHERE prompt_id = ?
-  `);
-  const { next_version } = versionStmt.get(promptId) as { next_version: number };
-
-  // Mark all existing versions as not current
-  db.prepare(`
-    UPDATE prompt_versions SET is_current = 0 WHERE prompt_id = ?
-  `).run(promptId);
-
-  // Insert new version as current
-  const insertStmt = db.prepare(`
-    INSERT INTO prompt_versions (prompt_id, version_number, content, model, purpose, is_current)
-    VALUES (?, ?, ?, ?, ?, 1)
-    RETURNING id
-  `);
-
-  const result = insertStmt.get(promptId, next_version, content, model, purpose) as { id: number };
-  return result.id;
-}
-
-/**
- * Get all versions for a prompt.
- */
-export function getPromptVersions(promptId: number): PromptVersionRecord[] {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    SELECT * FROM prompt_versions
-    WHERE prompt_id = ?
-    ORDER BY version_number DESC
-  `);
-
-  return stmt.all(promptId) as PromptVersionRecord[];
-}
-
-/**
- * Get all versions for a prompt by name.
- */
-export function getPromptVersionsByName(name: string): PromptVersionRecord[] {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    SELECT pv.* FROM prompt_versions pv
-    JOIN prompts p ON pv.prompt_id = p.id
-    WHERE p.name = ?
-    ORDER BY pv.version_number DESC
-  `);
-
-  return stmt.all(name) as PromptVersionRecord[];
-}
-
-/**
- * Get a specific version of a prompt.
- */
-export function getPromptVersion(promptId: number, versionNumber: number): PromptVersionRecord | null {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    SELECT * FROM prompt_versions
-    WHERE prompt_id = ? AND version_number = ?
-  `);
-
-  return stmt.get(promptId, versionNumber) as PromptVersionRecord | null;
-}
-
-/**
- * Revert a prompt to a specific version.
- * This creates a new version with the content from the specified version.
- */
-export function revertPromptToVersion(promptId: number, versionNumber: number): boolean {
-  const db = getDatabase();
-
-  // Get the version to revert to
-  const version = getPromptVersion(promptId, versionNumber);
-  if (!version) return false;
-
-  // Update the main prompt record
-  const now = new Date().toISOString();
-  db.prepare(`
-    UPDATE prompts SET content = ?, model = ?, purpose = ?, updated_at = ?
-    WHERE id = ?
-  `).run(version.content, version.model, version.purpose, now, promptId);
-
-  // Mark all versions as not current, then mark the reverted version as current
-  db.prepare(`UPDATE prompt_versions SET is_current = 0 WHERE prompt_id = ?`).run(promptId);
-  db.prepare(`UPDATE prompt_versions SET is_current = 1 WHERE prompt_id = ? AND version_number = ?`).run(promptId, versionNumber);
-
-  return true;
-}
-
-/**
- * Get the current version number for a prompt.
- */
-export function getCurrentVersionNumber(promptId: number): number | null {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    SELECT version_number FROM prompt_versions
-    WHERE prompt_id = ? AND is_current = 1
-  `);
-
-  const result = stmt.get(promptId) as { version_number: number } | undefined;
-  return result?.version_number ?? null;
 }
 
 /**
