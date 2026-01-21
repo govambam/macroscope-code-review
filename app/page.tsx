@@ -182,38 +182,16 @@ export default function Home() {
     loadForksFromDatabase();
   }, []);
 
-  // Initialize expanded repos from localStorage and auto-expand repos with PRs
+  // Auto-expand repos that have PRs, collapse repos with no PRs
   useEffect(() => {
     if (forks.length > 0 && !expandedReposInitialized.current) {
-      // Only expand repos that have PRs
+      // Always expand repos with 1+ PRs by default, collapse repos with 0 PRs
       const reposWithPRs = new Set(forks.filter(f => f.prs.length > 0).map(f => f.repoName));
-
-      // Try to load from localStorage first
-      const stored = localStorage.getItem("macroscope-expanded-repos");
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          // Filter to only include repos that still have PRs
-          const validExpanded = parsed.filter((repoName: string) => reposWithPRs.has(repoName));
-          setExpandedRepos(new Set(validExpanded));
-        } catch {
-          // If invalid, expand all repos with PRs by default
-          setExpandedRepos(reposWithPRs);
-        }
-      } else {
-        // Default: expand all repos with PRs
-        setExpandedRepos(reposWithPRs);
-      }
+      setExpandedRepos(reposWithPRs);
       expandedReposInitialized.current = true;
     }
   }, [forks]);
 
-  // Save expanded repos to localStorage when it changes
-  useEffect(() => {
-    if (expandedReposInitialized.current) {
-      localStorage.setItem("macroscope-expanded-repos", JSON.stringify([...expandedRepos]));
-    }
-  }, [expandedRepos]);
 
   // Auto-check missing bug counts when forks are loaded
   useEffect(() => {
@@ -1144,7 +1122,7 @@ export default function Home() {
                       const checkboxState = getRepoCheckboxState(fork.repoName);
                       const isExpanded = expandedRepos.has(fork.repoName);
                       return (
-                        <div key={fork.repoName}>
+                        <div key={fork.forkUrl}>
                           {/* Repo Header - Clickable Accordion */}
                           <div
                             className="flex items-center px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
