@@ -13,6 +13,37 @@ if (!fs.existsSync(REPOS_CACHE_DIR)) {
   fs.mkdirSync(REPOS_CACHE_DIR, { recursive: true });
 }
 
+// In-memory mutex map to prevent race conditions when cloning/updating repos
+// Key: "owner/repo", Value: Promise that resolves when the lock is released
+const repoLocks = new Map<string, Promise<void>>();
+
+/**
+ * Acquire a lock for the given repository. Returns a release function.
+ * Only one request can hold the lock for a given owner/repo at a time.
+ */
+async function acquireRepoLock(owner: string, repo: string): Promise<() => void> {
+  const key = `${owner}/${repo}`;
+  
+  // Wait for any existing lock to be released
+  while (repoLocks.has(key)) {
+    await repoLocks.get(key);
+  }
+  
+  // Create a new lock with a resolver we can call to release it
+  let releaseLock: () => void;
+  const lockPromise = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  
+  repoLocks.set(key, lockPromise);
+  
+  // Return a release function that removes the lock from the map and resolves the promise
+  return () => {
+    repoLocks.delete(key);
+    releaseLock!();
+  };
+}
+
 // Response type for the API
 interface ApiResponse {
   success: boolean;
@@ -101,6 +132,8 @@ function isRepoCached(owner: string, repo: string): boolean {
 /**
  * Ensure reference repo exists and is up-to-date in the cache.
  * This is used to speed up subsequent clones via --reference.
+ * Uses a mutex lock to prevent race conditions when multiple requests
+ * try to clone/update the same repository simultaneously.
  */
 async function ensureReferenceRepo(
   owner: string,
@@ -110,32 +143,40 @@ async function ensureReferenceRepo(
   const repoPath = getRepoCachePath(owner, repo);
   const cloneUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`;
 
-  if (isRepoCached(owner, repo)) {
-    // Reference repo exists - update it
-    console.log(`[GIT CACHE] Hit: Updating reference repo ${owner}/${repo}`);
-    const git = simpleGit(repoPath);
-    await git.fetch(["--all", "--tags", "--prune"]);
-  } else {
-    // Reference repo doesn't exist - clone it
-    console.log(`[GIT CACHE] Miss: Cloning reference repo ${owner}/${repo}`);
+  // Acquire lock to prevent race conditions
+  const releaseLock = await acquireRepoLock(owner, repo);
+  
+  try {
+    if (isRepoCached(owner, repo)) {
+      // Reference repo exists - update it
+      console.log(`[GIT CACHE] Hit: Updating reference repo ${owner}/${repo}`);
+      const git = simpleGit(repoPath);
+      await git.fetch(["--all", "--tags", "--prune"]);
+    } else {
+      // Reference repo doesn't exist - clone it
+      console.log(`[GIT CACHE] Miss: Cloning reference repo ${owner}/${repo}`);
 
-    // Ensure owner directory exists
-    const ownerDir = path.join(REPOS_CACHE_DIR, owner);
-    if (!fs.existsSync(ownerDir)) {
-      fs.mkdirSync(ownerDir, { recursive: true });
-    }
-
-    // Clone the repo (Bug 1 fix: clean up on failure)
-    const git = simpleGit();
-    try {
-      await git.clone(cloneUrl, repoPath, ["--no-single-branch"]);
-    } catch (error) {
-      // Clean up partial clone on failure
-      if (fs.existsSync(repoPath)) {
-        fs.rmSync(repoPath, { recursive: true, force: true });
+      // Ensure owner directory exists
+      const ownerDir = path.join(REPOS_CACHE_DIR, owner);
+      if (!fs.existsSync(ownerDir)) {
+        fs.mkdirSync(ownerDir, { recursive: true });
       }
-      throw error;
+
+      // Clone the repo (Bug 1 fix: clean up on failure)
+      const git = simpleGit();
+      try {
+        await git.clone(cloneUrl, repoPath, ["--no-single-branch"]);
+      } catch (error) {
+        // Clean up partial clone on failure
+        if (fs.existsSync(repoPath)) {
+          fs.rmSync(repoPath, { recursive: true, force: true });
+        }
+        throw error;
+      }
     }
+  } finally {
+    // Always release the lock, even if an error occurred
+    releaseLock();
   }
 }
 
