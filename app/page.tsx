@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type CreateMode = "commit" | "pr";
 
@@ -108,10 +109,56 @@ export default function Home() {
   const [status, setStatus] = useState<StatusMessage[]>([]);
   const [result, setResult] = useState<ApiResponse | null>(null);
 
-  // My Forks tab state
-  const [forks, setForks] = useState<ForkRecord[]>([]);
-  const [forksLoading, setForksLoading] = useState(false);
-  const [forksError, setForksError] = useState<string | null>(null);
+  // React Query client for cache manipulation
+  const queryClient = useQueryClient();
+
+  // Fetch forks from API
+  const fetchForks = async (source: "db" | "github" = "db"): Promise<ForkRecord[]> => {
+    const url = source === "db" ? "/api/forks?source=db" : "/api/forks";
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.error || "Failed to fetch forks");
+    }
+
+    // Cache in localStorage as backup
+    if (data.forks) {
+      localStorage.setItem("macroscope-forks", JSON.stringify(data.forks));
+    }
+
+    return data.forks || [];
+  };
+
+  // React Query for forks - loads from database initially
+  const {
+    data: forks = [],
+    isLoading: forksLoading,
+    error: forksQueryError,
+    refetch: refetchForks,
+    isFetching: forksRefetching,
+  } = useQuery({
+    queryKey: ["forks"],
+    queryFn: () => fetchForks("db"),
+    initialData: () => {
+      // Try to load from localStorage for instant display
+      if (typeof window !== "undefined") {
+        const stored = localStorage.getItem("macroscope-forks");
+        if (stored) {
+          try {
+            return JSON.parse(stored) as ForkRecord[];
+          } catch {
+            return undefined;
+          }
+        }
+      }
+      return undefined;
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  const forksError = forksQueryError ? (forksQueryError as Error).message : null;
+  const [isRefreshingFromGitHub, setIsRefreshingFromGitHub] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selection, setSelection] = useState<Selection>({ repos: new Set(), prs: new Set() });
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -153,44 +200,12 @@ export default function Home() {
   const [analyzeLoading, setAnalyzeLoading] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
-  // Load forks from database on mount
+  // Mark forks as loaded when data is available
   useEffect(() => {
-    const loadForksFromDatabase = async () => {
-      try {
-        // Load from database first (fast, no GitHub API calls)
-        const response = await fetch("/api/forks?source=db");
-        const data = await response.json();
-
-        if (data.success && data.forks && data.forks.length > 0) {
-          setForks(data.forks);
-          localStorage.setItem("macroscope-forks", JSON.stringify(data.forks));
-          forksLoadedRef.current = true;
-        } else {
-          // Fallback to localStorage if database is empty
-          const stored = localStorage.getItem("macroscope-forks");
-          if (stored) {
-            try {
-              setForks(JSON.parse(stored));
-            } catch {
-              // Invalid data, ignore
-            }
-          }
-        }
-      } catch {
-        // If API fails, fallback to localStorage
-        const stored = localStorage.getItem("macroscope-forks");
-        if (stored) {
-          try {
-            setForks(JSON.parse(stored));
-          } catch {
-            // Invalid data, ignore
-          }
-        }
-      }
-    };
-
-    loadForksFromDatabase();
-  }, []);
+    if (forks.length > 0) {
+      forksLoadedRef.current = true;
+    }
+  }, [forks]);
 
   // Auto-expand repos that have PRs, collapse repos with no PRs
   useEffect(() => {
@@ -230,7 +245,8 @@ export default function Home() {
               });
               const data = await response.json();
               if (data.success) {
-                setForks((prevForks) => {
+                queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
+                  if (!prevForks) return prevForks;
                   const updatedForks = prevForks.map((fork) => {
                     if (fork.repoName === repoName) {
                       return {
@@ -257,7 +273,7 @@ export default function Home() {
         checkBugs();
       }
     }
-  }, [forks]);
+  }, [forks, queryClient]);
 
   const addStatus = (
     text: string,
@@ -501,41 +517,25 @@ export default function Home() {
 
   // My Forks functions
   const refreshFromGitHub = useCallback(async () => {
-    setForksLoading(true);
-    setForksError(null);
     setDeleteResult(null);
+    setIsRefreshingFromGitHub(true);
     // Clear the checked PRs set so all PRs will be re-checked after refresh
     checkedPRsRef.current.clear();
 
     try {
-      const response = await fetch("/api/forks");
-      const data = await response.json();
+      // Fetch fresh data from GitHub
+      const freshForks = await fetchForks("github");
 
-      if (data.success) {
-        setForks(data.forks);
-        localStorage.setItem("macroscope-forks", JSON.stringify(data.forks));
-        forksLoadedRef.current = true;
-
-        // Debug: log comment info to help identify the correct bot username
-        if (data.debug && data.debug.length > 0) {
-          console.log("=== DEBUG: Comment info for all PRs ===");
-          console.log("This shows who commented on each PR (review comments on code lines):");
-          console.table(data.debug.map((d: { fork: string; prNumber: number; debug: { totalReviewComments: number; commentUsers: string[] } }) => ({
-            fork: d.fork,
-            prNumber: d.prNumber,
-            totalReviewComments: d.debug.totalReviewComments,
-            commentUsers: d.debug.commentUsers.join(", ") || "(none)",
-          })));
-        }
-      } else {
-        setForksError(data.error || "Failed to fetch forks");
-      }
+      // Update the query cache with the new data
+      queryClient.setQueryData(["forks"], freshForks);
+      forksLoadedRef.current = true;
     } catch (error) {
-      setForksError(error instanceof Error ? error.message : "Failed to fetch forks");
+      console.error("Failed to refresh from GitHub:", error);
+      // The error will be shown via forksError from the query
     } finally {
-      setForksLoading(false);
+      setIsRefreshingFromGitHub(false);
     }
-  }, []);
+  }, [queryClient]);
 
   const checkSinglePRBugs = async (repoName: string, prNumber: number) => {
     setCheckingPR({ repo: repoName, pr: prNumber });
@@ -553,8 +553,9 @@ export default function Home() {
       console.log("Bug check response:", data);
 
       if (data.success) {
-        // Update forks state and localStorage
-        setForks((prevForks) => {
+        // Update forks cache and localStorage
+        queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
+          if (!prevForks) return prevForks;
           const updatedForks = prevForks.map((fork) => {
             if (fork.repoName === repoName) {
               return {
@@ -607,9 +608,9 @@ export default function Home() {
         macroscopeBugs: undefined, // Will show refresh icon, user can check manually later
       };
 
-      // Update forks state
-      setForks((prevForks) => {
-        let updatedForks = [...prevForks];
+      // Update forks cache
+      queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
+        let updatedForks = [...(prevForks || [])];
         const existingForkIndex = updatedForks.findIndex((f) => f.repoName === repoName);
 
         if (existingForkIndex !== -1) {
@@ -638,7 +639,7 @@ export default function Home() {
         return updatedForks;
       });
     },
-    []
+    [queryClient]
   );
 
   // Helper to check if a string looks like a GitHub PR URL
@@ -805,37 +806,43 @@ export default function Home() {
       const data = await response.json();
 
       if (data.success) {
-        // Update local state
-        let updatedForks = [...forks];
+        // Update cache
+        const updatedForks = queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
+          if (!prevForks) return prevForks;
+          let newForks = [...prevForks];
 
-        // Remove deleted repos
-        updatedForks = updatedForks.filter((f) => !data.deletedRepos.includes(f.repoName));
+          // Remove deleted repos
+          newForks = newForks.filter((f) => !data.deletedRepos.includes(f.repoName));
 
-        // Remove deleted PRs (but keep the repo even if it has no PRs left)
-        data.deletedPRs.forEach((deleted: { repo: string; prNumber: number }) => {
-          const forkIndex = updatedForks.findIndex((f) => f.repoName === deleted.repo);
-          if (forkIndex !== -1) {
-            updatedForks[forkIndex] = {
-              ...updatedForks[forkIndex],
-              prs: updatedForks[forkIndex].prs.filter((pr) => pr.prNumber !== deleted.prNumber),
-            };
-          }
-        });
+          // Remove deleted PRs (but keep the repo even if it has no PRs left)
+          data.deletedPRs.forEach((deleted: { repo: string; prNumber: number }) => {
+            const forkIndex = newForks.findIndex((f) => f.repoName === deleted.repo);
+            if (forkIndex !== -1) {
+              newForks[forkIndex] = {
+                ...newForks[forkIndex],
+                prs: newForks[forkIndex].prs.filter((pr) => pr.prNumber !== deleted.prNumber),
+              };
+            }
+          });
 
-        setForks(updatedForks);
-        localStorage.setItem("macroscope-forks", JSON.stringify(updatedForks));
+          localStorage.setItem("macroscope-forks", JSON.stringify(newForks));
+          return newForks;
+        }) as ForkRecord[] | undefined;
+
         setSelection({ repos: new Set(), prs: new Set() });
 
         // Collapse repos that now have no PRs
-        setExpandedRepos((prev) => {
-          const newExpanded = new Set(prev);
-          updatedForks.forEach((fork) => {
-            if (fork.prs.length === 0) {
-              newExpanded.delete(fork.repoName);
-            }
+        if (updatedForks) {
+          setExpandedRepos((prev) => {
+            const newExpanded = new Set(prev);
+            updatedForks.forEach((fork) => {
+              if (fork.prs.length === 0) {
+                newExpanded.delete(fork.repoName);
+              }
+            });
+            return newExpanded;
           });
-          return newExpanded;
-        });
+        }
 
         const message =
           data.errors.length > 0
@@ -913,9 +920,10 @@ export default function Home() {
         setGeneratedEmail(data.cachedEmail);
       }
 
-      // Update forks state to reflect that this PR now has an analysis
+      // Update forks cache to reflect that this PR now has an analysis
       if (data.success && data.analysisId) {
-        setForks((prevForks) => {
+        queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
+          if (!prevForks) return prevForks;
           const updatedForks = prevForks.map((fork) => ({
             ...fork,
             prs: fork.prs.map((pr) => {
@@ -1285,10 +1293,10 @@ export default function Home() {
             </div>
             <button
               onClick={refreshFromGitHub}
-              disabled={forksLoading}
+              disabled={isRefreshingFromGitHub}
               className="px-4 py-2.5 bg-white border border-border rounded-lg text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              {forksLoading ? (
+              {isRefreshingFromGitHub ? (
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -1298,7 +1306,7 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               )}
-              Refresh
+              {isRefreshingFromGitHub ? "Refreshing..." : "Refresh"}
             </button>
           </div>
         </div>
