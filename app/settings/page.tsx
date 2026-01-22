@@ -19,6 +19,7 @@ interface PromptVersion {
   model: string | null;
   purpose: string | null;
   created_at: string;
+  created_by: string | null;
 }
 
 export default function SettingsPage() {
@@ -515,6 +516,7 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
                                         </span>
                                         <span className="text-xs text-text-muted">
                                           {formatRelativeTime(version.created_at)}
+                                          {version.created_by && ` by @${version.created_by}`}
                                         </span>
                                       </div>
                                       <div className="flex items-center gap-2">
@@ -574,8 +576,13 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
                                       </p>
                                     )}
                                     {selectedVersion.purpose && (
-                                      <p className="text-xs text-text-muted mb-3">
+                                      <p className="text-xs text-text-muted mb-1">
                                         <span className="font-medium">Purpose:</span> {selectedVersion.purpose}
+                                      </p>
+                                    )}
+                                    {selectedVersion.created_by && (
+                                      <p className="text-xs text-text-muted mb-3">
+                                        <span className="font-medium">Created by:</span> @{selectedVersion.created_by}
                                       </p>
                                     )}
                                     <textarea

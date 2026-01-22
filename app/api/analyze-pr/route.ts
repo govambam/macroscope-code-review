@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import {
   analyzePR,
   extractOriginalPRUrl,
@@ -57,6 +59,10 @@ function parsePrUrl(
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    // Get the current user from session
+    const session = await getServerSession(authOptions);
+    const createdBy = session?.user?.login || null;
+
     // Check for required environment variables
     if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json<AnalyzeResponse>(
@@ -253,6 +259,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           result.meaningful_bugs_found ? result.total_macroscope_bugs_found : 0,
           {
             originalPrTitle: originalPrTitle || null,
+            createdBy,
           }
         );
       }
