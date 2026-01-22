@@ -51,9 +51,11 @@ export function Providers({
   useEffect(() => {
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
       try {
+        const existing = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}')
         const cache = {
-          forks: queryClient.getQueryData(['forks']),
-          prompts: queryClient.getQueryData(['prompts']),
+          ...existing,
+          forks: queryClient.getQueryData(['forks']) ?? existing.forks,
+          prompts: queryClient.getQueryData(['prompts']) ?? existing.prompts,
         }
         localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
       } catch (error) {
