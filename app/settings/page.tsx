@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { UserMenu } from "@/components/UserMenu";
 
 interface Prompt {
   name: string;
@@ -301,6 +302,7 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
             </div>
           </div>
         </nav>
+        <UserMenu />
       </aside>
 
       {/* Main Content Area */}

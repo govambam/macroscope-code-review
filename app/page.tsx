@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { UserMenu } from "@/components/UserMenu";
 
 type CreateMode = "commit" | "pr";
 
@@ -1121,6 +1122,7 @@ export default function Home() {
             </Link>
           </div>
         </nav>
+        <UserMenu />
       </aside>
 
       {/* Main Content Area */}
