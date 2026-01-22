@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
+
+type FilterMode = "all" | "mine";
 
 type CreateMode = "commit" | "pr";
 
@@ -82,6 +85,7 @@ interface PRRecord {
   analysisId?: number | null;
   originalPrUrl?: string | null;
   isInternal?: boolean;
+  createdBy?: string | null;
 }
 
 interface ForkRecord {
@@ -98,6 +102,13 @@ interface Selection {
 }
 
 export default function Home() {
+  // Session for user filtering
+  const { data: session } = useSession();
+  const currentUserLogin = session?.user?.login;
+
+  // Filter mode state
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+
   // Create PR modal state
   const [showCreatePRModal, setShowCreatePRModal] = useState(false);
   const [createPRModalExpanded, setCreatePRModalExpanded] = useState(false);
@@ -690,8 +701,18 @@ export default function Home() {
         .filter((fork) => fork.prs.length > 0);
     }
 
+    // Apply "my PRs" filter
+    if (filterMode === "mine" && currentUserLogin) {
+      result = result
+        .map((fork) => ({
+          ...fork,
+          prs: fork.prs.filter((pr) => pr.createdBy === currentUserLogin),
+        }))
+        .filter((fork) => fork.prs.length > 0);
+    }
+
     return result;
-  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl]);
+  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin]);
 
   const toggleRepoExpand = (repoName: string) => {
     setExpandedRepos((prev) => {
@@ -1134,6 +1155,17 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-semibold text-accent tracking-tight">My Repos</h1>
               <p className="mt-2 text-text-secondary">Manage your repositories and analyze PRs</p>
+              {/* Filter Dropdown */}
+              <div className="mt-3">
+                <select
+                  value={filterMode}
+                  onChange={(e) => setFilterMode(e.target.value as FilterMode)}
+                  className="text-sm border border-border rounded-lg px-3 py-1.5 bg-white text-accent focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                >
+                  <option value="all">All Users</option>
+                  <option value="mine">My PRs Only</option>
+                </select>
+              </div>
             </div>
             <div className="flex items-center gap-3">
               {totalSelected > 0 && (
@@ -1444,6 +1476,7 @@ export default function Home() {
                                 <div className="w-[100px] text-center">Bugs</div>
                                 <div className="w-[140px] text-center">Created</div>
                                 <div className="w-[140px] text-center">Updated</div>
+                                <div className="w-[100px] text-center">By</div>
                               </div>
 
                               {/* PR Rows */}
@@ -1537,6 +1570,28 @@ export default function Home() {
                                       {/* Updated Date */}
                                       <div className="w-[140px] flex-shrink-0 text-sm text-gray-500 text-center">
                                         {pr.updatedAt ? formatDate(pr.updatedAt) : "-"}
+                                      </div>
+
+                                      {/* Created By */}
+                                      <div className="w-[100px] flex-shrink-0 flex justify-center">
+                                        {pr.createdBy ? (
+                                          <a
+                                            href={`https://github.com/${pr.createdBy}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            title={`@${pr.createdBy}`}
+                                          >
+                                            <Image
+                                              src={`https://avatars.githubusercontent.com/${pr.createdBy}`}
+                                              alt={pr.createdBy}
+                                              width={24}
+                                              height={24}
+                                              className="rounded-full hover:ring-2 hover:ring-primary/30 transition-all"
+                                            />
+                                          </a>
+                                        ) : (
+                                          <span className="text-sm text-gray-400">-</span>
+                                        )}
                                       </div>
                                     </div>
                                   );

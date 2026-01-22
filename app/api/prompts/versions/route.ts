@@ -27,6 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       model: v.model,
       purpose: v.purpose,
       created_at: v.created_at,
+      created_by: v.created_by,
     }));
 
     return NextResponse.json({

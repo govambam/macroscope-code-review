@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import {
   saveFork,
   savePR,
@@ -30,6 +32,10 @@ const MACROSCOPE_BOT_USERNAME = "macroscopeapp[bot]";
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    // Get the current user from session
+    const session = await getServerSession(authOptions);
+    const createdBy = session?.user?.login || null;
+
     const body = await request.json() as AnalyzeInternalPRRequest;
     const { prUrl } = body;
 
@@ -171,6 +177,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           commitCount: prData.commits,
           updateBugCheckTime: true,
           isInternal: true,
+          createdBy,
         }
       );
     }
@@ -200,6 +207,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         commitCount: prData.commits,
         updateBugCheckTime: true,
         isInternal: true,
+        createdBy,
       }
     );
 

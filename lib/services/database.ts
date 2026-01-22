@@ -26,6 +26,7 @@ export interface PRRecord {
   commit_count: number | null;
   last_bug_check_at: string | null;
   is_internal: boolean;
+  created_by: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -66,6 +67,7 @@ export interface PromptVersionRecord {
   content: string;
   model: string | null;
   purpose: string | null;
+  created_by: string | null;
   created_at: string;
 }
 
@@ -178,6 +180,12 @@ export function initializeDatabase(): void {
     db.exec("ALTER TABLE forks ADD COLUMN is_internal BOOLEAN DEFAULT FALSE");
   }
 
+  // Migration: Add created_by column to prs table for user tracking
+  if (!columnNames.includes("created_by")) {
+    db.exec("ALTER TABLE prs ADD COLUMN created_by TEXT");
+    console.log("Added created_by column to prs table");
+  }
+
   // Create PR analyses table
   db.exec(`
     CREATE TABLE IF NOT EXISTS pr_analyses (
@@ -231,6 +239,14 @@ export function initializeDatabase(): void {
       UNIQUE(prompt_name, version_number)
     )
   `);
+
+  // Migration: Add created_by column to prompt_versions table for user tracking
+  const promptVersionColumns = db.prepare("PRAGMA table_info(prompt_versions)").all() as { name: string }[];
+  const promptVersionColumnNames = promptVersionColumns.map(c => c.name);
+  if (!promptVersionColumnNames.includes("created_by")) {
+    db.exec("ALTER TABLE prompt_versions ADD COLUMN created_by TEXT");
+    console.log("Added created_by column to prompt_versions table");
+  }
 
   // Create index for prompt versions
   db.exec(`
@@ -297,14 +313,15 @@ export function savePR(
     commitCount?: number | null;
     updateBugCheckTime?: boolean;
     isInternal?: boolean;
+    createdBy?: string | null;
   } = {}
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
@@ -317,6 +334,7 @@ export function savePR(
       commit_count = COALESCE(excluded.commit_count, prs.commit_count),
       last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at),
       is_internal = COALESCE(excluded.is_internal, prs.is_internal),
+      created_by = COALESCE(prs.created_by, excluded.created_by),
       updated_at = ?
     RETURNING id
   `);
@@ -336,6 +354,7 @@ export function savePR(
     options.commitCount ?? null,
     lastBugCheckAt,
     options.isInternal ? 1 : 0,
+    options.createdBy ?? null,
     now, // updated_at for insert
     now  // updated_at for update
   ) as { id: number };
@@ -782,7 +801,8 @@ export function savePrompt(
   name: string,
   content: string,
   model: string | null = null,
-  purpose: string | null = null
+  purpose: string | null = null,
+  createdBy: string | null = null
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
@@ -796,10 +816,10 @@ export function savePrompt(
     ).get(name) as { max_version: number | null } | undefined;
     const nextVersion = (lastVersion?.max_version ?? 0) + 1;
 
-    // 2. Insert version record
+    // 2. Insert version record with created_by
     db.prepare(
-      "INSERT INTO prompt_versions (prompt_name, version_number, content, model, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(name, nextVersion, content, model, purpose, now);
+      "INSERT INTO prompt_versions (prompt_name, version_number, content, model, purpose, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(name, nextVersion, content, model, purpose, createdBy, now);
 
     // 3. Update main prompts table
     const stmt = db.prepare(`

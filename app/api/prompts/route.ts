@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import {
   getAllPrompts,
   getPrompt,
@@ -183,6 +185,10 @@ export async function GET(): Promise<NextResponse> {
  */
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   try {
+    // Get the current user from session
+    const session = await getServerSession(authOptions);
+    const createdBy = session?.user?.login || null;
+
     const body = await request.json();
     const { name, content, model, purpose } = body as PromptData;
 
@@ -212,7 +218,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     fs.writeFileSync(filePath, fileContent, "utf-8");
 
     // Save to database
-    const id = savePrompt(name, content, model, purpose);
+    const id = savePrompt(name, content, model, purpose, createdBy);
 
     return NextResponse.json({
       success: true,

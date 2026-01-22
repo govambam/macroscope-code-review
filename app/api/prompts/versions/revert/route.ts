@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { getPromptVersion, savePrompt } from "@/lib/services/database";
 
 interface RevertRequest {
@@ -13,6 +15,10 @@ interface RevertRequest {
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    // Get the current user from session
+    const session = await getServerSession(authOptions);
+    const createdBy = session?.user?.login || null;
+
     const body = await request.json();
     const { name, versionNumber } = body as RevertRequest;
 
@@ -46,7 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // Save the version's content as current (this creates a new version)
-    savePrompt(name, version.content, version.model, version.purpose);
+    savePrompt(name, version.content, version.model, version.purpose, createdBy);
 
     // Get the new version number (it's the latest one now)
     const { getPromptVersions } = await import("@/lib/services/database");

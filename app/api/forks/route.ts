@@ -23,6 +23,7 @@ interface PRRecord {
   lastBugCheckAt?: string;
   originalPrUrl?: string | null;
   isInternal?: boolean;
+  createdBy?: string | null;
 }
 
 interface ForkRecord {
@@ -111,6 +112,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
           originalPrUrl: dbPR.original_pr_url ?? null,
           isInternal: Boolean(dbPR.is_internal),
+          createdBy: dbPR.created_by ?? null,
         })),
       }));
 
