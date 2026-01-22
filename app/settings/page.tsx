@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
 
 interface Prompt {
@@ -23,9 +24,29 @@ interface PromptVersion {
 }
 
 export default function SettingsPage() {
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // Fetch prompts with React Query
+  const {
+    data: promptsData,
+    isLoading: loading,
+    error: promptsError,
+  } = useQuery({
+    queryKey: ["prompts"],
+    queryFn: async () => {
+      const response = await fetch("/api/prompts");
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to load prompts");
+      }
+      return data.prompts as Prompt[];
+    },
+    staleTime: 30 * 60 * 1000, // 30 minutes - prompts rarely change
+  });
+
+  const prompts = promptsData || [];
+  const error = promptsError ? (promptsError as Error).message : null;
+
   const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
   const [editedContent, setEditedContent] = useState("");
   const [editedModel, setEditedModel] = useState("");
@@ -34,39 +55,29 @@ export default function SettingsPage() {
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Version history state
-  const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
-  const [loadingVersions, setLoadingVersions] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<PromptVersion | null>(null);
   const [reverting, setReverting] = useState(false);
   const [showRevertConfirm, setShowRevertConfirm] = useState<number | null>(null);
-const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null));
 
-  // Load prompts on mount
-  useEffect(() => {
-    loadPrompts();
-  }, []);
-
-  const loadPrompts = async (): Promise<Prompt[]> => {
-    try {
-      setLoading(true);
-      const response = await fetch("/api/prompts");
+  // Fetch versions with React Query (only when version history is shown)
+  const {
+    data: versions = [],
+    isLoading: loadingVersions,
+  } = useQuery({
+    queryKey: ["prompt-versions", selectedPrompt?.name],
+    queryFn: async () => {
+      if (!selectedPrompt?.name) return [];
+      const response = await fetch(`/api/prompts/versions?name=${encodeURIComponent(selectedPrompt.name)}`);
       const data = await response.json();
-
-      if (data.success) {
-        setPrompts(data.prompts);
-        return data.prompts;
-      } else {
-        setError(data.error || "Failed to load prompts");
-        return [];
+      if (!data.success) {
+        throw new Error(data.error || "Failed to load versions");
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load prompts");
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  };
+      return data.versions as PromptVersion[];
+    },
+    enabled: showVersionHistory && !!selectedPrompt?.name,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   // Auto-select first prompt when prompts load
   useEffect(() => {
@@ -83,33 +94,6 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
     setSaveResult(null);
     setSelectedVersion(null);
     setShowVersionHistory(false);
-  };
-
-  const fetchVersions = async (promptName: string, forceRefresh = false) => {
-    if (!forceRefresh && versionCache.current[promptName]) {
-      setVersions(versionCache.current[promptName]);
-      setLoadingVersions(false);
-      return;
-    }
-
-    setLoadingVersions(true);
-    try {
-      const response = await fetch(`/api/prompts/versions?name=${encodeURIComponent(promptName)}`);
-      const data = await response.json();
-
-      if (data.success) {
-        versionCache.current[promptName] = data.versions;
-        if (selectedPrompt?.name === promptName) {
-          setVersions(data.versions);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch versions:", err);
-    } finally {
-      if (selectedPrompt?.name === promptName) {
-        setLoadingVersions(false);
-      }
-    }
   };
 
   const handleSave = async () => {
@@ -137,20 +121,17 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
       if (data.success) {
         setSaveResult({ success: true, message: "Prompt saved successfully" });
 
-        // Invalidate version cache for this prompt
-        delete versionCache.current[currentName];
+        // Invalidate queries to refresh data
+        await queryClient.invalidateQueries({ queryKey: ["prompts"] });
+        await queryClient.invalidateQueries({ queryKey: ["prompt-versions", currentName] });
 
-        // Reload prompts and re-select from fresh data
-        const freshPrompts = await loadPrompts();
-        const freshSelected = freshPrompts.find(p => p.name === currentName);
-        if (freshSelected) {
-          setSelectedPrompt(freshSelected);
-        }
-
-        // Refresh versions if panel is open
-        if (showVersionHistory) {
-          await fetchVersions(currentName, true);
-        }
+        // Update selected prompt with new content
+        setSelectedPrompt({
+          ...selectedPrompt,
+          content: editedContent,
+          model: editedModel || null,
+          purpose: editedPurpose || null,
+        });
 
         // Auto-hide success message after 3 seconds
         setTimeout(() => setSaveResult(null), 3000);
@@ -183,21 +164,23 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
       const data = await response.json();
 
       if (data.success) {
-        // Invalidate version cache
-        delete versionCache.current[promptName];
+        // Invalidate queries to refresh data
+        await queryClient.invalidateQueries({ queryKey: ["prompts"] });
+        await queryClient.invalidateQueries({ queryKey: ["prompt-versions", promptName] });
 
-        // Reload prompts and re-select from fresh data
-        const freshPrompts = await loadPrompts();
-        const freshSelected = freshPrompts.find(p => p.name === promptName);
-        if (freshSelected) {
-          setSelectedPrompt(freshSelected);
-          setEditedContent(freshSelected.content);
-          setEditedModel(freshSelected.model || "");
-          setEditedPurpose(freshSelected.purpose || "");
+        // Get the reverted version's content to update the editor
+        const revertedVersion = versions.find(v => v.version_number === versionNumber);
+        if (revertedVersion) {
+          setEditedContent(revertedVersion.content);
+          setEditedModel(revertedVersion.model || "");
+          setEditedPurpose(revertedVersion.purpose || "");
+          setSelectedPrompt({
+            ...selectedPrompt,
+            content: revertedVersion.content,
+            model: revertedVersion.model,
+            purpose: revertedVersion.purpose,
+          });
         }
-
-        // Refresh versions
-        await fetchVersions(promptName, true);
 
         // Clear selected version preview
         setSelectedVersion(null);
@@ -219,9 +202,6 @@ const versionCache = useRef<Record<string, PromptVersion[]>>(Object.create(null)
   };
 
   const toggleVersionHistory = () => {
-    if (!showVersionHistory && selectedPrompt) {
-      fetchVersions(selectedPrompt.name);
-    }
     setShowVersionHistory(!showVersionHistory);
     setSelectedVersion(null);
   };
