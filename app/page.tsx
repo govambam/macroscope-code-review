@@ -532,7 +532,6 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to refresh from GitHub:", error);
       // The error will be shown via forksError from the query
-      throw error;
     } finally {
       setIsRefreshingFromGitHub(false);
     }
