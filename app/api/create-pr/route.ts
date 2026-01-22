@@ -3,8 +3,9 @@ import simpleGit, { SimpleGit } from "simple-git";
 import { Octokit } from "@octokit/rest";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
-// Cache directory for cloned repositories
+// Cache directory for reference repositories (speeds up cloning)
 const REPOS_CACHE_DIR = path.join(process.cwd(), "data", "repos");
 
 // Ensure cache directory exists
@@ -61,15 +62,10 @@ function getShortHash(hash: string): string {
   return hash.substring(0, 7);
 }
 
-// Clean up temporary directory (but not cached repos)
+// Clean up temporary directory
 async function cleanup(tmpDir: string): Promise<void> {
   try {
-    // Don't delete if it's a cached repo directory
-    if (tmpDir && tmpDir.startsWith(REPOS_CACHE_DIR)) {
-      // This is a cached repo, don't delete it
-      return;
-    }
-    if (fs.existsSync(tmpDir)) {
+    if (tmpDir && fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   } catch {
@@ -83,14 +79,14 @@ function wait(ms: number): Promise<void> {
 }
 
 /**
- * Get the path where a repo should be cached
+ * Get the path where a reference repo should be cached
  */
 function getRepoCachePath(owner: string, repo: string): string {
   return path.join(REPOS_CACHE_DIR, owner, repo);
 }
 
 /**
- * Check if a repo is already cloned in the cache
+ * Check if a reference repo exists in the cache
  */
 function isRepoCached(owner: string, repo: string): boolean {
   const repoPath = getRepoCachePath(owner, repo);
@@ -98,33 +94,25 @@ function isRepoCached(owner: string, repo: string): boolean {
 }
 
 /**
- * Ensure repo is cloned and up-to-date
- * Returns the path to the cached repo
+ * Ensure reference repo exists and is up-to-date in the cache.
+ * This is used to speed up subsequent clones via --reference.
  */
-async function ensureRepoCloned(
+async function ensureReferenceRepo(
   owner: string,
   repo: string,
   githubToken: string
-): Promise<string> {
+): Promise<void> {
   const repoPath = getRepoCachePath(owner, repo);
   const cloneUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`;
 
   if (isRepoCached(owner, repo)) {
-    // Repo exists - update it
-    console.log(`[GIT CACHE] Hit: Using cached repo ${owner}/${repo}`);
+    // Reference repo exists - update it
+    console.log(`[GIT CACHE] Hit: Updating reference repo ${owner}/${repo}`);
     const git = simpleGit(repoPath);
-
-    // Fetch all branches and tags
     await git.fetch(["--all", "--tags", "--prune"]);
-
-    // Reset to clean state (in case of previous failed operations)
-    await git.reset(["--hard"]);
-    await git.clean("f", ["-d"]);
-
-    return repoPath;
   } else {
-    // Repo doesn't exist - clone it
-    console.log(`[GIT CACHE] Miss: Cloning fresh ${owner}/${repo}`);
+    // Reference repo doesn't exist - clone it
+    console.log(`[GIT CACHE] Miss: Cloning reference repo ${owner}/${repo}`);
 
     // Ensure owner directory exists
     const ownerDir = path.join(REPOS_CACHE_DIR, owner);
@@ -132,11 +120,54 @@ async function ensureRepoCloned(
       fs.mkdirSync(ownerDir, { recursive: true });
     }
 
-    // Clone the repo
+    // Clone the repo (Bug 1 fix: clean up on failure)
     const git = simpleGit();
-    await git.clone(cloneUrl, repoPath, ["--no-single-branch"]);
+    try {
+      await git.clone(cloneUrl, repoPath, ["--no-single-branch"]);
+    } catch (error) {
+      // Clean up partial clone on failure
+      if (fs.existsSync(repoPath)) {
+        fs.rmSync(repoPath, { recursive: true, force: true });
+      }
+      throw error;
+    }
+  }
+}
 
-    return repoPath;
+/**
+ * Clone repo to an isolated temp directory for working.
+ * Uses --reference to the cached repo for faster cloning.
+ * Each request gets its own temp directory (Bug 2 fix: no race conditions).
+ */
+async function cloneToWorkDir(
+  owner: string,
+  repo: string,
+  githubToken: string
+): Promise<string> {
+  const cloneUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "macroscope-"));
+
+  try {
+    const git = simpleGit();
+
+    // Check if we have a reference repo for faster cloning
+    if (isRepoCached(owner, repo)) {
+      const refPath = getRepoCachePath(owner, repo);
+      console.log(`[GIT CACHE] Fast clone using reference repo`);
+      await git.clone(cloneUrl, tmpDir, ["--no-single-branch", "--reference", refPath]);
+    } else {
+      // No reference repo, do regular clone
+      console.log(`[GIT CACHE] Regular clone (no reference repo available)`);
+      await git.clone(cloneUrl, tmpDir, ["--no-single-branch"]);
+    }
+
+    return tmpDir;
+  } catch (error) {
+    // Clean up temp dir on failure
+    if (fs.existsSync(tmpDir)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+    throw error;
   }
 }
 
@@ -387,22 +418,21 @@ export async function POST(request: NextRequest): Promise<Response> {
             // Continue
           }
 
-          // Step 7: Clone or update repository from cache
+          // Step 7: Clone repository (using cache for speed)
           const isCached = isRepoCached(forkOwner, repoName);
           if (isCached) {
-            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Updating cached repository..." });
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
           } else {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository (this may take a while for large repos)..." });
           }
 
-          // Use cached repo instead of temp directory
-          tmpDir = await ensureRepoCloned(forkOwner, repoName, githubToken);
+          // First, ensure reference repo is up-to-date (for faster cloning)
+          await ensureReferenceRepo(forkOwner, repoName, githubToken);
 
-          if (isCached) {
-            sendStatus({ type: "success", message: "Repository updated from cache" });
-          } else {
-            sendStatus({ type: "success", message: "Repository cloned successfully" });
-          }
+          // Clone to isolated working directory (no race conditions)
+          tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken);
+
+          sendStatus({ type: "success", message: isCached ? "Repository ready (fast clone from cache)" : "Repository cloned successfully" });
 
           const repoGit = simpleGit(tmpDir);
           await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
@@ -412,13 +442,8 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Fetching commits from upstream repository..." });
 
           const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
-          // Add upstream remote (or update if already exists)
-          try {
-            await repoGit.addRemote("upstream", upstreamCloneUrl);
-          } catch {
-            // Remote might already exist from cached repo, update its URL
-            await repoGit.remote(["set-url", "upstream", upstreamCloneUrl]);
-          }
+          // Add upstream remote (fresh clone, so no need for set-url fallback)
+          await repoGit.addRemote("upstream", upstreamCloneUrl);
           await repoGit.fetch(["upstream", "--no-tags"]);
 
           // Fetch specific commits
@@ -838,35 +863,29 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
             // Continue
           }
 
-          // Clone or update repository from cache
+          // Clone repository (using cache for speed)
           const isCachedCommitMode = isRepoCached(forkOwner, repoName);
           if (isCachedCommitMode) {
-            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Updating cached repository..." });
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
           } else {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository..." });
           }
 
-          // Use cached repo instead of temp directory
-          tmpDir = await ensureRepoCloned(forkOwner, repoName, githubToken);
+          // First, ensure reference repo is up-to-date (for faster cloning)
+          await ensureReferenceRepo(forkOwner, repoName, githubToken);
 
-          if (isCachedCommitMode) {
-            sendStatus({ type: "success", message: "Repository updated from cache" });
-          } else {
-            sendStatus({ type: "success", message: "Clone complete" });
-          }
+          // Clone to isolated working directory (no race conditions)
+          tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken);
+
+          sendStatus({ type: "success", message: isCachedCommitMode ? "Repository ready (fast clone from cache)" : "Clone complete" });
 
           const repoGit = simpleGit(tmpDir);
           await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
           await repoGit.addConfig("user.name", "Macroscope PR Creator");
 
           const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
-          // Add upstream remote (or update if already exists)
-          try {
-            await repoGit.addRemote("upstream", upstreamCloneUrl);
-          } catch {
-            // Remote might already exist from cached repo, update its URL
-            await repoGit.remote(["set-url", "upstream", upstreamCloneUrl]);
-          }
+          // Add upstream remote (fresh clone, so no need for set-url fallback)
+          await repoGit.addRemote("upstream", upstreamCloneUrl);
 
           sendStatus({ type: "info", message: "Fetching commits..." });
           await repoGit.fetch(["--all"]);
