@@ -33,10 +33,13 @@ export async function GET() {
       if (dbExists) {
         dbSize = fs.statSync(config.dbPath).size;
         const db = new Database(config.dbPath, { readonly: true });
-        forkCount = (db.prepare("SELECT COUNT(*) as count FROM forks").get() as { count: number })?.count || 0;
-        prCount = (db.prepare("SELECT COUNT(*) as count FROM prs").get() as { count: number })?.count || 0;
-        analysisCount = (db.prepare("SELECT COUNT(*) as count FROM pr_analyses").get() as { count: number })?.count || 0;
-        db.close();
+        try {
+          forkCount = (db.prepare("SELECT COUNT(*) as count FROM forks").get() as { count: number })?.count || 0;
+          prCount = (db.prepare("SELECT COUNT(*) as count FROM prs").get() as { count: number })?.count || 0;
+          analysisCount = (db.prepare("SELECT COUNT(*) as count FROM pr_analyses").get() as { count: number })?.count || 0;
+        } finally {
+          db.close();
+        }
       }
     } catch {
       // Database might not be initialized yet
@@ -137,7 +140,6 @@ function getDirectorySize(dir: string): number {
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
