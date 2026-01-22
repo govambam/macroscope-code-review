@@ -969,17 +969,24 @@ export default function Home() {
     setExpectingCachedResult(hasExistingAnalysis);
     setSelectedPrTitle(prTitle);
     setModalTab("analysis");
+
+    // If there's an existing analysis, set loading state BEFORE opening modal
+    // This prevents the "Ready to Analyze" blip
+    if (hasExistingAnalysis) {
+      setAnalysisLoading(true);
+    }
+
     setShowAnalysisModal(true);
 
-    // If there's an existing analysis, auto-load it
+    // If there's an existing analysis, auto-load it immediately
     if (hasExistingAnalysis) {
-      // Trigger the analysis fetch (which will return cached result)
+      // Use setTimeout(0) to ensure state updates are flushed before triggering fetch
       setTimeout(() => {
         const form = document.getElementById("analysis-form") as HTMLFormElement;
         if (form) {
           form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
         }
-      }, 100);
+      }, 0);
     }
   };
 
@@ -1061,6 +1068,8 @@ export default function Home() {
     setEmailLoading(true);
     setEmailError(null);
     setGeneratedEmail(null);
+    // Switch to email tab immediately to show loading skeleton
+    setModalTab("email");
 
     try {
       const response = await fetch("/api/generate-email", {
@@ -1080,6 +1089,8 @@ export default function Home() {
 
       if (data.success && data.email) {
         setGeneratedEmail(data.email);
+        // Automatically switch to email tab after successful generation
+        setModalTab("email");
       } else {
         setEmailError(data.error || "Failed to generate email");
       }
@@ -1714,15 +1725,29 @@ export default function Home() {
       )}
 
       {/* Analysis Modal */}
-      {showAnalysisModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div
-            className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ${
-              modalExpanded
-                ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
-                : "w-full max-w-4xl max-h-[80vh]"
-            }`}
-          >
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 bg-black/50 z-40 transition-opacity duration-200 ${
+          showAnalysisModal ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={closeAnalysisModal}
+      />
+      {/* Modal Container */}
+      <div
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+          showAnalysisModal ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      >
+        <div
+          className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ease-out ${
+            showAnalysisModal ? "scale-100 opacity-100" : "scale-95 opacity-0"
+          } ${
+            modalExpanded
+              ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
+              : "w-full max-w-4xl h-[700px]"
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-10 py-4 border-b border-border shrink-0">
               <div className="flex-1 min-w-0">
@@ -1781,16 +1806,22 @@ export default function Home() {
               >
                 Analysis
               </button>
-              {generatedEmail && (
+              {(generatedEmail || emailLoading) && (
                 <button
                   onClick={() => setModalTab("email")}
-                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px flex items-center gap-2 ${
                     modalTab === "email"
                       ? "border-primary text-primary"
                       : "border-transparent text-text-secondary hover:text-accent"
                   }`}
                 >
                   Email
+                  {emailLoading && (
+                    <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  )}
                 </button>
               )}
             </div>
@@ -1804,21 +1835,52 @@ export default function Home() {
                     <input type="hidden" value={analysisForkedUrl} />
                   </form>
 
-                  {/* Loading State */}
-                  {analysisLoading && (
-                    <div className="flex flex-col items-center justify-center py-12">
-                      <svg className="animate-spin h-8 w-8 text-primary mb-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      <p className="text-text-secondary">
-                        {expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR..."}
-                      </p>
+                  {/* Loading State - Skeleton Screen */}
+                  {(analysisLoading || (expectingCachedResult && !analysisResult)) && (
+                    <div className="space-y-6 animate-pulse">
+                      {/* Header skeleton */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-2">
+                          <div className="h-6 w-48 bg-gray-200 rounded" />
+                          <div className="h-4 w-32 bg-gray-200 rounded" />
+                        </div>
+                        <div className="h-8 w-24 bg-gray-200 rounded" />
+                      </div>
+
+                      {/* Bug cards skeleton */}
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="h-5 w-16 bg-gray-200 rounded-full" />
+                              <div className="h-5 w-24 bg-gray-200 rounded" />
+                            </div>
+                            <div className="h-4 w-20 bg-gray-200 rounded" />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="h-4 w-full bg-gray-200 rounded" />
+                            <div className="h-4 w-5/6 bg-gray-200 rounded" />
+                            <div className="h-4 w-4/6 bg-gray-200 rounded" />
+                          </div>
+                          <div className="pt-2 border-t border-gray-100">
+                            <div className="h-3 w-40 bg-gray-200 rounded" />
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Loading indicator text */}
+                      <div className="flex items-center justify-center gap-2 text-text-secondary text-sm">
+                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        <span>{expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR..."}</span>
+                      </div>
                     </div>
                   )}
 
                   {/* No Analysis Yet - Show Run Button */}
-                  {!analysisLoading && !analysisResult && (
+                  {!analysisLoading && !analysisResult && !expectingCachedResult && (
                     <div className="text-center py-12">
                       <svg className="mx-auto h-12 w-12 text-text-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -1989,40 +2051,80 @@ export default function Home() {
               ) : (
                 /* Email Tab */
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-accent">Generated Email</h3>
-                    <button
-                      onClick={copyEmail}
-                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary-hover font-medium"
-                    >
-                      {emailCopied ? (
-                        <>
-                          <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                          Copied!
-                        </>
-                      ) : (
-                        <>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                          </svg>
-                          Copy to Clipboard
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <div className="bg-bg-subtle border border-border rounded-lg p-4">
-                    <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
-                      {generatedEmail}
-                    </pre>
-                  </div>
+                  {emailLoading ? (
+                    /* Email Skeleton */
+                    <div className="space-y-4 animate-pulse">
+                      <div className="flex items-center justify-between">
+                        <div className="h-5 w-32 bg-gray-200 rounded" />
+                        <div className="h-5 w-28 bg-gray-200 rounded" />
+                      </div>
+                      <div className="bg-bg-subtle border border-border rounded-lg p-4 space-y-3">
+                        {/* Email content skeleton lines */}
+                        <div className="h-4 w-24 bg-gray-200 rounded" />
+                        <div className="h-4 w-full bg-gray-200 rounded" />
+                        <div className="h-4 w-full bg-gray-200 rounded" />
+                        <div className="h-4 w-3/4 bg-gray-200 rounded" />
+                        <div className="h-4 w-0" /> {/* Spacer */}
+                        <div className="h-4 w-full bg-gray-200 rounded" />
+                        <div className="h-4 w-full bg-gray-200 rounded" />
+                        <div className="h-4 w-5/6 bg-gray-200 rounded" />
+                        <div className="h-4 w-full bg-gray-200 rounded" />
+                        <div className="h-4 w-2/3 bg-gray-200 rounded" />
+                        <div className="h-4 w-0" /> {/* Spacer */}
+                        <div className="h-4 w-full bg-gray-200 rounded" />
+                        <div className="h-4 w-4/5 bg-gray-200 rounded" />
+                        <div className="h-4 w-0" /> {/* Spacer */}
+                        <div className="h-4 w-20 bg-gray-200 rounded" />
+                        <div className="h-4 w-32 bg-gray-200 rounded" />
+                      </div>
+                      {/* Loading indicator */}
+                      <div className="flex items-center justify-center gap-2 text-text-secondary text-sm">
+                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        <span>Generating email...</span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Email Content */
+                    <>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium text-accent">Generated Email</h3>
+                        <button
+                          onClick={copyEmail}
+                          className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary-hover font-medium"
+                        >
+                          {emailCopied ? (
+                            <>
+                              <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                              Copy to Clipboard
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <div className="bg-bg-subtle border border-border rounded-lg p-4">
+                        <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
+                          {generatedEmail}
+                        </pre>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
-      )}
+      {/* End Analysis Modal */}
 
       {/* Create PR Modal */}
       {showCreatePRModal && (
