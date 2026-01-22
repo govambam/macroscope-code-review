@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
-import path from "path";
 import fs from "fs";
+import { config, validateConfig, logConfig } from "../config";
 
 // Types for database records
 export interface ForkRecord {
@@ -81,12 +81,13 @@ export interface PRRecordWithAnalysis extends PRRecord {
   analysis_id: number | null;
 }
 
-// Database path
-const DATA_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "pr-creator.db");
+// Database path - uses config for environment-aware paths
+const DATA_DIR = config.dataDir;
+const DB_PATH = config.dbPath;
 
 // Singleton database instance
 let db: Database.Database | null = null;
+let startupLogged = false;
 
 /**
  * Get or create the database instance.
@@ -94,9 +95,18 @@ let db: Database.Database | null = null;
 function getDatabase(): Database.Database {
   if (db) return db;
 
+  // Log startup info once
+  if (!startupLogged) {
+    console.log("Starting Macroscope PR Creator...");
+    validateConfig();
+    logConfig();
+    startupLogged = true;
+  }
+
   // Ensure data directory exists
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
+    console.log("Created data directory:", DATA_DIR);
   }
 
   db = new Database(DB_PATH);
