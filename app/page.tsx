@@ -131,6 +131,8 @@ export default function Home() {
   };
 
   // React Query for forks - loads from database initially
+  // Note: We don't use initialData from localStorage to avoid hydration mismatch
+  // (server renders empty state, client would render cached data)
   const {
     data: forks = [],
     isLoading: forksLoading,
@@ -140,20 +142,6 @@ export default function Home() {
   } = useQuery({
     queryKey: ["forks"],
     queryFn: () => fetchForks("db"),
-    initialData: () => {
-      // Try to load from localStorage for instant display
-      if (typeof window !== "undefined") {
-        const stored = localStorage.getItem("macroscope-forks");
-        if (stored) {
-          try {
-            return JSON.parse(stored) as ForkRecord[];
-          } catch {
-            return undefined;
-          }
-        }
-      }
-      return undefined;
-    },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 

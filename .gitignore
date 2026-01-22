@@ -42,3 +42,6 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+
+# Cached git repositories
+data/repos/
