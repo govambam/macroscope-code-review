@@ -186,14 +186,6 @@ export function initializeDatabase(): void {
     console.log("Added created_by column to prs table");
   }
 
-  // Migration: Add created_by column to prompt_versions table for user tracking
-  const promptVersionColumns = db.prepare("PRAGMA table_info(prompt_versions)").all() as { name: string }[];
-  const promptVersionColumnNames = promptVersionColumns.map(c => c.name);
-  if (!promptVersionColumnNames.includes("created_by")) {
-    db.exec("ALTER TABLE prompt_versions ADD COLUMN created_by TEXT");
-    console.log("Added created_by column to prompt_versions table");
-  }
-
   // Create PR analyses table
   db.exec(`
     CREATE TABLE IF NOT EXISTS pr_analyses (
@@ -247,6 +239,14 @@ export function initializeDatabase(): void {
       UNIQUE(prompt_name, version_number)
     )
   `);
+
+  // Migration: Add created_by column to prompt_versions table for user tracking
+  const promptVersionColumns = db.prepare("PRAGMA table_info(prompt_versions)").all() as { name: string }[];
+  const promptVersionColumnNames = promptVersionColumns.map(c => c.name);
+  if (!promptVersionColumnNames.includes("created_by")) {
+    db.exec("ALTER TABLE prompt_versions ADD COLUMN created_by TEXT");
+    console.log("Added created_by column to prompt_versions table");
+  }
 
   // Create index for prompt versions
   db.exec(`
