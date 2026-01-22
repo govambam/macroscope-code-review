@@ -82,6 +82,11 @@ function wait(ms: number): Promise<void> {
  * Get the path where a reference repo should be cached
  */
 function getRepoCachePath(owner: string, repo: string): string {
+  // Prevent path traversal attacks
+  if (owner.includes('..') || owner.includes('/') || owner.includes('\\') ||
+      repo.includes('..') || repo.includes('/') || repo.includes('\\')) {
+    throw new Error('Invalid owner or repo name');
+  }
   return path.join(REPOS_CACHE_DIR, owner, repo);
 }
 
