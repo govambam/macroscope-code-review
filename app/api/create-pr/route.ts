@@ -4,9 +4,11 @@ import { Octokit } from "@octokit/rest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { config } from "@/lib/config";
 
 // Cache directory for reference repositories (speeds up cloning)
-const REPOS_CACHE_DIR = path.join(process.cwd(), "data", "repos");
+// Uses config for environment-aware paths (local vs Railway)
+const REPOS_CACHE_DIR = config.reposDir;
 
 // Ensure cache directory exists
 if (!fs.existsSync(REPOS_CACHE_DIR)) {
