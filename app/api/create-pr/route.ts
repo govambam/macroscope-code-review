@@ -4,7 +4,10 @@ import { Octokit } from "@octokit/rest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { config } from "@/lib/config";
+import { saveFork, savePR } from "@/lib/services/database";
 
 // Cache directory for reference repositories (speeds up cloning)
 // Uses config for environment-aware paths (local vs Railway)
@@ -257,6 +260,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       try {
+        // Get session for createdBy tracking
+        const session = await getServerSession(authOptions);
+
         // Step 1: Validate configuration
         sendStatus({ type: "info", step: 1, totalSteps: 10, message: "Checking GitHub configuration..." });
 
@@ -635,6 +641,29 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
 
               if (existingPRs.length > 0) {
                 await cleanup(tmpDir);
+
+                // Save to database so it's immediately available
+                try {
+                  const forkId = saveFork(forkOwner, repoName, forkUrl);
+                  savePR(
+                    forkId,
+                    existingPRs[0].number,
+                    existingPRs[0].title,
+                    existingPRs[0].html_url,
+                    inputPrUrl,
+                    false,
+                    null,
+                    {
+                      originalPrTitle: prTitle,
+                      state: existingPRs[0].state,
+                      commitCount: commitsToApply.length,
+                      createdBy: session?.user?.login || session?.user?.name || null,
+                    }
+                  );
+                } catch (dbError) {
+                  console.error("Failed to save PR to database:", dbError);
+                }
+
                 sendStatus({ type: "success", message: "Found existing PR" });
                 sendResult({
                   success: true,
@@ -655,6 +684,30 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           }
 
           await cleanup(tmpDir);
+
+          // Save to database so it's immediately available
+          try {
+            const newPrNumber = parseInt(newPrUrl.split("/").pop() || "0", 10);
+            const forkId = saveFork(forkOwner, repoName, forkUrl);
+            savePR(
+              forkId,
+              newPrNumber,
+              newPrTitle,
+              newPrUrl,
+              inputPrUrl, // original PR URL
+              false, // has bugs (unknown yet)
+              null, // bug count
+              {
+                originalPrTitle: prTitle,
+                state: "open",
+                commitCount: commitsToApply.length,
+                createdBy: session?.user?.login || session?.user?.name || null,
+              }
+            );
+          } catch (dbError) {
+            console.error("Failed to save PR to database:", dbError);
+            // Continue anyway, GitHub is the source of truth
+          }
 
           sendStatus({ type: "success", message: "Pull request created successfully!" });
           sendResult({
@@ -1077,6 +1130,28 @@ ${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1
 
               if (existingPRs.length > 0) {
                 await cleanup(tmpDir);
+
+                // Save to database
+                try {
+                  const forkId = saveFork(forkOwner, repoName, forkUrl);
+                  savePR(
+                    forkId,
+                    existingPRs[0].number,
+                    existingPRs[0].title,
+                    existingPRs[0].html_url,
+                    null,
+                    false,
+                    null,
+                    {
+                      state: existingPRs[0].state,
+                      commitCount: commitsToApplyInCommitMode.length || 1,
+                      createdBy: session?.user?.login || session?.user?.name || null,
+                    }
+                  );
+                } catch (dbError) {
+                  console.error("Failed to save PR to database:", dbError);
+                }
+
                 sendResult({
                   success: true,
                   message: "A PR already exists for this commit",
@@ -1110,6 +1185,28 @@ ${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1
           }
 
           await cleanup(tmpDir);
+
+          // Save to database so it's immediately available
+          try {
+            const newPrNumber = parseInt(prUrl.split("/").pop() || "0", 10);
+            const forkId = saveFork(forkOwner, repoName, forkUrl);
+            savePR(
+              forkId,
+              newPrNumber,
+              prTitle,
+              prUrl,
+              null, // no original PR URL in commit mode
+              false,
+              null,
+              {
+                state: "open",
+                commitCount: commitsToApplyInCommitMode.length || 1,
+                createdBy: session?.user?.login || session?.user?.name || null,
+              }
+            );
+          } catch (dbError) {
+            console.error("Failed to save PR to database:", dbError);
+          }
 
           let successMessage: string;
           if (commitsToApplyInCommitMode.length > 1 && originalPrNumber) {
