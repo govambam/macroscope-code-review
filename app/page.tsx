@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
 
 type FilterMode = "all" | "mine";
+type InternalFilter = "all" | "internal" | "external";
 type SortMode = "created-desc" | "created-asc" | "updated-desc" | "updated-asc" | "bugs-desc" | "bugs-asc";
 
 type CreateMode = "commit" | "pr";
@@ -203,6 +204,7 @@ export default function Home() {
 
   // Filters state
   const [sortMode, setSortMode] = useState<SortMode>("created-desc");
+  const [internalFilter, setInternalFilter] = useState<InternalFilter>("all");
   const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
 
@@ -733,6 +735,13 @@ export default function Home() {
         .filter((fork) => fork.prs.length > 0);
     }
 
+    // Apply internal/external filter
+    if (internalFilter === "internal") {
+      result = result.filter((fork) => fork.isInternal);
+    } else if (internalFilter === "external") {
+      result = result.filter((fork) => !fork.isInternal);
+    }
+
     // Apply sorting to PRs within each fork
     result = result.map((fork) => ({
       ...fork,
@@ -757,7 +766,7 @@ export default function Home() {
     }));
 
     return result;
-  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin, sortMode]);
+  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin, internalFilter, sortMode]);
 
   const toggleRepoExpand = (repoName: string) => {
     setExpandedRepos((prev) => {
@@ -1367,22 +1376,22 @@ export default function Home() {
               <button
                 onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
                 className={`px-3 py-2 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors flex items-center gap-1.5 ${
-                  (filterMode !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
+                  (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
                 }`}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                 </svg>
                 Filters
-                {(filterMode !== "all" || sortMode !== "created-desc") && (
+                {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
                   <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
-                    {(filterMode !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
+                    {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
                   </span>
                 )}
               </button>
 
               {showFiltersDropdown && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden">
+                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden max-h-[70vh] overflow-y-auto">
                   {/* User Filter */}
                   <div className="p-3 border-b border-border">
                     <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
@@ -1406,6 +1415,43 @@ export default function Home() {
                           className="text-primary focus:ring-primary"
                         />
                         <span className="text-sm text-accent">My PRs Only</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* PR Type Filter */}
+                  <div className="p-3 border-b border-border">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">PR Type</p>
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="internalFilter"
+                          checked={internalFilter === "all"}
+                          onChange={() => setInternalFilter("all")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">All PRs</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="internalFilter"
+                          checked={internalFilter === "internal"}
+                          onChange={() => setInternalFilter("internal")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Internal Only</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="internalFilter"
+                          checked={internalFilter === "external"}
+                          onChange={() => setInternalFilter("external")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Simulated Only</span>
                       </label>
                     </div>
                   </div>
@@ -1478,11 +1524,12 @@ export default function Home() {
                   </div>
 
                   {/* Reset Button */}
-                  {(filterMode !== "all" || sortMode !== "created-desc") && (
+                  {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
                     <div className="p-3 border-t border-border">
                       <button
                         onClick={() => {
                           setFilterMode("all");
+                          setInternalFilter("all");
                           setSortMode("created-desc");
                         }}
                         className="w-full text-sm text-text-secondary hover:text-accent py-1.5 transition-colors"

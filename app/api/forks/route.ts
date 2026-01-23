@@ -241,9 +241,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           const dbPR = dbFork?.prs.find(p => p.pr_number === ghPR.prNumber);
           return {
             ...ghPR,
+            // Preserve database fields that aren't in GitHub data
+            prTitle: dbPR?.pr_title || ghPR.prTitle, // Prefer DB title if available
             updatedAt: dbPR?.updated_at ?? null,
             hasAnalysis: Boolean(dbPR?.has_analysis),
             analysisId: dbPR?.analysis_id ?? null,
+            originalPrUrl: dbPR?.original_pr_url ?? null,
+            createdBy: dbPR?.created_by ?? null,
             isInternal: false,
           };
         }),
