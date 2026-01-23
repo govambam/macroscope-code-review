@@ -1272,7 +1272,20 @@ export default function Home() {
           <div className="flex items-start justify-between mb-6">
             <div>
               <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
-              <p className="mt-2 text-text-secondary">View and analyze pull requests grouped by repository</p>
+              <p className="mt-2 text-text-secondary">
+                View and analyze pull requests grouped by repository
+                <a
+                  href="https://github.com/govambam/macroscope-code-review?tab=readme-ov-file#macroscope-code-review-tool"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-3 inline-flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                  Docs
+                </a>
+              </p>
             </div>
             <div className="flex items-center gap-2">
               {totalSelected > 0 && (
