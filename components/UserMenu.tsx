@@ -74,6 +74,17 @@ export function UserMenu() {
             <p className="text-xs text-gray-500">Signed in as</p>
             <p className="text-sm font-medium text-gray-900 truncate">{username ? `@${username}` : displayName}</p>
           </div>
+          <a
+            href="https://github.com/govambam/macroscope-code-review?tab=readme-ov-file#macroscope-code-review-tool"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full text-sm text-gray-600 hover:text-gray-900 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+            Docs
+          </a>
           <button
             onClick={() => signOut({ callbackUrl: '/auth/signin' })}
             className="w-full text-sm text-gray-600 hover:text-gray-900 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left flex items-center gap-2 cursor-pointer"
