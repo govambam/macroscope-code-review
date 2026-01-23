@@ -87,9 +87,11 @@ const DB_PATH = config.dbPath;
 
 // Singleton database instance
 let db: Database.Database | null = null;
+let initialized = false;
 
 /**
  * Get or create the database instance.
+ * Lazily initializes the schema on first access.
  */
 function getDatabase(): Database.Database {
   if (db) return db;
@@ -108,15 +110,21 @@ function getDatabase(): Database.Database {
   // Use WAL mode for better concurrent access
   db.pragma("journal_mode = WAL");
 
+  // Initialize schema on first connection
+  if (!initialized) {
+    initializeSchema(db);
+    initialized = true;
+  }
+
   return db;
 }
 
 /**
  * Initialize the database schema.
  * Creates tables if they don't exist.
+ * Called automatically on first database access.
  */
-export function initializeDatabase(): void {
-  const db = getDatabase();
+function initializeSchema(db: Database.Database): void {
 
   // Create forks table
   db.exec(`
@@ -882,8 +890,6 @@ export function closeDatabase(): void {
   if (db) {
     db.close();
     db = null;
+    initialized = false;
   }
-}
-
-// Initialize database on module load
-initializeDatabase();
+};
