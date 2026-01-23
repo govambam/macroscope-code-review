@@ -53,33 +53,28 @@ The main dashboard shows all your review activity:
 - **Filters**: Filter by owner (My PRs / All PRs) or type (Internal / Simulated)
 - **Sort**: Sort repositories by name, date, or PR count
 - **Bulk Actions**: Select multiple PRs or repos to delete
-- **Refresh**: Sync with GitHub to get latest bug counts
+- **Refresh**: Sync with GitHub 
 
 ### Analyzing Bugs
 
-After Macroscope reviews a PR, click the **Bugs** count (or the analyze button) to:
+After Macroscope reviews a PR, click the **Run** action (or **View** for PRs that have already be analyzed) to:
 
 1. **View Meaningful Bugs**: AI filters out style suggestions and minor issues
 2. **See Severity Levels**: Bugs are classified as Critical, High, or Medium
 3. **Find Most Impactful**: The single best bug for outreach is highlighted
 4. **Generate Emails**: Create outreach emails with Attio merge fields
 
-### Managing PR Ownership
-
-Click any owner avatar to reassign a PR to a different team member. This helps track who is responsible for following up on each PR analysis.
+Behind the scenes we are using an Opus 4.5 to analyze the bugs found during Macroscope's review. The prompts and models used for analysis can be updated in Settings > Prompts.
 
 ### Tips & Best Practices
 
-- **Wait for Macroscope**: After simulating a PR, wait a few minutes for Macroscope to complete its review before analyzing
+- **Wait for Macroscope**: After simulating a PR, wait a few minutes for Macroscope to complete its review before analyzing. You can check the PR in Github for the Macroscope review status
 - **Check Bug Count**: If bug count shows "-", Macroscope hasn't reviewed yet or found no issues
 - **Use Filters**: Filter by "My PRs" to focus on your assigned reviews
-- **Refresh Regularly**: Click Refresh to sync the latest bug counts from GitHub
-
+- 
 ---
 
 ## Technical Documentation
-
-This section is for developers who want to set up, modify, or understand how the tool works.
 
 ### Tech Stack
 
