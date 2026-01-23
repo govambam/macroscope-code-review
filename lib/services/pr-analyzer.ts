@@ -1,6 +1,7 @@
 import { loadPrompt, getPromptMetadata } from "./prompt-loader";
 import { sendMessageAndParseJSON, DEFAULT_MODEL } from "./anthropic";
 import { Octokit } from "@octokit/rest";
+import { config } from "../config";
 
 /**
  * A review comment from Macroscope bot.
@@ -95,9 +96,9 @@ async function fetchMacroscopeComments(
   repo: string,
   prNumber: number
 ): Promise<MacroscopeComment[]> {
-  const githubToken = process.env.GITHUB_TOKEN;
+  const githubToken = config.githubToken;
   if (!githubToken) {
-    throw new Error("GITHUB_TOKEN is required to fetch PR comments");
+    throw new Error("GITHUB_BOT_TOKEN is required to fetch PR comments");
   }
 
   const octokit = new Octokit({ auth: githubToken });

@@ -6,7 +6,7 @@ import * as path from "path";
 import * as os from "os";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { config } from "@/lib/config";
+import { config, GITHUB_ORG, GITHUB_BOT_NAME, GITHUB_BOT_EMAIL } from "@/lib/config";
 import { saveFork, savePR } from "@/lib/services/database";
 
 // Cache directory for reference repositories (speeds up cloning)
@@ -266,9 +266,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         // Step 1: Validate configuration
         sendStatus({ type: "info", step: 1, totalSteps: 10, message: "Checking GitHub configuration..." });
 
-        const githubToken = process.env.GITHUB_TOKEN;
+        const githubToken = config.githubToken;
         if (!githubToken) {
-          sendError("GitHub token not configured", "GITHUB_TOKEN environment variable is not set");
+          sendError("GitHub token not configured", "GITHUB_BOT_TOKEN environment variable is not set");
           return;
         }
 
@@ -276,14 +276,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         const body = await request.json();
         const { repoUrl, commitHash: specifiedCommitHash, prUrl: inputPrUrl } = body;
 
-        // Initialize Octokit
+        // Initialize Octokit with bot token
         const octokit = new Octokit({ auth: githubToken });
 
-        // Get authenticated user
-        sendStatus({ type: "info", step: 1, totalSteps: 10, message: "Authenticating with GitHub..." });
-        const { data: authenticatedUser } = await octokit.users.getAuthenticated();
-        const forkOwner = authenticatedUser.login;
-        sendStatus({ type: "success", message: `Authenticated as @${forkOwner}` });
+        // Use organization as fork destination (not personal account)
+        const forkOwner = GITHUB_ORG;
+        sendStatus({ type: "info", step: 1, totalSteps: 10, message: `Using organization: ${forkOwner}` });
+        sendStatus({ type: "success", message: `Fork destination: ${forkOwner}` });
 
         // Determine which mode we're in
         if (inputPrUrl) {
@@ -423,9 +422,10 @@ export async function POST(request: NextRequest): Promise<Response> {
             await octokit.repos.createFork({
               owner: upstreamOwner,
               repo: repoName,
+              organization: GITHUB_ORG, // Fork to organization instead of personal account
             });
             forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-            sendStatus({ type: "info", message: "Fork created, waiting for GitHub to process..." });
+            sendStatus({ type: "info", message: `Fork created in ${GITHUB_ORG}, waiting for GitHub to process...` });
             await wait(3000);
             sendStatus({ type: "success", message: "Fork is ready" });
           }
@@ -489,8 +489,8 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "success", message: isCached ? "Repository ready (fast clone from cache)" : "Repository cloned successfully" });
 
           const repoGit = simpleGit(tmpDir);
-          await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
-          await repoGit.addConfig("user.name", "Macroscope PR Creator");
+          await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);
+          await repoGit.addConfig("user.name", GITHUB_BOT_NAME);
 
           // Add upstream remote and fetch
           sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Fetching commits from upstream repository..." });
@@ -766,9 +766,10 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
             await octokit.repos.createFork({
               owner: upstreamOwner,
               repo: repoName,
+              organization: GITHUB_ORG, // Fork to organization instead of personal account
             });
             forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-            sendStatus({ type: "info", message: "Waiting for fork to be ready..." });
+            sendStatus({ type: "info", message: `Fork created in ${GITHUB_ORG}, waiting for it to be ready...` });
             await wait(3000);
             sendStatus({ type: "success", message: "Fork created" });
           }
@@ -981,8 +982,8 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           sendStatus({ type: "success", message: isCachedCommitMode ? "Repository ready (fast clone from cache)" : "Clone complete" });
 
           const repoGit = simpleGit(tmpDir);
-          await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
-          await repoGit.addConfig("user.name", "Macroscope PR Creator");
+          await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);
+          await repoGit.addConfig("user.name", GITHUB_BOT_NAME);
 
           const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
           // Add upstream remote (fresh clone, so no need for set-url fallback)

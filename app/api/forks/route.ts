@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
+import { config, GITHUB_ORG } from "@/lib/config";
 import {
   syncForksFromGitHub,
   getAllForksWithPRs,
@@ -132,28 +133,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Default: Fetch from GitHub
   try {
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = config.githubToken;
     if (!githubToken) {
       return NextResponse.json(
-        { success: false, error: "GitHub token not configured" },
+        { success: false, error: "GitHub bot token not configured" },
         { status: 500 }
       );
     }
 
     const octokit = new Octokit({ auth: githubToken });
 
-    // Get authenticated user
-    const { data: user } = await octokit.users.getAuthenticated();
+    // Use organization as the owner for all forks
+    const orgOwner = GITHUB_ORG;
 
-    // Get all user's repos that are forks
-    const { data: repos } = await octokit.repos.listForAuthenticatedUser({
-      type: "owner",
+    // Get all org's repos that are forks
+    const { data: repos } = await octokit.repos.listForOrg({
+      org: orgOwner,
+      type: "forks",
       sort: "created",
       direction: "desc",
       per_page: 100,
     });
 
-    const forks = repos.filter((repo) => repo.fork);
+    const forks = repos;
 
     // For each fork, get PRs that look like review PRs
     const forkRecords: ForkRecord[] = [];
@@ -162,7 +164,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const fork of forks) {
       try {
         const { data: prs } = await octokit.pulls.list({
-          owner: user.login,
+          owner: orgOwner,
           repo: fork.name,
           state: "all",
           per_page: 100,
@@ -182,7 +184,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           for (const pr of reviewPRs) {
             const bugResult = await countMacroscopeBugs(
               octokit,
-              user.login,
+              orgOwner,
               fork.name,
               pr.number
             );
@@ -286,7 +288,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       forks: allForks,
-      username: user.login,
+      username: orgOwner,
       source: "github",
       debug: allDebugInfo,
     });
@@ -302,16 +304,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // DELETE - Delete selected forks and PRs
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   try {
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = config.githubToken;
     if (!githubToken) {
       return NextResponse.json(
-        { success: false, error: "GitHub token not configured" },
+        { success: false, error: "GitHub bot token not configured" },
         { status: 500 }
       );
     }
 
     const octokit = new Octokit({ auth: githubToken });
-    const { data: user } = await octokit.users.getAuthenticated();
+    const orgOwner = GITHUB_ORG;
 
     const body = await request.json();
     const { repos, prs } = body as {
@@ -334,7 +336,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       try {
         // Close the PR
         await octokit.pulls.update({
-          owner: user.login,
+          owner: orgOwner,
           repo: pr.repo,
           pull_number: pr.prNumber,
           state: "closed",
@@ -343,7 +345,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
         // Delete the branch
         try {
           await octokit.git.deleteRef({
-            owner: user.login,
+            owner: orgOwner,
             repo: pr.repo,
             ref: `heads/${pr.branchName}`,
           });
@@ -355,7 +357,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 
         // Also delete from database
         try {
-          const fork = getFork(user.login, pr.repo);
+          const fork = getFork(orgOwner, pr.repo);
           if (fork) {
             deletePR(fork.id, pr.prNumber);
           }
@@ -372,14 +374,14 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     for (const repo of repos) {
       try {
         await octokit.repos.delete({
-          owner: user.login,
+          owner: orgOwner,
           repo: repo,
         });
         results.deletedRepos.push(repo);
 
         // Also delete from database
         try {
-          deleteFork(user.login, repo);
+          deleteFork(orgOwner, repo);
         } catch (dbError) {
           console.error("Failed to delete fork from database:", dbError);
         }

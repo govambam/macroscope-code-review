@@ -14,6 +14,11 @@ const isDevelopment = !isProduction;
 // - Local: Use ./data relative to project root
 const defaultDataDir = isRailway ? "/data" : path.join(process.cwd(), "data");
 
+// GitHub organization and bot configuration
+export const GITHUB_ORG = "macroscope-gtm";
+export const GITHUB_BOT_NAME = "macroscope-gtm-bot";
+export const GITHUB_BOT_EMAIL = "bot@macroscope-gtm.github.io";
+
 export const config = {
   // Environment detection
   isRailway,
@@ -32,8 +37,13 @@ export const config = {
     return process.env.REPOS_DIR || path.join(this.dataDir, "repos");
   },
 
+  // GitHub organization
+  githubOrg: GITHUB_ORG,
+  githubBotName: GITHUB_BOT_NAME,
+  githubBotEmail: GITHUB_BOT_EMAIL,
+
   // API keys
-  githubToken: process.env.GITHUB_BOT_TOKEN || process.env.GITHUB_TOKEN,
+  githubToken: process.env.GITHUB_BOT_TOKEN,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
 
   // Auth

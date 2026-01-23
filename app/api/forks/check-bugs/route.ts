@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
+import { config, GITHUB_ORG } from "@/lib/config";
 import { getFork, getPR, updatePRBugCount } from "@/lib/services/database";
 
 // POST - Check bug count for a single PR
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = config.githubToken;
     if (!githubToken) {
       return NextResponse.json(
-        { success: false, error: "GitHub token not configured" },
+        { success: false, error: "GitHub bot token not configured" },
         { status: 500 }
       );
     }
 
     const octokit = new Octokit({ auth: githubToken });
-    const { data: user } = await octokit.users.getAuthenticated();
+    const orgOwner = GITHUB_ORG;
 
     const body = await request.json();
     const { repoName, prNumber } = body as {
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Fetch review comments for this PR (comments on specific lines of code)
     const { data: reviewComments } = await octokit.pulls.listReviewComments({
-      owner: user.login,
+      owner: orgOwner,
       repo: repoName,
       pull_number: prNumber,
       per_page: 100,
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Save bug count to database with timestamp
     try {
-      const fork = getFork(user.login, repoName);
+      const fork = getFork(orgOwner, repoName);
       if (fork) {
         const pr = getPR(fork.id, prNumber);
         if (pr) {

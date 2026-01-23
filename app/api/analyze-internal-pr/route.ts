@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { config } from "@/lib/config";
 import {
   saveFork,
   savePR,
@@ -58,10 +59,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { owner, repo, prNumber } = parsed;
 
     // Check for GitHub token
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = config.githubToken;
     if (!githubToken) {
       return NextResponse.json(
-        { success: false, error: "GitHub token not configured" },
+        { success: false, error: "GitHub bot token not configured" },
         { status: 500 }
       );
     }

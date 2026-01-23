@@ -131,10 +131,11 @@ cp .env.local.example .env.local
 Edit `.env.local`:
 
 ```env
-# GitHub API Token (for API operations)
-GITHUB_TOKEN=ghp_your_token_here
+# GitHub Bot Token (for macroscope-gtm-bot account)
+# All forks and PRs are created under the macroscope-gtm organization
+GITHUB_BOT_TOKEN=ghp_your_bot_token_here
 
-# GitHub OAuth (for authentication)
+# GitHub OAuth (for user authentication)
 GITHUB_CLIENT_ID=your_client_id
 GITHUB_CLIENT_SECRET=your_client_secret
 
@@ -226,7 +227,7 @@ Environment variables needed in production:
 ### Troubleshooting
 
 #### "GitHub token not configured"
-Ensure `GITHUB_TOKEN` is set in `.env.local` and restart the dev server.
+Ensure `GITHUB_BOT_TOKEN` is set in `.env.local` and restart the dev server.
 
 #### "Cherry-pick failed" / Merge conflicts
 The commit cannot be cleanly applied. Try:

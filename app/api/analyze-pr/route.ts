@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { config } from "@/lib/config";
 import {
   analyzePR,
   extractOriginalPRUrl,
@@ -143,12 +144,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // No cached result - need to fetch from GitHub and run analysis
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = config.githubToken;
     if (!githubToken) {
       return NextResponse.json<AnalyzeResponse>(
         {
           success: false,
-          error: "GITHUB_TOKEN is not configured. Required to fetch PR details.",
+          error: "GITHUB_BOT_TOKEN is not configured. Required to fetch PR details.",
         },
         { status: 500 }
       );
