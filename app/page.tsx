@@ -9,7 +9,7 @@ import { UserMenu } from "@/components/UserMenu";
 
 type FilterMode = "all" | "mine";
 type InternalFilter = "all" | "internal" | "external";
-type SortMode = "created-desc" | "created-asc" | "updated-desc" | "updated-asc" | "bugs-desc" | "bugs-asc";
+type SortMode = "alpha-asc" | "alpha-desc" | "created-desc" | "created-asc" | "prs-desc" | "prs-asc";
 
 type CreateMode = "commit" | "pr";
 
@@ -742,28 +742,25 @@ export default function Home() {
       result = result.filter((fork) => !fork.isInternal);
     }
 
-    // Apply sorting to PRs within each fork
-    result = result.map((fork) => ({
-      ...fork,
-      prs: [...fork.prs].sort((a, b) => {
-        switch (sortMode) {
-          case "created-desc":
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          case "created-asc":
-            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-          case "updated-desc":
-            return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
-          case "updated-asc":
-            return new Date(a.updatedAt || a.createdAt).getTime() - new Date(b.updatedAt || b.createdAt).getTime();
-          case "bugs-desc":
-            return (b.macroscopeBugs ?? -1) - (a.macroscopeBugs ?? -1);
-          case "bugs-asc":
-            return (a.macroscopeBugs ?? Infinity) - (b.macroscopeBugs ?? Infinity);
-          default:
-            return 0;
-        }
-      }),
-    }));
+    // Apply sorting to repos
+    result = [...result].sort((a, b) => {
+      switch (sortMode) {
+        case "alpha-asc":
+          return a.repoName.localeCompare(b.repoName);
+        case "alpha-desc":
+          return b.repoName.localeCompare(a.repoName);
+        case "created-desc":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "created-asc":
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "prs-desc":
+          return b.prs.length - a.prs.length;
+        case "prs-asc":
+          return a.prs.length - b.prs.length;
+        default:
+          return 0;
+      }
+    });
 
     return result;
   }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin, internalFilter, sortMode]);
@@ -1457,8 +1454,8 @@ export default function Home() {
                   </div>
 
                   {/* Sort Options */}
-                  <div className="p-3">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort By</p>
+                  <div className="p-3 border-b border-border">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort Repos By</p>
                     <div className="space-y-1">
                       <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
                         <input
@@ -1468,7 +1465,7 @@ export default function Home() {
                           onChange={() => setSortMode("created-desc")}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-sm text-accent">Created (Newest)</span>
+                        <span className="text-sm text-accent">Newest First</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
                         <input
@@ -1478,47 +1475,47 @@ export default function Home() {
                           onChange={() => setSortMode("created-asc")}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-sm text-accent">Created (Oldest)</span>
+                        <span className="text-sm text-accent">Oldest First</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
                         <input
                           type="radio"
                           name="sortMode"
-                          checked={sortMode === "updated-desc"}
-                          onChange={() => setSortMode("updated-desc")}
+                          checked={sortMode === "alpha-asc"}
+                          onChange={() => setSortMode("alpha-asc")}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-sm text-accent">Updated (Newest)</span>
+                        <span className="text-sm text-accent">A → Z</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
                         <input
                           type="radio"
                           name="sortMode"
-                          checked={sortMode === "updated-asc"}
-                          onChange={() => setSortMode("updated-asc")}
+                          checked={sortMode === "alpha-desc"}
+                          onChange={() => setSortMode("alpha-desc")}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-sm text-accent">Updated (Oldest)</span>
+                        <span className="text-sm text-accent">Z → A</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
                         <input
                           type="radio"
                           name="sortMode"
-                          checked={sortMode === "bugs-desc"}
-                          onChange={() => setSortMode("bugs-desc")}
+                          checked={sortMode === "prs-desc"}
+                          onChange={() => setSortMode("prs-desc")}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-sm text-accent">Bugs (High to Low)</span>
+                        <span className="text-sm text-accent">Most PRs</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
                         <input
                           type="radio"
                           name="sortMode"
-                          checked={sortMode === "bugs-asc"}
-                          onChange={() => setSortMode("bugs-asc")}
+                          checked={sortMode === "prs-asc"}
+                          onChange={() => setSortMode("prs-asc")}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-sm text-accent">Bugs (Low to High)</span>
+                        <span className="text-sm text-accent">Fewest PRs</span>
                       </label>
                     </div>
                   </div>
