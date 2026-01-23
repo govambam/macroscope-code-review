@@ -34,7 +34,6 @@ export const config = {
 
   // API keys
   githubToken: process.env.GITHUB_BOT_TOKEN || process.env.GITHUB_TOKEN,
-  linearApiKey: process.env.LINEAR_API_KEY,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
 
   // Auth
