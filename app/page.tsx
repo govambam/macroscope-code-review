@@ -553,7 +553,7 @@ export default function Home() {
       console.log("Bug check response:", data);
 
       if (data.success) {
-        // Update forks cache and localStorage
+        // Optimistic update for immediate UI feedback
         queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
           if (!prevForks) return prevForks;
           const updatedForks = prevForks.map((fork) => {
@@ -573,6 +573,8 @@ export default function Home() {
           localStorage.setItem("macroscope-forks", JSON.stringify(updatedForks));
           return updatedForks;
         });
+        // Refetch to get complete updated data (updatedAt, etc.)
+        queryClient.invalidateQueries({ queryKey: ["forks"] });
       }
     } catch (error) {
       console.error("Failed to check bugs:", error);
@@ -596,7 +598,7 @@ export default function Home() {
       const prKey = `${repoName}:${prNumber}`;
       checkedPRsRef.current.add(prKey);
 
-      // Create the new PR record
+      // Create the new PR record for optimistic update
       const newPR: PRRecord = {
         prNumber,
         prUrl,
@@ -608,7 +610,7 @@ export default function Home() {
         macroscopeBugs: undefined, // Will show refresh icon, user can check manually later
       };
 
-      // Update forks cache
+      // Optimistic update for immediate UI feedback
       queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) => {
         let updatedForks = [...(prevForks || [])];
         const existingForkIndex = updatedForks.findIndex((f) => f.repoName === repoName);
@@ -638,6 +640,9 @@ export default function Home() {
         localStorage.setItem("macroscope-forks", JSON.stringify(updatedForks));
         return updatedForks;
       });
+
+      // Refetch from database to get complete data (createdBy, updatedAt, etc.)
+      queryClient.invalidateQueries({ queryKey: ["forks"] });
     },
     [queryClient]
   );
@@ -946,6 +951,8 @@ export default function Home() {
           localStorage.setItem("macroscope-forks", JSON.stringify(updatedForks));
           return updatedForks;
         });
+        // Refetch to get complete updated data from database
+        queryClient.invalidateQueries({ queryKey: ["forks"] });
       }
     } catch (error) {
       setAnalysisResult({
