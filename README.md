@@ -6,13 +6,11 @@ A web application for reviewing code with [Macroscope](https://macroscope.dev). 
 
 ## User Guide
 
-This section is for Macroscope team members who want to use the tool.
-
 ### Getting Started
 
 1. **Sign in** with your GitHub account (must be a member of the macroscope-gtm organization)
 2. Choose your workflow based on where the PR is:
-   - **External PR**: Use "Import PR" to simulate a PR from any public repository
+   - **External PR**: Use "Simulate PR" to simulate a PR from any public repository
    - **Internal PR**: Use "Import PR" to analyze a PR where Macroscope is already installed
 
 ### Importing a PR for Review
@@ -21,16 +19,15 @@ This section is for Macroscope team members who want to use the tool.
 
 Use this when you want Macroscope to review a PR from a repository where Macroscope isn't installed.
 
-1. Click **Import PR** in the top-right corner
-2. Select the **Recreate PR** tab
-3. Paste the GitHub PR URL (e.g., `https://github.com/owner/repo/pull/123`)
+1. Click **Simulate PR** in the top-right corner
+2. Paste the GitHub PR URL (e.g., `https://github.com/owner/repo/pull/123`)
 4. Click **Create Pull Request**
 5. Wait for the simulation to complete (you'll see real-time progress)
 6. Once done, Macroscope will automatically review the PR in your fork
 
 **What happens behind the scenes:** The tool forks the repository to your GitHub account and recreates the PR commits, allowing Macroscope to review it.
 
-#### Internal Repositories (Direct Analysis)
+#### Internal Repositories 
 
 Use this when Macroscope has already reviewed a PR in one of your repositories.
 
