@@ -71,7 +71,6 @@ Behind the scenes we are using an Opus 4.5 to analyze the bugs found during Macr
 - **Wait for Macroscope**: After simulating a PR, wait a few minutes for Macroscope to complete its review before analyzing. You can check the PR in Github for the Macroscope review status
 - **Check Bug Count**: If bug count shows "-", Macroscope hasn't reviewed yet or found no issues
 - **Use Filters**: Filter by "My PRs" to focus on your assigned reviews
-- 
 ---
 
 ## Technical Documentation
@@ -253,6 +252,4 @@ npm run lint     # Run linter
 
 ---
 
-## License
 
-MIT
