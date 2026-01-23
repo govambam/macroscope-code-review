@@ -439,6 +439,20 @@ export function updatePROriginalInfo(prId: number, originalPrUrl: string, origin
 }
 
 /**
+ * Update the owner (created_by) of a PR.
+ */
+export function updatePROwner(prId: number, owner: string): void {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE prs SET created_by = ?, updated_at = ? WHERE id = ?
+  `);
+
+  stmt.run(owner, now, prId);
+}
+
+/**
  * Save a PR analysis.
  * Returns the analysis ID.
  */

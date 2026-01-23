@@ -98,6 +98,11 @@ interface ForkRecord {
   prs: PRRecord[];
 }
 
+interface OrgUser {
+  login: string;
+  avatar_url: string;
+}
+
 interface Selection {
   repos: Set<string>;
   prs: Set<string>; // Format: "repoName:prNumber"
@@ -158,6 +163,54 @@ export default function Home() {
     queryFn: () => fetchForks("db"),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
+
+  // Fetch organization users for owner dropdown
+  const { data: orgUsers = [] } = useQuery<OrgUser[]>({
+    queryKey: ["orgUsers"],
+    queryFn: async () => {
+      const response = await fetch("/api/users");
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+      return data.users;
+    },
+    staleTime: 30 * 60 * 1000, // 30 minutes - users don't change often
+  });
+
+  // Owner dropdown state
+  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState<string | null>(null); // PR URL of open dropdown
+  const ownerDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close owner dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (ownerDropdownRef.current && !ownerDropdownRef.current.contains(event.target as Node)) {
+        setOwnerDropdownOpen(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Handle owner change
+  const handleOwnerChange = async (prUrl: string, newOwner: string) => {
+    try {
+      const response = await fetch("/api/prs/owner", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prUrl, owner: newOwner }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        console.error("Failed to update owner:", data.error);
+        return;
+      }
+      // Refresh forks to show updated owner
+      queryClient.invalidateQueries({ queryKey: ["forks"] });
+      setOwnerDropdownOpen(null);
+    } catch (error) {
+      console.error("Error updating owner:", error);
+    }
+  };
 
   const forksError = forksQueryError ? (forksQueryError as Error).message : null;
   const [isRefreshingFromGitHub, setIsRefreshingFromGitHub] = useState(false);
@@ -1702,7 +1755,7 @@ export default function Home() {
                                 <div className="w-[100px] text-center">Bugs</div>
                                 <div className="w-[140px] text-center">Created</div>
                                 <div className="w-[140px] text-center">Updated</div>
-                                <div className="w-[100px] text-center">By</div>
+                                <div className="w-[100px] text-center">Owner</div>
                               </div>
 
                               {/* PR Rows */}
@@ -1798,25 +1851,74 @@ export default function Home() {
                                         {pr.updatedAt ? formatDate(pr.updatedAt) : "-"}
                                       </div>
 
-                                      {/* Created By */}
-                                      <div className="w-[100px] flex-shrink-0 flex justify-center">
-                                        {pr.createdBy ? (
-                                          <a
-                                            href={`https://github.com/${pr.createdBy}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            title={`@${pr.createdBy}`}
-                                          >
+                                      {/* Owner */}
+                                      <div className="w-[100px] flex-shrink-0 flex justify-center relative">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setOwnerDropdownOpen(ownerDropdownOpen === pr.prUrl ? null : pr.prUrl);
+                                          }}
+                                          className="flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary/30 rounded-full transition-all"
+                                          title={pr.createdBy ? `@${pr.createdBy} - Click to change owner` : "Click to assign owner"}
+                                        >
+                                          {pr.createdBy ? (
                                             <Image
                                               src={`https://avatars.githubusercontent.com/${pr.createdBy}`}
                                               alt={pr.createdBy}
                                               width={24}
                                               height={24}
-                                              className="rounded-full hover:ring-2 hover:ring-primary/30 transition-all"
+                                              className="rounded-full"
+                                              unoptimized
                                             />
-                                          </a>
-                                        ) : (
-                                          <span className="text-sm text-gray-400">-</span>
+                                          ) : (
+                                            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center">
+                                              <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                              </svg>
+                                            </div>
+                                          )}
+                                        </button>
+
+                                        {/* Owner Dropdown */}
+                                        {ownerDropdownOpen === pr.prUrl && (
+                                          <div
+                                            ref={ownerDropdownRef}
+                                            className="absolute top-full mt-1 right-0 w-48 bg-white border border-border rounded-lg shadow-lg z-30 max-h-60 overflow-y-auto"
+                                          >
+                                            <div className="p-2">
+                                              <p className="text-xs text-text-muted px-2 py-1 font-medium">Assign Owner</p>
+                                              {orgUsers.map((user) => (
+                                                <button
+                                                  key={user.login}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleOwnerChange(pr.prUrl, user.login);
+                                                  }}
+                                                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-subtle transition-colors ${
+                                                    pr.createdBy === user.login ? "bg-primary/10" : ""
+                                                  }`}
+                                                >
+                                                  <Image
+                                                    src={user.avatar_url}
+                                                    alt={user.login}
+                                                    width={20}
+                                                    height={20}
+                                                    className="rounded-full"
+                                                    unoptimized
+                                                  />
+                                                  <span className="text-sm text-accent truncate">@{user.login}</span>
+                                                  {pr.createdBy === user.login && (
+                                                    <svg className="w-4 h-4 text-primary ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                  )}
+                                                </button>
+                                              ))}
+                                              {orgUsers.length === 0 && (
+                                                <p className="text-sm text-text-muted px-2 py-2">Loading users...</p>
+                                              )}
+                                            </div>
+                                          </div>
                                         )}
                                       </div>
                                     </div>
