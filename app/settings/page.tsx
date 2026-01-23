@@ -259,6 +259,7 @@ export default function SettingsPage() {
             height={28}
             className="h-7 w-auto"
             priority
+            unoptimized
           />
         </div>
 

@@ -1137,6 +1137,7 @@ export default function Home() {
             height={28}
             className="h-7 w-auto"
             priority
+            unoptimized
           />
         </div>
 
@@ -2347,7 +2348,7 @@ export default function Home() {
                       {result.prUrl && (
                         <div className="mt-4 flex gap-3">
                           <a href={result.prUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors">
-                            <Image src="/GitHub_Invertocat_White.svg" alt="" width={16} height={16} className="h-4 w-4" />
+                            <Image src="/GitHub_Invertocat_White.svg" alt="" width={16} height={16} className="h-4 w-4" unoptimized />
                             View in GitHub
                           </a>
                           <button
