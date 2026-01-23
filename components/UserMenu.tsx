@@ -2,9 +2,23 @@
 
 import { useSession, signOut } from 'next-auth/react'
 import Image from 'next/image'
+import { useState, useRef, useEffect } from 'react'
 
 export function UserMenu() {
   const { data: session } = useSession()
+  const [isOpen, setIsOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   if (!session?.user) return null
 
@@ -12,24 +26,28 @@ export function UserMenu() {
   const username = session.user.login || session.user.email?.split('@')[0] || ''
 
   return (
-    <div className="border-t border-gray-200 p-4 mt-auto">
-      <div className="flex items-center gap-3 mb-3">
+    <div className="border-t border-gray-200 p-4 mt-auto relative" ref={menuRef}>
+      {/* User Info Button */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+      >
         {session.user.image ? (
           <Image
             src={session.user.image}
             alt={displayName}
-            width={40}
-            height={40}
+            width={36}
+            height={36}
             className="rounded-full ring-2 ring-gray-100"
           />
         ) : (
-          <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center">
             <span className="text-indigo-600 font-semibold text-sm">
               {displayName.charAt(0).toUpperCase()}
             </span>
           </div>
         )}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 text-left">
           <p className="text-sm font-medium text-gray-900 truncate">
             {displayName}
           </p>
@@ -39,16 +57,34 @@ export function UserMenu() {
             </p>
           )}
         </div>
-      </div>
-      <button
-        onClick={() => signOut({ callbackUrl: '/auth/signin' })}
-        className="w-full text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md hover:bg-gray-100 transition-colors text-left flex items-center gap-2 cursor-pointer"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
         </svg>
-        Sign Out
       </button>
+
+      {/* Dropdown Menu */}
+      {isOpen && (
+        <div className="absolute bottom-full left-4 right-4 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="p-3 border-b border-gray-100">
+            <p className="text-xs text-gray-500">Signed in as</p>
+            <p className="text-sm font-medium text-gray-900 truncate">{username ? `@${username}` : displayName}</p>
+          </div>
+          <button
+            onClick={() => signOut({ callbackUrl: '/auth/signin' })}
+            className="w-full text-sm text-gray-600 hover:text-gray-900 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left flex items-center gap-2 cursor-pointer"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sign Out
+          </button>
+        </div>
+      )}
     </div>
   )
 }

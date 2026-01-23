@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
 
 type FilterMode = "all" | "mine";
+type SortMode = "created-desc" | "created-asc" | "updated-desc" | "updated-asc" | "bugs-desc" | "bugs-asc";
 
 type CreateMode = "commit" | "pr";
 
@@ -199,6 +200,22 @@ export default function Home() {
   const [isInternalPR, setIsInternalPR] = useState(true);
   const [analyzeLoading, setAnalyzeLoading] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+
+  // Filters state
+  const [sortMode, setSortMode] = useState<SortMode>("created-desc");
+  const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
+  const filtersRef = useRef<HTMLDivElement>(null);
+
+  // Close filters dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) {
+        setShowFiltersDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Mark forks as loaded when data is available
   useEffect(() => {
@@ -716,8 +733,31 @@ export default function Home() {
         .filter((fork) => fork.prs.length > 0);
     }
 
+    // Apply sorting to PRs within each fork
+    result = result.map((fork) => ({
+      ...fork,
+      prs: [...fork.prs].sort((a, b) => {
+        switch (sortMode) {
+          case "created-desc":
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          case "created-asc":
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          case "updated-desc":
+            return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+          case "updated-asc":
+            return new Date(a.updatedAt || a.createdAt).getTime() - new Date(b.updatedAt || b.createdAt).getTime();
+          case "bugs-desc":
+            return (b.macroscopeBugs ?? -1) - (a.macroscopeBugs ?? -1);
+          case "bugs-asc":
+            return (a.macroscopeBugs ?? Infinity) - (b.macroscopeBugs ?? Infinity);
+          default:
+            return 0;
+        }
+      }),
+    }));
+
     return result;
-  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin]);
+  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin, sortMode]);
 
   const toggleRepoExpand = (repoName: string) => {
     setExpandedRepos((prev) => {
@@ -1146,9 +1186,9 @@ export default function Home() {
           <div className="space-y-1">
             <div className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg bg-primary/10 text-primary">
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
-              My Repos
+              PR Reviews
             </div>
             <Link
               href="/settings"
@@ -1172,26 +1212,15 @@ export default function Home() {
           {/* Page Header */}
           <div className="flex items-start justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-semibold text-accent tracking-tight">My Repos</h1>
-              <p className="mt-2 text-text-secondary">Manage your repositories and analyze PRs</p>
-              {/* Filter Dropdown */}
-              <div className="mt-3">
-                <select
-                  value={filterMode}
-                  onChange={(e) => setFilterMode(e.target.value as FilterMode)}
-                  className="text-sm border border-border rounded-lg px-3 py-1.5 bg-white text-accent focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                >
-                  <option value="all">All Users</option>
-                  <option value="mine">My PRs Only</option>
-                </select>
-              </div>
+              <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
+              <p className="mt-2 text-text-secondary">View and analyze pull requests grouped by repository</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {totalSelected > 0 && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   disabled={deleteLoading}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-error hover:bg-error/90 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                 >
                   {deleteLoading ? (
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -1203,27 +1232,27 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   )}
-                  Delete Selected
+                  Delete
                 </button>
               )}
               <button
                 onClick={() => setShowAnalyzeCard(!showAnalyzeCard)}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 font-medium rounded-lg transition-colors ${
+                className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   showAnalyzeCard
                     ? "bg-primary text-white"
                     : "bg-white border border-border text-accent hover:bg-bg-subtle"
                 }`}
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                Analyze PR
+                Import PR
               </button>
               <button
                 onClick={openCreatePRModal}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors"
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                 </svg>
                 Simulate PR
@@ -1231,11 +1260,11 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Analyze PR Card */}
+          {/* Import PR Card */}
           {showAnalyzeCard && (
             <div className="mb-6 bg-white rounded-xl border border-border shadow-sm overflow-hidden">
               <div className="p-6">
-                <h3 className="text-lg font-semibold text-accent mb-4">Analyze PR</h3>
+                <h3 className="text-lg font-semibold text-accent mb-4">Import PR</h3>
 
                 {/* PR URL Input */}
                 <div className="mb-4">
@@ -1284,7 +1313,7 @@ export default function Home() {
                   <button
                     onClick={analyzeInternalPR}
                     disabled={analyzeLoading || !analyzeInternalUrl.trim()}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {analyzeLoading ? (
                       <>
@@ -1292,14 +1321,14 @@ export default function Home() {
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                         </svg>
-                        Analyzing...
+                        Importing...
                       </>
                     ) : (
                       <>
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                         </svg>
-                        Analyze PR
+                        Import PR
                       </>
                     )}
                   </button>
@@ -1309,7 +1338,7 @@ export default function Home() {
                       setAnalyzeInternalUrl("");
                       setAnalyzeError(null);
                     }}
-                    className="px-4 py-2.5 text-text-secondary hover:text-accent font-medium rounded-lg transition-colors"
+                    className="px-3 py-2 text-text-secondary hover:text-accent text-sm font-medium rounded-lg transition-colors"
                   >
                     Cancel
                   </button>
@@ -1318,24 +1347,158 @@ export default function Home() {
             </div>
           )}
 
-          {/* Search and Refresh */}
-          <div className="flex gap-3">
+          {/* Search and Filters */}
+          <div className="flex gap-2">
             <div className="flex-1 relative">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search repos or PR titles..."
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                className="w-full pl-10 pr-4 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
               />
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
+
+            {/* Filters Dropdown */}
+            <div className="relative" ref={filtersRef}>
+              <button
+                onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
+                className={`px-3 py-2 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors flex items-center gap-1.5 ${
+                  (filterMode !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
+                }`}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                Filters
+                {(filterMode !== "all" || sortMode !== "created-desc") && (
+                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
+                    {(filterMode !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
+                  </span>
+                )}
+              </button>
+
+              {showFiltersDropdown && (
+                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden">
+                  {/* User Filter */}
+                  <div className="p-3 border-b border-border">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="filterMode"
+                          checked={filterMode === "all"}
+                          onChange={() => setFilterMode("all")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">All Users</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="filterMode"
+                          checked={filterMode === "mine"}
+                          onChange={() => setFilterMode("mine")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">My PRs Only</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Sort Options */}
+                  <div className="p-3">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort By</p>
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="sortMode"
+                          checked={sortMode === "created-desc"}
+                          onChange={() => setSortMode("created-desc")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Created (Newest)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="sortMode"
+                          checked={sortMode === "created-asc"}
+                          onChange={() => setSortMode("created-asc")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Created (Oldest)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="sortMode"
+                          checked={sortMode === "updated-desc"}
+                          onChange={() => setSortMode("updated-desc")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Updated (Newest)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="sortMode"
+                          checked={sortMode === "updated-asc"}
+                          onChange={() => setSortMode("updated-asc")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Updated (Oldest)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="sortMode"
+                          checked={sortMode === "bugs-desc"}
+                          onChange={() => setSortMode("bugs-desc")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Bugs (High to Low)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                        <input
+                          type="radio"
+                          name="sortMode"
+                          checked={sortMode === "bugs-asc"}
+                          onChange={() => setSortMode("bugs-asc")}
+                          className="text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm text-accent">Bugs (Low to High)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Reset Button */}
+                  {(filterMode !== "all" || sortMode !== "created-desc") && (
+                    <div className="p-3 border-t border-border">
+                      <button
+                        onClick={() => {
+                          setFilterMode("all");
+                          setSortMode("created-desc");
+                        }}
+                        className="w-full text-sm text-text-secondary hover:text-accent py-1.5 transition-colors"
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <button
               onClick={refreshFromGitHub}
               disabled={isRefreshingFromGitHub}
-              className="px-4 py-2.5 bg-white border border-border rounded-lg text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-2"
+              className="px-3 py-2 bg-white border border-border rounded-lg text-sm text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-1.5"
             >
               {isRefreshingFromGitHub ? (
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
