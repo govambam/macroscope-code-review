@@ -202,9 +202,9 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     const body = (await request.json()) as RemoveCacheRequest;
     const { repoOwner, repoName, deleteFromDisk } = body;
 
-    if (!repoOwner || !repoName) {
+    if (!repoOwner || !repoName || typeof repoOwner !== 'string' || typeof repoName !== 'string') {
       return NextResponse.json(
-        { error: "repoOwner and repoName are required" },
+        { error: "repoOwner and repoName are required and must be strings" },
         { status: 400 }
       );
     }

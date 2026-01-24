@@ -14,7 +14,13 @@ function getDirectorySize(dirPath: string): number {
   }
 
   let totalSize = 0;
-  const items = fs.readdirSync(dirPath, { withFileTypes: true });
+  let items;
+  try {
+    items = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    // Skip directories we can't read
+    return 0;
+  }
 
   for (const item of items) {
     const itemPath = path.join(dirPath, item.name);
