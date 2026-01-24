@@ -92,9 +92,11 @@ interface PRRecord {
 
 interface ForkRecord {
   repoName: string;
+  repoOwner: string;
   forkUrl: string;
   createdAt: string;
   isInternal?: boolean;
+  isCached?: boolean;
   prs: PRRecord[];
 }
 
@@ -269,6 +271,9 @@ export default function Home() {
   const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
   const statusContainerRef = useRef<HTMLDivElement>(null);
+
+  // Cache operations state - tracks repos being cached/uncached
+  const [cachingRepos, setCachingRepos] = useState<Set<string>>(new Set());
 
   // Close filters dropdown when clicking outside
   useEffect(() => {
@@ -668,12 +673,13 @@ export default function Home() {
   // Add a newly created PR to the forks list (without checking for bugs yet)
   const addCreatedPRToForks = useCallback(
     (prUrl: string, forkUrl: string, prTitle: string, commitCount: number) => {
-      // Parse PR URL to extract repo name and PR number
-      const prMatch = prUrl.match(/github\.com\/[\w.-]+\/([\w.-]+)\/pull\/(\d+)/);
+      // Parse PR URL to extract owner, repo name and PR number
+      const prMatch = prUrl.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/);
       if (!prMatch) return;
 
-      const repoName = prMatch[1];
-      const prNumber = parseInt(prMatch[2], 10);
+      const repoOwner = prMatch[1];
+      const repoName = prMatch[2];
+      const prNumber = parseInt(prMatch[3], 10);
 
       // Mark this PR as "checked" so the auto-check effect skips it
       // (Macroscope hasn't had time to analyze it yet, so checking would just return 0)
@@ -712,8 +718,10 @@ export default function Home() {
           // Create new fork entry
           const newFork: ForkRecord = {
             repoName,
+            repoOwner,
             forkUrl,
             createdAt: new Date().toISOString(),
+            isCached: false,
             prs: [newPR],
           };
           updatedForks = [newFork, ...updatedForks];
@@ -880,6 +888,65 @@ export default function Home() {
 
       return { repos: newRepos, prs: newPrs };
     });
+  };
+
+  // Toggle cache status for a repo
+  const toggleRepoCache = async (repoOwner: string, repoName: string, currentlyCached: boolean) => {
+    const cacheKey = `${repoOwner}/${repoName}`;
+
+    // Mark as processing
+    setCachingRepos(prev => new Set(prev).add(cacheKey));
+
+    try {
+      if (currentlyCached) {
+        // Remove from cache
+        const response = await fetch("/api/cache", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repoOwner,
+            repoName,
+            deleteFromDisk: true
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to remove from cache");
+        }
+      } else {
+        // Add to cache and clone
+        const response = await fetch("/api/cache/clone", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repoOwner, repoName }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to cache repo");
+        }
+      }
+
+      // Update local state to reflect the change
+      queryClient.setQueryData(["forks"], (prevForks: ForkRecord[] | undefined) =>
+        (prevForks || []).map(fork =>
+          fork.repoOwner === repoOwner && fork.repoName === repoName
+            ? { ...fork, isCached: !currentlyCached }
+            : fork
+        )
+      );
+    } catch (error) {
+      console.error("Error toggling cache:", error);
+      // Could show a toast/alert here
+    } finally {
+      // Remove from processing state
+      setCachingRepos(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(cacheKey);
+        return newSet;
+      });
+    }
   };
 
   const getRepoCheckboxState = (repoName: string): "checked" | "unchecked" | "indeterminate" => {
@@ -1747,6 +1814,50 @@ export default function Home() {
                                   Internal
                                 </span>
                               )}
+                              {/* Cache indicator */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleRepoCache(fork.repoOwner, fork.repoName, fork.isCached ?? false);
+                                }}
+                                disabled={cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)}
+                                className={`group relative inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full transition-colors ${
+                                  cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)
+                                    ? "bg-gray-100 text-gray-400 cursor-wait"
+                                    : fork.isCached
+                                    ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                                    : "bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200"
+                                }`}
+                                title={
+                                  cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)
+                                    ? "Processing..."
+                                    : fork.isCached
+                                    ? "Click to remove from cache"
+                                    : "Click to cache this repo"
+                                }
+                              >
+                                {cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`) ? (
+                                  <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                ) : fork.isCached ? (
+                                  <>
+                                    <svg className="h-3.5 w-3.5 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                                      <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                    Cached
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="h-3.5 w-3.5 mr-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
+                                    </svg>
+                                    <span className="opacity-70">Not Cached</span>
+                                  </>
+                                )}
+                              </button>
                               <span className="text-sm text-gray-500">
                                 ({fork.prs.length} PR{fork.prs.length !== 1 ? "s" : ""})
                               </span>
