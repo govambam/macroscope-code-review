@@ -1821,20 +1821,13 @@ export default function Home() {
                                   toggleRepoCache(fork.repoOwner, fork.repoName, fork.isCached ?? false);
                                 }}
                                 disabled={cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)}
-                                className={`group relative inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full transition-colors ${
+                                className={`group relative inline-flex items-center justify-center w-7 h-7 text-xs font-medium rounded-full transition-colors ${
                                   cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)
                                     ? "bg-gray-100 text-gray-400 cursor-wait"
                                     : fork.isCached
                                     ? "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
                                     : "bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200"
                                 }`}
-                                title={
-                                  cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)
-                                    ? "Processing..."
-                                    : fork.isCached
-                                    ? "Click to remove from cache"
-                                    : "Click to cache this repo"
-                                }
                               >
                                 {cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`) ? (
                                   <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -1842,21 +1835,23 @@ export default function Home() {
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                   </svg>
                                 ) : fork.isCached ? (
-                                  <>
-                                    <svg className="h-3.5 w-3.5 mr-1" fill="currentColor" viewBox="0 0 24 24">
-                                      <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                    </svg>
-                                    Cached
-                                  </>
+                                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                  </svg>
                                 ) : (
-                                  <>
-                                    <svg className="h-3.5 w-3.5 mr-1 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
-                                    </svg>
-                                    <span className="opacity-70">Not Cached</span>
-                                  </>
+                                  <svg className="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
+                                  </svg>
                                 )}
+                                {/* Delayed tooltip */}
+                                <span className="pointer-events-none absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 transition-opacity delay-500 group-hover:opacity-100">
+                                  {cachingRepos.has(`${fork.repoOwner}/${fork.repoName}`)
+                                    ? "Processing..."
+                                    : fork.isCached
+                                    ? "Remove from cache"
+                                    : "Cache this repo"}
+                                </span>
                               </button>
                               <span className="text-sm text-gray-500">
                                 ({fork.prs.length} PR{fork.prs.length !== 1 ? "s" : ""})
