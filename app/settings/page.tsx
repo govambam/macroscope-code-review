@@ -84,6 +84,9 @@ export default function SettingsPage() {
   const [reverting, setReverting] = useState(false);
   const [showRevertConfirm, setShowRevertConfirm] = useState<number | null>(null);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<"prompts" | "caching">("prompts");
+
   // Cache management state
   const [newCacheRepo, setNewCacheRepo] = useState("");
   const [cacheNotes, setCacheNotes] = useState("");
@@ -452,14 +455,39 @@ export default function SettingsPage() {
       {/* Main Content Area */}
       <main className="flex-1 bg-bg-subtle h-screen overflow-y-auto">
         {/* Sticky Header */}
-        <div className="sticky top-0 z-10 bg-bg-subtle px-8 pt-8 pb-4 border-b border-border shadow-sm">
+        <div className="sticky top-0 z-10 bg-bg-subtle px-8 pt-8 pb-0 border-b border-border shadow-sm">
           <h1 className="text-2xl font-semibold text-accent tracking-tight">Settings</h1>
           <p className="mt-2 text-text-secondary">Configure prompts and application settings</p>
+
+          {/* Tabs */}
+          <div className="flex gap-6 mt-6">
+            <button
+              onClick={() => setActiveTab("prompts")}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === "prompts"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-text-secondary hover:text-accent hover:border-border"
+              }`}
+            >
+              Prompts
+            </button>
+            <button
+              onClick={() => setActiveTab("caching")}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === "caching"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-text-secondary hover:text-accent hover:border-border"
+              }`}
+            >
+              Caching
+            </button>
+          </div>
         </div>
 
         {/* Content */}
         <div className="px-8 py-6">
           {/* Prompts Section */}
+          {activeTab === "prompts" && (
           <div className="bg-white border border-border rounded-xl shadow-sm">
             <div className="px-6 py-4 border-b border-border">
               <h2 className="text-lg font-semibold text-accent">Prompts</h2>
@@ -751,9 +779,11 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Cache Management Section */}
-          <div className="bg-white border border-border rounded-xl shadow-sm mt-6">
+          {activeTab === "caching" && (
+          <div className="bg-white border border-border rounded-xl shadow-sm">
             <div className="px-6 py-4 border-b border-border">
               <h2 className="text-lg font-semibold text-accent">Repository Cache</h2>
               <p className="text-sm text-text-secondary mt-1">
@@ -791,13 +821,6 @@ export default function SettingsPage() {
                     </svg>
                     <span className="text-sm text-text-secondary">Repos on Disk:</span>
                     <span className="text-sm font-semibold text-accent">{cacheData.reposOnDisk.length}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    <span className="text-sm text-text-secondary">In Cache List:</span>
-                    <span className="text-sm font-semibold text-accent">{cacheData.cachedReposList.length}</span>
                   </div>
                   {cacheData.reposOnDisk.length > 0 && (
                     <div className="ml-auto">
@@ -997,6 +1020,7 @@ export default function SettingsPage() {
               </div>
             ) : null}
           </div>
+          )}
         </div>
       </main>
     </div>
