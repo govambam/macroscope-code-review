@@ -7,7 +7,7 @@ import * as os from "os";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { config, GITHUB_ORG, GITHUB_BOT_NAME, GITHUB_BOT_EMAIL } from "@/lib/config";
-import { saveFork, savePR, isRepoCached as shouldCacheRepo } from "@/lib/services/database";
+import { saveFork, savePR, isRepoCached as shouldCacheRepo, addCachedRepo } from "@/lib/services/database";
 
 // Cache directory for reference repositories (speeds up cloning)
 // Uses config for environment-aware paths (local vs Railway)
@@ -135,6 +135,11 @@ function isRepoClonedLocally(owner: string, repo: string): boolean {
 }
 
 /**
+ * Progress callback for git operations
+ */
+type ProgressCallback = (stage: string, progress: number, total: number) => void;
+
+/**
  * Ensure reference repo exists and is up-to-date in the cache.
  * This is used to speed up subsequent clones via --reference.
  * Uses a mutex lock to prevent race conditions when multiple requests
@@ -145,7 +150,8 @@ function isRepoClonedLocally(owner: string, repo: string): boolean {
 async function ensureReferenceRepo(
   owner: string,
   repo: string,
-  githubToken: string
+  githubToken: string,
+  onProgress?: ProgressCallback
 ): Promise<boolean> {
   // Check if this repo should be cached (selective caching)
   // Use the original repo owner/name for the cache check, not the fork owner
@@ -176,10 +182,14 @@ async function ensureReferenceRepo(
         fs.mkdirSync(ownerDir, { recursive: true });
       }
 
-      // Clone the repo (Bug 1 fix: clean up on failure)
-      const git = simpleGit();
+      // Clone the repo with progress reporting
+      const git = simpleGit({ progress: (data) => {
+        if (onProgress && data.total > 0) {
+          onProgress(data.stage, data.processed, data.total);
+        }
+      }});
       try {
-        await git.clone(cloneUrl, repoPath, ["--no-single-branch"]);
+        await git.clone(cloneUrl, repoPath, ["--no-single-branch", "--progress"]);
       } catch (error) {
         // Clean up partial clone on failure
         if (fs.existsSync(repoPath)) {
@@ -203,23 +213,28 @@ async function ensureReferenceRepo(
 async function cloneToWorkDir(
   owner: string,
   repo: string,
-  githubToken: string
+  githubToken: string,
+  onProgress?: ProgressCallback
 ): Promise<string> {
   const cloneUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "macroscope-"));
 
   try {
-    const git = simpleGit();
+    const git = simpleGit({ progress: (data) => {
+      if (onProgress && data.total > 0) {
+        onProgress(data.stage, data.processed, data.total);
+      }
+    }});
 
     // Check if we have a reference repo for faster cloning
     if (isRepoClonedLocally(owner, repo)) {
       const refPath = getRepoCachePath(owner, repo);
       console.log(`[GIT CACHE] Fast clone using reference repo`);
-      await git.clone(cloneUrl, tmpDir, ["--no-single-branch", "--reference", refPath]);
+      await git.clone(cloneUrl, tmpDir, ["--no-single-branch", "--reference", refPath, "--progress"]);
     } else {
       // No reference repo, do regular clone
       console.log(`[GIT CACHE] Regular clone (no reference repo available)`);
-      await git.clone(cloneUrl, tmpDir, ["--no-single-branch"]);
+      await git.clone(cloneUrl, tmpDir, ["--no-single-branch", "--progress"]);
     }
 
     return tmpDir;
@@ -284,7 +299,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         // Parse request body
         const body = await request.json();
-        const { repoUrl, commitHash: specifiedCommitHash, prUrl: inputPrUrl } = body;
+        const { repoUrl, commitHash: specifiedCommitHash, prUrl: inputPrUrl, cacheRepo } = body;
 
         // Initialize Octokit with bot token
         const octokit = new Octokit({ auth: githubToken });
@@ -483,18 +498,44 @@ export async function POST(request: NextRequest): Promise<Response> {
           }
 
           // Step 7: Clone repository (using cache for speed if available)
-          const wasClonedLocally = isRepoClonedLocally(forkOwner, repoName);
-          if (wasClonedLocally) {
-            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
-          } else {
-            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository (this may take a while for large repos)..." });
+          // If user requested caching, add to cache list before cloning
+          if (cacheRepo) {
+            addCachedRepo(forkOwner, repoName, `Upstream: ${upstreamOwner}/${repoName}`);
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: `Added ${forkOwner}/${repoName} to cache list` });
           }
 
+          const wasClonedLocally = isRepoClonedLocally(forkOwner, repoName);
+          const willCache = cacheRepo || shouldCacheRepo(forkOwner, repoName);
+
+          if (wasClonedLocally) {
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
+          } else if (willCache) {
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning and caching repository (this may take several minutes for large repos)..." });
+          } else {
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository..." });
+          }
+
+          // Track last progress update to avoid flooding
+          let lastProgressUpdate = 0;
+          const progressCallback = (stage: string, processed: number, total: number) => {
+            const now = Date.now();
+            // Only send updates every 2 seconds to avoid flooding
+            if (now - lastProgressUpdate > 2000) {
+              const percent = Math.round((processed / total) * 100);
+              const stageLabel = stage === 'receiving' ? 'Receiving objects' :
+                                stage === 'resolving' ? 'Resolving deltas' :
+                                stage === 'counting' ? 'Counting objects' :
+                                stage === 'compressing' ? 'Compressing objects' : stage;
+              sendStatus({ type: "info", step: 7, totalSteps: 10, message: `${stageLabel}: ${percent}% (${processed}/${total})` });
+              lastProgressUpdate = now;
+            }
+          };
+
           // Ensure reference repo is up-to-date if this repo is in the cache list
-          const didCache = await ensureReferenceRepo(forkOwner, repoName, githubToken);
+          const didCache = await ensureReferenceRepo(forkOwner, repoName, githubToken, progressCallback);
 
           // Clone to isolated working directory (no race conditions)
-          tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken);
+          tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken, progressCallback);
 
           const usedCache = wasClonedLocally || didCache;
           sendStatus({ type: "success", message: usedCache ? "Repository ready (fast clone from cache)" : "Repository cloned successfully" });
@@ -977,18 +1018,43 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           }
 
           // Clone repository (using cache for speed if available)
+          // If user requested caching, add to cache list before cloning
+          if (cacheRepo) {
+            addCachedRepo(forkOwner, repoName, `Upstream: ${upstreamOwner}/${repoName}`);
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: `Added ${forkOwner}/${repoName} to cache list` });
+          }
+
           const wasClonedLocallyCommitMode = isRepoClonedLocally(forkOwner, repoName);
+          const willCacheCommitMode = cacheRepo || shouldCacheRepo(forkOwner, repoName);
+
           if (wasClonedLocallyCommitMode) {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
+          } else if (willCacheCommitMode) {
+            sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning and caching repository (this may take several minutes for large repos)..." });
           } else {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository..." });
           }
 
+          // Track last progress update to avoid flooding
+          let lastProgressUpdateCommitMode = 0;
+          const progressCallbackCommitMode = (stage: string, processed: number, total: number) => {
+            const now = Date.now();
+            if (now - lastProgressUpdateCommitMode > 2000) {
+              const percent = Math.round((processed / total) * 100);
+              const stageLabel = stage === 'receiving' ? 'Receiving objects' :
+                                stage === 'resolving' ? 'Resolving deltas' :
+                                stage === 'counting' ? 'Counting objects' :
+                                stage === 'compressing' ? 'Compressing objects' : stage;
+              sendStatus({ type: "info", step: 7, totalSteps: 10, message: `${stageLabel}: ${percent}% (${processed}/${total})` });
+              lastProgressUpdateCommitMode = now;
+            }
+          };
+
           // Ensure reference repo is up-to-date if this repo is in the cache list
-          const didCacheCommitMode = await ensureReferenceRepo(forkOwner, repoName, githubToken);
+          const didCacheCommitMode = await ensureReferenceRepo(forkOwner, repoName, githubToken, progressCallbackCommitMode);
 
           // Clone to isolated working directory (no race conditions)
-          tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken);
+          tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken, progressCallbackCommitMode);
 
           const usedCacheCommitMode = wasClonedLocallyCommitMode || didCacheCommitMode;
           sendStatus({ type: "success", message: usedCacheCommitMode ? "Repository ready (fast clone from cache)" : "Clone complete" });

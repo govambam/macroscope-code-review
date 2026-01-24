@@ -124,6 +124,7 @@ export default function Home() {
   const [specifyCommit, setSpecifyCommit] = useState(false);
   const [commitHash, setCommitHash] = useState("");
   const [prUrl, setPrUrl] = useState("");
+  const [cacheRepo, setCacheRepo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<StatusMessage[]>([]);
   const [result, setResult] = useState<ApiResponse | null>(null);
@@ -392,8 +393,8 @@ export default function Home() {
       // Build request body
       const body =
         createMode === "commit"
-          ? { repoUrl, commitHash: specifyCommit ? commitHash : undefined }
-          : { prUrl };
+          ? { repoUrl, commitHash: specifyCommit ? commitHash : undefined, cacheRepo }
+          : { prUrl, cacheRepo };
 
       const response = await fetch("/api/create-pr", {
         method: "POST",
@@ -506,6 +507,7 @@ export default function Home() {
   const closeCreatePRModal = () => {
     setShowCreatePRModal(false);
     setCreatePRModalExpanded(false);
+    setCacheRepo(false);
   };
 
   // Analyze Internal PR function
@@ -2515,24 +2517,46 @@ export default function Home() {
             <div className="flex-1 overflow-y-auto p-6">
               <form onSubmit={handleSubmit} className="space-y-6">
                 {createMode === "pr" ? (
-                  <div>
-                    <label htmlFor="prUrl" className="block text-sm font-medium text-accent mb-2">
-                      Pull Request URL
-                    </label>
-                    <input
-                      type="text"
-                      id="prUrl"
-                      value={prUrl}
-                      onChange={(e) => setPrUrl(e.target.value)}
-                      placeholder="https://github.com/owner/repo/pull/123"
-                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                      required
-                      disabled={loading}
-                    />
-                    <p className="mt-2 text-sm text-text-muted">
-                      Paste any GitHub PR URL to simulate it for review
-                    </p>
-                  </div>
+                  <>
+                    <div>
+                      <label htmlFor="prUrl" className="block text-sm font-medium text-accent mb-2">
+                        Pull Request URL
+                      </label>
+                      <input
+                        type="text"
+                        id="prUrl"
+                        value={prUrl}
+                        onChange={(e) => setPrUrl(e.target.value)}
+                        placeholder="https://github.com/owner/repo/pull/123"
+                        className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                        required
+                        disabled={loading}
+                      />
+                      <p className="mt-2 text-sm text-text-muted">
+                        Paste any GitHub PR URL to simulate it for review
+                      </p>
+                    </div>
+
+                    <div className="flex items-start">
+                      <input
+                        type="checkbox"
+                        id="cacheRepoModal"
+                        checked={cacheRepo}
+                        onChange={(e) => setCacheRepo(e.target.checked)}
+                        className="h-4 w-4 mt-0.5 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                        disabled={loading}
+                      />
+                      <label
+                        htmlFor="cacheRepoModal"
+                        className="ml-3 cursor-pointer select-none"
+                      >
+                        <span className="text-sm text-text-secondary">Cache this repository</span>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Enable for large repos or repos you&apos;ll simulate multiple PRs from. Speeds up future simulations.
+                        </p>
+                      </label>
+                    </div>
+                  </>
                 ) : (
                   <>
                     <div>
@@ -2591,6 +2615,26 @@ export default function Home() {
                         </p>
                       </div>
                     )}
+
+                    <div className="flex items-start">
+                      <input
+                        type="checkbox"
+                        id="cacheRepoCommitModal"
+                        checked={cacheRepo}
+                        onChange={(e) => setCacheRepo(e.target.checked)}
+                        className="h-4 w-4 mt-0.5 rounded border-border text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                        disabled={loading}
+                      />
+                      <label
+                        htmlFor="cacheRepoCommitModal"
+                        className="ml-3 cursor-pointer select-none"
+                      >
+                        <span className="text-sm text-text-secondary">Cache this repository</span>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Enable for large repos or repos you&apos;ll simulate multiple PRs from. Speeds up future simulations.
+                        </p>
+                      </label>
+                    </div>
                   </>
                 )}
 
