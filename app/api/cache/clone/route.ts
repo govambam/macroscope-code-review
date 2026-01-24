@@ -10,6 +10,35 @@ import simpleGit from "simple-git";
 // Mutex locks for repo cloning (prevents concurrent clones of same repo)
 const repoLocks = new Map<string, Promise<void>>();
 
+// Global semaphore to limit total concurrent clone operations across all repos
+const MAX_CONCURRENT_CLONES = 3;
+let activeClones = 0;
+const cloneQueue: Array<() => void> = [];
+
+async function acquireGlobalCloneSemaphore(): Promise<() => void> {
+  if (activeClones < MAX_CONCURRENT_CLONES) {
+    activeClones++;
+    return () => {
+      activeClones--;
+      // Wake up next waiting clone if any
+      const next = cloneQueue.shift();
+      if (next) next();
+    };
+  }
+
+  // Wait in queue for a slot
+  await new Promise<void>((resolve) => {
+    cloneQueue.push(resolve);
+  });
+
+  activeClones++;
+  return () => {
+    activeClones--;
+    const next = cloneQueue.shift();
+    if (next) next();
+  };
+}
+
 async function acquireRepoLock(owner: string, repo: string): Promise<() => void> {
   const key = `${owner}/${repo}`;
 
@@ -94,6 +123,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Acquire lock to prevent race conditions
     const releaseLock = await acquireRepoLock(repoOwner, repoName);
 
+    // Acquire global semaphore to limit concurrent clones across all repos
+    const releaseGlobalSemaphore = await acquireGlobalCloneSemaphore();
+
     try {
       // Add to cache list in database
       addCachedRepo(repoOwner, repoName, null);
@@ -144,6 +176,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
       }
     } finally {
+      releaseGlobalSemaphore();
       releaseLock();
     }
   } catch (error) {
