@@ -364,8 +364,7 @@ export function savePR(
       commit_count = COALESCE(excluded.commit_count, prs.commit_count),
       last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at),
       is_internal = COALESCE(excluded.is_internal, prs.is_internal),
-      created_by = COALESCE(prs.created_by, excluded.created_by),
-      updated_at = ?
+      created_by = COALESCE(prs.created_by, excluded.created_by)
     RETURNING id
   `);
 
@@ -386,8 +385,7 @@ export function savePR(
     options.isInternal ? 1 : 0,
     options.createdBy ?? null,
     now, // created_at for insert (ignored on update)
-    now, // updated_at for insert
-    now  // updated_at for update
+    now  // updated_at for insert (not updated on conflict)
   ) as { id: number };
   return result.id;
 }
