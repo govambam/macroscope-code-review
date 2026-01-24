@@ -72,6 +72,14 @@ export interface PromptVersionRecord {
   created_at: string;
 }
 
+export interface CachedRepoRecord {
+  id: number;
+  repo_owner: string;
+  repo_name: string;
+  cached_at: string;
+  notes: string | null;
+}
+
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -267,6 +275,18 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_prs_fork_id ON prs(fork_id);
     CREATE INDEX IF NOT EXISTS idx_pr_analyses_pr_id ON pr_analyses(pr_id);
     CREATE INDEX IF NOT EXISTS idx_generated_emails_analysis_id ON generated_emails(pr_analysis_id);
+  `);
+
+  // Create cached repos table for selective caching
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cached_repos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      repo_owner TEXT NOT NULL,
+      repo_name TEXT NOT NULL,
+      cached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      notes TEXT,
+      UNIQUE(repo_owner, repo_name)
+    )
   `);
 
   console.log("Database initialized successfully at:", DB_PATH);
@@ -894,6 +914,78 @@ export function getPromptVersion(promptName: string, versionNumber: number): Pro
   `);
 
   return (stmt.get(promptName, versionNumber) as PromptVersionRecord | undefined) ?? null;
+}
+
+/**
+ * Get all cached repos.
+ */
+export function getCachedRepos(): CachedRepoRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM cached_repos ORDER BY cached_at DESC
+  `);
+
+  return stmt.all() as CachedRepoRecord[];
+}
+
+/**
+ * Add a repo to the cache list.
+ * Returns the record ID.
+ */
+export function addCachedRepo(repoOwner: string, repoName: string, notes: string | null = null): number {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    INSERT INTO cached_repos (repo_owner, repo_name, notes)
+    VALUES (?, ?, ?)
+    ON CONFLICT(repo_owner, repo_name)
+    DO UPDATE SET notes = COALESCE(excluded.notes, cached_repos.notes)
+    RETURNING id
+  `);
+
+  const result = stmt.get(repoOwner, repoName, notes) as { id: number };
+  return result.id;
+}
+
+/**
+ * Remove a repo from the cache list.
+ * Returns true if a record was deleted.
+ */
+export function removeCachedRepo(repoOwner: string, repoName: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    DELETE FROM cached_repos WHERE repo_owner = ? AND repo_name = ?
+  `);
+
+  const result = stmt.run(repoOwner, repoName);
+  return result.changes > 0;
+}
+
+/**
+ * Check if a repo is in the cache list (should be cached).
+ */
+export function isRepoCached(repoOwner: string, repoName: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count FROM cached_repos WHERE repo_owner = ? AND repo_name = ?
+  `);
+
+  const result = stmt.get(repoOwner, repoName) as { count: number };
+  return result.count > 0;
+}
+
+/**
+ * Clear all cached repos from the list.
+ * Returns the number of records deleted.
+ */
+export function clearCachedRepos(): number {
+  const db = getDatabase();
+
+  const result = db.prepare(`DELETE FROM cached_repos`).run();
+  return result.changes;
 }
 
 /**
