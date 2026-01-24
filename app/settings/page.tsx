@@ -792,13 +792,6 @@ export default function SettingsPage() {
                     <span className="text-sm text-text-secondary">Repos on Disk:</span>
                     <span className="text-sm font-semibold text-accent">{cacheData.reposOnDisk.length}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    <span className="text-sm text-text-secondary">In Cache List:</span>
-                    <span className="text-sm font-semibold text-accent">{cacheData.cachedReposList.length}</span>
-                  </div>
                   {cacheData.reposOnDisk.length > 0 && (
                     <div className="ml-auto">
                       {showClearConfirm ? (
