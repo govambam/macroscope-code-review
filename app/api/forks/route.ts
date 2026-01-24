@@ -7,6 +7,7 @@ import {
   deleteFork,
   deletePR,
   getFork,
+  isRepoCached,
 } from "@/lib/services/database";
 
 interface PRRecord {
@@ -29,9 +30,11 @@ interface PRRecord {
 
 interface ForkRecord {
   repoName: string;
+  repoOwner: string;
   forkUrl: string;
   createdAt: string;
   isInternal?: boolean;
+  isCached?: boolean;
   prs: PRRecord[];
 }
 
@@ -95,9 +98,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Transform database format to API format
       const forks: ForkRecord[] = dbForks.map(dbFork => ({
         repoName: dbFork.repo_name,
+        repoOwner: dbFork.repo_owner,
         forkUrl: dbFork.fork_url,
         createdAt: dbFork.created_at,
         isInternal: Boolean(dbFork.is_internal),
+        isCached: isRepoCached(dbFork.repo_owner, dbFork.repo_name),
         prs: dbFork.prs.map(dbPR => ({
           prNumber: dbPR.pr_number,
           prUrl: dbPR.forked_pr_url,
@@ -211,8 +216,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
           forkRecords.push({
             repoName: fork.name,
+            repoOwner: orgOwner,
             forkUrl: fork.html_url,
             createdAt: fork.created_at || new Date().toISOString(),
+            isCached: isRepoCached(orgOwner, fork.name),
             prs: prRecords,
           });
         }
@@ -261,9 +268,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .filter(dbFork => dbFork.is_internal)
       .map(dbFork => ({
         repoName: dbFork.repo_name,
+        repoOwner: dbFork.repo_owner,
         forkUrl: dbFork.fork_url,
         createdAt: dbFork.created_at,
         isInternal: true,
+        isCached: isRepoCached(dbFork.repo_owner, dbFork.repo_name),
         prs: dbFork.prs.map(dbPR => ({
           prNumber: dbPR.pr_number,
           prUrl: dbPR.forked_pr_url,
