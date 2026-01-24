@@ -868,7 +868,7 @@ export default function Home() {
 
       // Check if any PR titles match
       for (const pr of fork.prs) {
-        if (pr.prTitle?.toLowerCase().includes(lowerQuery) || `#${pr.prNumber}`.includes(lowerQuery)) {
+        if (pr.prTitle?.toLowerCase()?.includes(lowerQuery) || `#${pr.prNumber}`.includes(lowerQuery)) {
           suggestions.push({
             type: 'pr',
             repoName: fork.repoName,
