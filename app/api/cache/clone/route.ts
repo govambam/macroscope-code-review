@@ -102,6 +102,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // Repo already exists - update it
         console.log(`[CACHE CLONE] Updating existing cache for ${repoOwner}/${repoName}`);
         const git = simpleGit(repoPath);
+        // Update remote URL in case token was rotated
+        await git.remote(["set-url", "origin", cloneUrl]);
         await git.fetch(["--all", "--tags", "--prune"]);
 
         return NextResponse.json({
@@ -117,6 +119,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const ownerDir = path.join(config.reposDir, repoOwner);
         if (!fs.existsSync(ownerDir)) {
           fs.mkdirSync(ownerDir, { recursive: true });
+        }
+
+        // Clean up any leftover directory from failed previous clone
+        if (fs.existsSync(repoPath)) {
+          fs.rmSync(repoPath, { recursive: true, force: true });
         }
 
         const git = simpleGit();
