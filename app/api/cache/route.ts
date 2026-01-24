@@ -215,6 +215,11 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     // Optionally delete from disk
     let deletedFromDisk = false;
     if (deleteFromDisk) {
+      // Validate inputs don't contain path traversal characters
+      if (repoOwner.includes('/') || repoOwner.includes('\\') || repoOwner === '.' || repoOwner === '..' ||
+          repoName.includes('/') || repoName.includes('\\') || repoName === '.' || repoName === '..') {
+        return NextResponse.json({ error: "Invalid repository name" }, { status: 400 });
+      }
       // Repos are stored as reposDir/owner/repo
       const repoPath = path.resolve(config.reposDir, repoOwner, repoName);
       // Validate path stays within reposDir to prevent path traversal
