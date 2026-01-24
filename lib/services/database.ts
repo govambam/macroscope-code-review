@@ -298,16 +298,17 @@ function initializeSchema(db: Database.Database): void {
  */
 export function saveFork(repoOwner: string, repoName: string, forkUrl: string, isInternal: boolean = false): number {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal, created_at)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(repo_owner, repo_name)
     DO UPDATE SET fork_url = excluded.fork_url, is_internal = excluded.is_internal
     RETURNING id
   `);
 
-  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0) as { id: number };
+  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0, now) as { id: number };
   return result.id;
 }
 
@@ -349,8 +350,8 @@ export function savePR(
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
@@ -384,6 +385,7 @@ export function savePR(
     lastBugCheckAt,
     options.isInternal ? 1 : 0,
     options.createdBy ?? null,
+    now, // created_at for insert (ignored on update)
     now, // updated_at for insert
     now  // updated_at for update
   ) as { id: number };
