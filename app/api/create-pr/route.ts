@@ -7,7 +7,7 @@ import * as os from "os";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { config, GITHUB_ORG, GITHUB_BOT_NAME, GITHUB_BOT_EMAIL } from "@/lib/config";
-import { saveFork, savePR } from "@/lib/services/database";
+import { saveFork, savePR, isRepoCached as shouldCacheRepo } from "@/lib/services/database";
 
 // Cache directory for reference repositories (speeds up cloning)
 // Uses config for environment-aware paths (local vs Railway)
@@ -127,9 +127,9 @@ function getRepoCachePath(owner: string, repo: string): string {
 }
 
 /**
- * Check if a reference repo exists in the cache
+ * Check if a reference repo exists on disk in the cache directory
  */
-function isRepoCached(owner: string, repo: string): boolean {
+function isRepoClonedLocally(owner: string, repo: string): boolean {
   const repoPath = getRepoCachePath(owner, repo);
   return fs.existsSync(path.join(repoPath, ".git"));
 }
@@ -139,20 +139,29 @@ function isRepoCached(owner: string, repo: string): boolean {
  * This is used to speed up subsequent clones via --reference.
  * Uses a mutex lock to prevent race conditions when multiple requests
  * try to clone/update the same repository simultaneously.
+ *
+ * Returns true if caching was performed, false if caching was skipped.
  */
 async function ensureReferenceRepo(
   owner: string,
   repo: string,
   githubToken: string
-): Promise<void> {
+): Promise<boolean> {
+  // Check if this repo should be cached (selective caching)
+  // Use the original repo owner/name for the cache check, not the fork owner
+  if (!shouldCacheRepo(owner, repo)) {
+    console.log(`[GIT CACHE] Skip: ${owner}/${repo} not in cache list`);
+    return false;
+  }
+
   const repoPath = getRepoCachePath(owner, repo);
   const cloneUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`;
 
   // Acquire lock to prevent race conditions
   const releaseLock = await acquireRepoLock(owner, repo);
-  
+
   try {
-    if (isRepoCached(owner, repo)) {
+    if (isRepoClonedLocally(owner, repo)) {
       // Reference repo exists - update it
       console.log(`[GIT CACHE] Hit: Updating reference repo ${owner}/${repo}`);
       const git = simpleGit(repoPath);
@@ -179,6 +188,7 @@ async function ensureReferenceRepo(
         throw error;
       }
     }
+    return true;
   } finally {
     // Always release the lock, even if an error occurred
     releaseLock();
@@ -187,7 +197,7 @@ async function ensureReferenceRepo(
 
 /**
  * Clone repo to an isolated temp directory for working.
- * Uses --reference to the cached repo for faster cloning.
+ * Uses --reference to the cached repo for faster cloning if available.
  * Each request gets its own temp directory (Bug 2 fix: no race conditions).
  */
 async function cloneToWorkDir(
@@ -202,7 +212,7 @@ async function cloneToWorkDir(
     const git = simpleGit();
 
     // Check if we have a reference repo for faster cloning
-    if (isRepoCached(owner, repo)) {
+    if (isRepoClonedLocally(owner, repo)) {
       const refPath = getRepoCachePath(owner, repo);
       console.log(`[GIT CACHE] Fast clone using reference repo`);
       await git.clone(cloneUrl, tmpDir, ["--no-single-branch", "--reference", refPath]);
@@ -472,21 +482,22 @@ export async function POST(request: NextRequest): Promise<Response> {
             // Continue
           }
 
-          // Step 7: Clone repository (using cache for speed)
-          const isCached = isRepoCached(forkOwner, repoName);
-          if (isCached) {
+          // Step 7: Clone repository (using cache for speed if available)
+          const wasClonedLocally = isRepoClonedLocally(forkOwner, repoName);
+          if (wasClonedLocally) {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
           } else {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository (this may take a while for large repos)..." });
           }
 
-          // First, ensure reference repo is up-to-date (for faster cloning)
-          await ensureReferenceRepo(forkOwner, repoName, githubToken);
+          // Ensure reference repo is up-to-date if this repo is in the cache list
+          const didCache = await ensureReferenceRepo(forkOwner, repoName, githubToken);
 
           // Clone to isolated working directory (no race conditions)
           tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken);
 
-          sendStatus({ type: "success", message: isCached ? "Repository ready (fast clone from cache)" : "Repository cloned successfully" });
+          const usedCache = wasClonedLocally || didCache;
+          sendStatus({ type: "success", message: usedCache ? "Repository ready (fast clone from cache)" : "Repository cloned successfully" });
 
           const repoGit = simpleGit(tmpDir);
           await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);
@@ -965,21 +976,22 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
             // Continue
           }
 
-          // Clone repository (using cache for speed)
-          const isCachedCommitMode = isRepoCached(forkOwner, repoName);
-          if (isCachedCommitMode) {
+          // Clone repository (using cache for speed if available)
+          const wasClonedLocallyCommitMode = isRepoClonedLocally(forkOwner, repoName);
+          if (wasClonedLocallyCommitMode) {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Preparing repository (using cache)..." });
           } else {
             sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Cloning repository..." });
           }
 
-          // First, ensure reference repo is up-to-date (for faster cloning)
-          await ensureReferenceRepo(forkOwner, repoName, githubToken);
+          // Ensure reference repo is up-to-date if this repo is in the cache list
+          const didCacheCommitMode = await ensureReferenceRepo(forkOwner, repoName, githubToken);
 
           // Clone to isolated working directory (no race conditions)
           tmpDir = await cloneToWorkDir(forkOwner, repoName, githubToken);
 
-          sendStatus({ type: "success", message: isCachedCommitMode ? "Repository ready (fast clone from cache)" : "Clone complete" });
+          const usedCacheCommitMode = wasClonedLocallyCommitMode || didCacheCommitMode;
+          sendStatus({ type: "success", message: usedCacheCommitMode ? "Repository ready (fast clone from cache)" : "Clone complete" });
 
           const repoGit = simpleGit(tmpDir);
           await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);

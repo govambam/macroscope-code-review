@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
 
 interface Prompt {
@@ -21,6 +21,23 @@ interface PromptVersion {
   purpose: string | null;
   created_at: string;
   created_by: string | null;
+}
+
+interface CachedRepoInfo {
+  id: number;
+  repo_owner: string;
+  repo_name: string;
+  cached_at: string;
+  notes: string | null;
+}
+
+interface CacheInfo {
+  totalSizeBytes: number;
+  totalSizeFormatted: string;
+  reposOnDisk: string[];
+  repoSizes: Record<string, { bytes: number; formatted: string }>;
+  cachedReposList: CachedRepoInfo[];
+  reposDir: string;
 }
 
 export default function SettingsPage() {
@@ -59,6 +76,97 @@ export default function SettingsPage() {
   const [selectedVersion, setSelectedVersion] = useState<PromptVersion | null>(null);
   const [reverting, setReverting] = useState(false);
   const [showRevertConfirm, setShowRevertConfirm] = useState<number | null>(null);
+
+  // Cache management state
+  const [newCacheRepo, setNewCacheRepo] = useState("");
+  const [cacheNotes, setCacheNotes] = useState("");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Fetch cache info
+  const {
+    data: cacheData,
+    isLoading: cacheLoading,
+    error: cacheError,
+  } = useQuery({
+    queryKey: ["cache-info"],
+    queryFn: async () => {
+      const response = await fetch("/api/cache");
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to load cache info");
+      }
+      return data.cache as CacheInfo;
+    },
+    staleTime: 30 * 1000, // 30 seconds
+  });
+
+  // Add repo to cache list mutation
+  const addCacheRepoMutation = useMutation({
+    mutationFn: async ({ repoOwner, repoName, notes }: { repoOwner: string; repoName: string; notes?: string }) => {
+      const response = await fetch("/api/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoOwner, repoName, notes }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to add repo to cache list");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cache-info"] });
+      setNewCacheRepo("");
+      setCacheNotes("");
+    },
+  });
+
+  // Remove repo from cache list mutation
+  const removeCacheRepoMutation = useMutation({
+    mutationFn: async ({ repoOwner, repoName, deleteFromDisk }: { repoOwner: string; repoName: string; deleteFromDisk?: boolean }) => {
+      const response = await fetch("/api/cache", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoOwner, repoName, deleteFromDisk }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to remove repo from cache");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cache-info"] });
+    },
+  });
+
+  // Clear all cache mutation
+  const clearCacheMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/cache/clear", {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to clear cache");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cache-info"] });
+      setShowClearConfirm(false);
+    },
+  });
+
+  const handleAddCacheRepo = () => {
+    const parts = newCacheRepo.trim().split("/");
+    if (parts.length !== 2) {
+      alert("Please enter in format: owner/repo");
+      return;
+    }
+    const [repoOwner, repoName] = parts;
+    addCacheRepoMutation.mutate({ repoOwner, repoName, notes: cacheNotes || undefined });
+  };
 
   // Fetch versions with React Query (only when version history is shown)
   const {
@@ -588,6 +696,224 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Cache Management Section */}
+          <div className="bg-white border border-border rounded-xl shadow-sm mt-6">
+            <div className="px-6 py-4 border-b border-border">
+              <h2 className="text-lg font-semibold text-accent">Repository Cache</h2>
+              <p className="text-sm text-text-secondary mt-1">
+                Manage cached repositories to speed up PR simulation. Only repos in the cache list will be cached on disk.
+              </p>
+            </div>
+
+            {cacheLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <svg className="animate-spin h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              </div>
+            ) : cacheError ? (
+              <div className="p-6">
+                <div className="rounded-lg bg-error-light border border-error/20 p-4 text-sm text-error">
+                  {(cacheError as Error).message}
+                </div>
+              </div>
+            ) : cacheData ? (
+              <div className="p-6 space-y-6">
+                {/* Cache Stats */}
+                <div className="flex items-center gap-6 pb-4 border-b border-border">
+                  <div className="flex items-center gap-2">
+                    <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                    </svg>
+                    <span className="text-sm text-text-secondary">Total Size:</span>
+                    <span className="text-sm font-semibold text-accent">{cacheData.totalSizeFormatted}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <span className="text-sm text-text-secondary">Repos on Disk:</span>
+                    <span className="text-sm font-semibold text-accent">{cacheData.reposOnDisk.length}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <span className="text-sm text-text-secondary">In Cache List:</span>
+                    <span className="text-sm font-semibold text-accent">{cacheData.cachedReposList.length}</span>
+                  </div>
+                  {cacheData.reposOnDisk.length > 0 && (
+                    <div className="ml-auto">
+                      {showClearConfirm ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-text-muted">Clear all cached repos?</span>
+                          <button
+                            onClick={() => clearCacheMutation.mutate()}
+                            disabled={clearCacheMutation.isPending}
+                            className="px-3 py-1.5 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            {clearCacheMutation.isPending ? "Clearing..." : "Confirm"}
+                          </button>
+                          <button
+                            onClick={() => setShowClearConfirm(false)}
+                            className="px-3 py-1.5 bg-bg-subtle hover:bg-border text-text-secondary text-sm font-medium rounded-lg transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowClearConfirm(true)}
+                          className="px-3 py-1.5 bg-error/10 hover:bg-error/20 text-error text-sm font-medium rounded-lg transition-colors"
+                        >
+                          Clear All Cache
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Add Repo to Cache List */}
+                <div>
+                  <label className="block text-sm font-medium text-accent mb-2">
+                    Add Repository to Cache List
+                  </label>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      value={newCacheRepo}
+                      onChange={(e) => setNewCacheRepo(e.target.value)}
+                      placeholder="owner/repo (e.g., supabase/supabase)"
+                      className="flex-1 px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                    />
+                    <input
+                      type="text"
+                      value={cacheNotes}
+                      onChange={(e) => setCacheNotes(e.target.value)}
+                      placeholder="Notes (optional)"
+                      className="w-48 px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                    />
+                    <button
+                      onClick={handleAddCacheRepo}
+                      disabled={!newCacheRepo.trim() || addCacheRepoMutation.isPending}
+                      className="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {addCacheRepoMutation.isPending ? "Adding..." : "Add"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-text-muted mt-2">
+                    Repos in this list will be cached on disk for faster PR simulation. Strategic target accounts should be added here.
+                  </p>
+                </div>
+
+                {/* Cached Repos List */}
+                {cacheData.cachedReposList.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-accent mb-3">Repos in Cache List</h3>
+                    <div className="border border-border rounded-lg divide-y divide-border">
+                      {cacheData.cachedReposList.map((repo) => {
+                        const repoKey = `${repo.repo_owner}/${repo.repo_name}`;
+                        const isOnDisk = cacheData.reposOnDisk.includes(repo.repo_name);
+                        const diskSize = cacheData.repoSizes[repo.repo_name];
+
+                        return (
+                          <div
+                            key={repo.id}
+                            className="flex items-center justify-between px-4 py-3 hover:bg-bg-subtle"
+                          >
+                            <div className="flex items-center gap-3">
+                              <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                              </svg>
+                              <div>
+                                <div className="text-sm font-medium text-accent">{repoKey}</div>
+                                <div className="flex items-center gap-2 text-xs text-text-muted">
+                                  {repo.notes && <span>{repo.notes}</span>}
+                                  {isOnDisk ? (
+                                    <span className="inline-flex items-center gap-1 text-success">
+                                      <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                      </svg>
+                                      Cached ({diskSize?.formatted || "?"})
+                                    </span>
+                                  ) : (
+                                    <span className="text-text-muted">Not cached yet</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => removeCacheRepoMutation.mutate({
+                                repoOwner: repo.repo_owner,
+                                repoName: repo.repo_name,
+                                deleteFromDisk: isOnDisk,
+                              })}
+                              disabled={removeCacheRepoMutation.isPending}
+                              className="text-xs text-error hover:text-error/80 font-medium"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Repos on Disk but not in List */}
+                {cacheData.reposOnDisk.filter(
+                  (repo) => !cacheData.cachedReposList.some((cr) => cr.repo_name === repo)
+                ).length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-accent mb-3">
+                      Cached on Disk (not in list)
+                    </h3>
+                    <p className="text-xs text-text-muted mb-3">
+                      These repos are on disk but not in the cache list. They will not be updated on future simulations.
+                    </p>
+                    <div className="border border-border rounded-lg divide-y divide-border">
+                      {cacheData.reposOnDisk
+                        .filter((repo) => !cacheData.cachedReposList.some((cr) => cr.repo_name === repo))
+                        .map((repoName) => {
+                          const diskSize = cacheData.repoSizes[repoName];
+                          return (
+                            <div
+                              key={repoName}
+                              className="flex items-center justify-between px-4 py-3 hover:bg-bg-subtle"
+                            >
+                              <div className="flex items-center gap-3">
+                                <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                </svg>
+                                <div>
+                                  <div className="text-sm font-medium text-accent">{repoName}</div>
+                                  <div className="text-xs text-text-muted">
+                                    {diskSize?.formatted || "Unknown size"}
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => removeCacheRepoMutation.mutate({
+                                  repoOwner: "unknown",
+                                  repoName: repoName,
+                                  deleteFromDisk: true,
+                                })}
+                                disabled={removeCacheRepoMutation.isPending}
+                                className="text-xs text-error hover:text-error/80 font-medium"
+                              >
+                                Delete from Disk
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       </main>
