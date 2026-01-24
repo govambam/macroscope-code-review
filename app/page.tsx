@@ -225,6 +225,8 @@ export default function Home() {
   const forksError = forksQueryError ? (forksQueryError as Error).message : null;
   const [isRefreshingFromGitHub, setIsRefreshingFromGitHub] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showSearchAutocomplete, setShowSearchAutocomplete] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<Selection>({ repos: new Set(), prs: new Set() });
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -280,6 +282,17 @@ export default function Home() {
     function handleClickOutside(event: MouseEvent) {
       if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) {
         setShowFiltersDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Close search autocomplete when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSearchAutocomplete(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -835,6 +848,40 @@ export default function Home() {
 
     return result;
   }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin, internalFilter, sortMode]);
+
+  // Autocomplete suggestions for search
+  const searchSuggestions = useMemo(() => {
+    if (!searchQuery.trim() || searchQuery.length < 2) return [];
+
+    const lowerQuery = searchQuery.toLowerCase().trim();
+    const suggestions: Array<{ type: 'repo' | 'pr'; repoName: string; prNumber?: number; prTitle?: string; repoOwner: string }> = [];
+
+    for (const fork of forks) {
+      // Check if repo name matches
+      if (fork.repoName.toLowerCase().includes(lowerQuery)) {
+        suggestions.push({
+          type: 'repo',
+          repoName: fork.repoName,
+          repoOwner: fork.repoOwner,
+        });
+      }
+
+      // Check if any PR titles match
+      for (const pr of fork.prs) {
+        if (pr.prTitle?.toLowerCase()?.includes(lowerQuery) || `#${pr.prNumber}`.includes(lowerQuery)) {
+          suggestions.push({
+            type: 'pr',
+            repoName: fork.repoName,
+            repoOwner: fork.repoOwner,
+            prNumber: pr.prNumber,
+            prTitle: pr.prTitle,
+          });
+        }
+      }
+    }
+
+    return suggestions;
+  }, [forks, searchQuery]);
 
   const toggleRepoExpand = (repoName: string) => {
     setExpandedRepos((prev) => {
@@ -1485,17 +1532,66 @@ export default function Home() {
 
           {/* Search and Filters */}
           <div className="flex gap-2">
-            <div className="flex-1 relative">
+            <div className="flex-1 relative" ref={searchContainerRef}>
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowSearchAutocomplete(true);
+                }}
+                onFocus={() => setShowSearchAutocomplete(true)}
                 placeholder="Search repos or PR titles..."
                 className="w-full pl-10 pr-4 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
               />
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
+
+              {/* Search Autocomplete Dropdown */}
+              {showSearchAutocomplete && searchSuggestions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[240px] overflow-y-auto">
+                  {searchSuggestions.slice(0, 20).map((suggestion, index) => (
+                    <button
+                      key={`${suggestion.type}-${suggestion.repoName}-${suggestion.prNumber || index}`}
+                      onClick={() => {
+                        if (suggestion.type === 'repo') {
+                          setSearchQuery(suggestion.repoName);
+                          // Auto-expand the repo
+                          setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
+                        } else {
+                          setSearchQuery(suggestion.prTitle || `#${suggestion.prNumber}`);
+                          // Auto-expand the repo containing this PR
+                          setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
+                        }
+                        setShowSearchAutocomplete(false);
+                      }}
+                      className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
+                    >
+                      {suggestion.type === 'repo' ? (
+                        <>
+                          <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                          </svg>
+                          <span className="text-sm text-accent truncate">{suggestion.repoName}</span>
+                          <span className="text-xs text-text-muted ml-auto">Repo</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="h-4 w-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                          </svg>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-primary">#{suggestion.prNumber}</span>
+                            <span className="text-sm text-accent ml-1.5 truncate">{suggestion.prTitle}</span>
+                          </div>
+                          <span className="text-xs text-text-muted flex-shrink-0">{suggestion.repoName}</span>
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Filters Dropdown */}

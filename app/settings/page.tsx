@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
+
+// Fork types for autocomplete
+interface ForkRecord {
+  repoName: string;
+  repoOwner: string;
+  forkUrl: string;
+}
 
 interface Prompt {
   name: string;
@@ -81,6 +88,53 @@ export default function SettingsPage() {
   const [newCacheRepo, setNewCacheRepo] = useState("");
   const [cacheNotes, setCacheNotes] = useState("");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showCacheAutocomplete, setShowCacheAutocomplete] = useState(false);
+  const cacheInputRef = useRef<HTMLDivElement>(null);
+
+  // Fetch forks for autocomplete
+  const { data: forksData = [] } = useQuery<ForkRecord[]>({
+    queryKey: ["forks-for-autocomplete"],
+    queryFn: async () => {
+      const response = await fetch("/api/forks?source=db");
+      const data = await response.json();
+      if (!data.success) return [];
+      return data.forks || [];
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // Close autocomplete when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (cacheInputRef.current && !cacheInputRef.current.contains(event.target as Node)) {
+        setShowCacheAutocomplete(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Autocomplete suggestions for cache repo input
+  const cacheSuggestions = useMemo(() => {
+    if (!newCacheRepo.trim() || newCacheRepo.length < 2) return [];
+
+    const lowerQuery = newCacheRepo.toLowerCase().trim();
+    const suggestions: Array<{ repoOwner: string; repoName: string }> = [];
+    const seen = new Set<string>();
+
+    for (const fork of forksData) {
+      const key = `${fork.repoOwner}/${fork.repoName}`;
+      if (!seen.has(key) && key.toLowerCase().includes(lowerQuery)) {
+        seen.add(key);
+        suggestions.push({
+          repoOwner: fork.repoOwner,
+          repoName: fork.repoName,
+        });
+      }
+    }
+
+    return suggestions;
+  }, [forksData, newCacheRepo]);
 
   // Fetch cache info
   const {
@@ -782,13 +836,40 @@ export default function SettingsPage() {
                     Add Repository to Cache List
                   </label>
                   <div className="flex gap-3">
-                    <input
-                      type="text"
-                      value={newCacheRepo}
-                      onChange={(e) => setNewCacheRepo(e.target.value)}
-                      placeholder="owner/repo (e.g., supabase/supabase)"
-                      className="flex-1 px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                    />
+                    <div className="flex-1 relative" ref={cacheInputRef}>
+                      <input
+                        type="text"
+                        value={newCacheRepo}
+                        onChange={(e) => {
+                          setNewCacheRepo(e.target.value);
+                          setShowCacheAutocomplete(true);
+                        }}
+                        onFocus={() => setShowCacheAutocomplete(true)}
+                        placeholder="owner/repo (e.g., supabase/supabase)"
+                        className="w-full px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      />
+
+                      {/* Autocomplete Dropdown */}
+                      {showCacheAutocomplete && cacheSuggestions.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[200px] overflow-y-auto">
+                          {cacheSuggestions.slice(0, 20).map((suggestion, index) => (
+                            <button
+                              key={`${suggestion.repoOwner}/${suggestion.repoName}-${index}`}
+                              onClick={() => {
+                                setNewCacheRepo(`${suggestion.repoOwner}/${suggestion.repoName}`);
+                                setShowCacheAutocomplete(false);
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
+                            >
+                              <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                              </svg>
+                              <span className="text-sm text-accent truncate">{suggestion.repoOwner}/{suggestion.repoName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={cacheNotes}
