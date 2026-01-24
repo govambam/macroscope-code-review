@@ -20,7 +20,13 @@ function getDirectorySize(dirPath: string): number {
   }
 
   let totalSize = 0;
-  const items = fs.readdirSync(dirPath, { withFileTypes: true });
+  let items;
+  try {
+    items = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    // Skip directories we can't read
+    return 0;
+  }
 
   for (const item of items) {
     const itemPath = path.join(dirPath, item.name);
@@ -45,13 +51,14 @@ function getDirectorySize(dirPath: string): number {
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
 /**
  * Get list of repos currently cached on disk.
+ * Returns array of "owner/repo" strings.
  */
 function getCachedReposOnDisk(): string[] {
   const reposDir = config.reposDir;
@@ -60,11 +67,29 @@ function getCachedReposOnDisk(): string[] {
   }
 
   const repos: string[] = [];
-  const items = fs.readdirSync(reposDir, { withFileTypes: true });
 
-  for (const item of items) {
-    if (item.isDirectory()) {
-      repos.push(item.name);
+  // Repos are stored as reposDir/owner/repo
+  let ownerDirs;
+  try {
+    ownerDirs = fs.readdirSync(reposDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  for (const ownerDir of ownerDirs) {
+    if (ownerDir.isDirectory()) {
+      const ownerPath = path.join(reposDir, ownerDir.name);
+      let repoDirs;
+      try {
+        repoDirs = fs.readdirSync(ownerPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const repoDir of repoDirs) {
+        if (repoDir.isDirectory()) {
+          repos.push(`${ownerDir.name}/${repoDir.name}`);
+        }
+      }
     }
   }
 
@@ -87,12 +112,12 @@ export async function GET(): Promise<NextResponse> {
     const reposOnDisk = getCachedReposOnDisk();
     const totalSizeBytes = getDirectorySize(reposDir);
 
-    // Get size of each repo on disk
+    // Get size of each repo on disk (keyed by owner/repo)
     const repoSizes: Record<string, { bytes: number; formatted: string }> = {};
-    for (const repo of reposOnDisk) {
-      const repoPath = path.join(reposDir, repo);
+    for (const ownerRepo of reposOnDisk) {
+      const repoPath = path.join(reposDir, ownerRepo);
       const size = getDirectorySize(repoPath);
-      repoSizes[repo] = {
+      repoSizes[ownerRepo] = {
         bytes: size,
         formatted: formatBytes(size),
       };
@@ -190,7 +215,12 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     // Optionally delete from disk
     let deletedFromDisk = false;
     if (deleteFromDisk) {
-      const repoPath = path.join(config.reposDir, repoName);
+      // Repos are stored as reposDir/owner/repo
+      const repoPath = path.resolve(config.reposDir, repoOwner, repoName);
+      // Validate path stays within reposDir to prevent path traversal
+      if (!repoPath.startsWith(path.resolve(config.reposDir) + path.sep)) {
+        return NextResponse.json({ error: "Invalid repository name" }, { status: 400 });
+      }
       if (fs.existsSync(repoPath)) {
         fs.rmSync(repoPath, { recursive: true, force: true });
         deletedFromDisk = true;

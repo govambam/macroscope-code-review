@@ -940,7 +940,7 @@ export function addCachedRepo(repoOwner: string, repoName: string, notes: string
     INSERT INTO cached_repos (repo_owner, repo_name, notes)
     VALUES (?, ?, ?)
     ON CONFLICT(repo_owner, repo_name)
-    DO UPDATE SET notes = excluded.notes
+    DO UPDATE SET notes = COALESCE(excluded.notes, cached_repos.notes)
     RETURNING id
   `);
 

@@ -816,8 +816,8 @@ export default function SettingsPage() {
                     <div className="border border-border rounded-lg divide-y divide-border">
                       {cacheData.cachedReposList.map((repo) => {
                         const repoKey = `${repo.repo_owner}/${repo.repo_name}`;
-                        const isOnDisk = cacheData.reposOnDisk.includes(repo.repo_name);
-                        const diskSize = cacheData.repoSizes[repo.repo_name];
+                        const isOnDisk = cacheData.reposOnDisk.includes(repoKey);
+                        const diskSize = cacheData.repoSizes[repoKey];
 
                         return (
                           <div
@@ -865,7 +865,7 @@ export default function SettingsPage() {
 
                 {/* Repos on Disk but not in List */}
                 {cacheData.reposOnDisk.filter(
-                  (repo) => !cacheData.cachedReposList.some((cr) => cr.repo_name === repo)
+                  (ownerRepo) => !cacheData.cachedReposList.some((cr) => `${cr.repo_owner}/${cr.repo_name}` === ownerRepo)
                 ).length > 0 && (
                   <div>
                     <h3 className="text-sm font-medium text-accent mb-3">
@@ -876,12 +876,13 @@ export default function SettingsPage() {
                     </p>
                     <div className="border border-border rounded-lg divide-y divide-border">
                       {cacheData.reposOnDisk
-                        .filter((repo) => !cacheData.cachedReposList.some((cr) => cr.repo_name === repo))
-                        .map((repoName) => {
-                          const diskSize = cacheData.repoSizes[repoName];
+                        .filter((ownerRepo) => !cacheData.cachedReposList.some((cr) => `${cr.repo_owner}/${cr.repo_name}` === ownerRepo))
+                        .map((ownerRepo) => {
+                          const diskSize = cacheData.repoSizes[ownerRepo];
+                          const [owner, repoName] = ownerRepo.split("/");
                           return (
                             <div
-                              key={repoName}
+                              key={ownerRepo}
                               className="flex items-center justify-between px-4 py-3 hover:bg-bg-subtle"
                             >
                               <div className="flex items-center gap-3">
@@ -889,7 +890,7 @@ export default function SettingsPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                                 </svg>
                                 <div>
-                                  <div className="text-sm font-medium text-accent">{repoName}</div>
+                                  <div className="text-sm font-medium text-accent">{ownerRepo}</div>
                                   <div className="text-xs text-text-muted">
                                     {diskSize?.formatted || "Unknown size"}
                                   </div>
@@ -897,7 +898,7 @@ export default function SettingsPage() {
                               </div>
                               <button
                                 onClick={() => removeCacheRepoMutation.mutate({
-                                  repoOwner: "unknown",
+                                  repoOwner: owner,
                                   repoName: repoName,
                                   deleteFromDisk: true,
                                 })}
