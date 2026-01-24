@@ -129,6 +129,13 @@ export default function Home() {
   const [status, setStatus] = useState<StatusMessage[]>([]);
   const [result, setResult] = useState<ApiResponse | null>(null);
 
+  // Auto-scroll status container to bottom when new messages arrive
+  useEffect(() => {
+    if (statusContainerRef.current) {
+      statusContainerRef.current.scrollTop = statusContainerRef.current.scrollHeight;
+    }
+  }, [status]);
+
   // React Query client for cache manipulation
   const queryClient = useQueryClient();
 
@@ -261,6 +268,7 @@ export default function Home() {
   const [internalFilter, setInternalFilter] = useState<InternalFilter>("all");
   const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
+  const statusContainerRef = useRef<HTMLDivElement>(null);
 
   // Close filters dropdown when clicking outside
   useEffect(() => {
@@ -2661,7 +2669,7 @@ export default function Home() {
               {status.length > 0 && (
                 <div className="mt-6">
                   <h3 className="text-sm font-medium text-accent mb-3">Status</h3>
-                  <div className="bg-bg-subtle border border-border rounded-lg p-4 max-h-48 overflow-y-auto">
+                  <div ref={statusContainerRef} className="bg-bg-subtle border border-border rounded-lg p-4 max-h-48 overflow-y-auto">
                     <div className="space-y-2">
                       {status.map((msg, idx) => (
                         <div key={idx} className="flex items-start gap-3 text-sm">
