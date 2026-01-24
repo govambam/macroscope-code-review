@@ -71,6 +71,36 @@ Behind the scenes we are using an Opus 4.5 to analyze the bugs found during Macr
 - **Wait for Macroscope**: After simulating a PR, wait a few minutes for Macroscope to complete its review before analyzing. You can check the PR in Github for the Macroscope review status
 - **Check Bug Count**: If bug count shows "-", Macroscope hasn't reviewed yet or found no issues
 - **Use Filters**: Filter by "My PRs" to focus on your assigned reviews
+
+### Caching Repositories
+
+For faster PR simulations, you can cache repositories on the server. This is useful for:
+
+- **Large repositories** that take a long time to clone (e.g., supabase, kubernetes)
+- **Strategic accounts** where you expect to simulate multiple PRs over time
+
+**How to cache a repository:**
+
+1. Go to **Settings** (click your avatar > Settings, or use the sidebar)
+2. Scroll to the **Repository Cache** section
+3. Enter the repository in `owner/repo` format (e.g., `supabase/supabase`)
+4. Optionally add notes (e.g., "Strategic account - Series B")
+5. Click **Add**
+
+**What caching does:**
+- The first PR simulation will clone and cache the repository
+- Subsequent simulations from the same repo will be much faster
+- You can see total cache size and manage cached repos in Settings
+
+**When NOT to cache:**
+- One-off PR reviews from repos you won't revisit
+- Small repositories that clone quickly anyway
+
+**Managing cache:**
+- View cache size and cached repos in Settings > Repository Cache
+- Remove individual repos from the cache list
+- Use "Clear All Cache" to free up disk space if needed
+
 ---
 
 ## Technical Documentation
