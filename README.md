@@ -105,6 +105,8 @@ For faster PR simulations, you can cache repositories on the server. This is use
 
 ## Technical Documentation
 
+> **Deep Dive:** For detailed technical documentation on how PR Simulation and Repository Caching work under the hood (including architecture diagrams, code snippets, and Q&A), see **[Technical Documentation: PR Simulation & Caching](docs/TECHNICAL_DOCUMENTATION.md)**.
+
 ### Tech Stack
 
 - **Framework**: Next.js 16 with App Router
