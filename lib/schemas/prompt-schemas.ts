@@ -61,14 +61,12 @@ export const prAnalysisSchema = z.object({
 
 /**
  * Schema for Email Generation prompt output
- * Note: The email generation prompt returns plain text, not JSON
- * This schema is for reference only - the prompt outputs formatted email text
+ * The email generation prompt returns plain text (not JSON).
+ * The output should be a formatted email starting with "Subject:" line.
  */
-export const emailGenerationSchema = z.object({
-  // Email generation returns plain text with Attio merge fields
-  // This schema documents what the code expects to receive
-  email_text: z.string().describe("The generated email with Attio merge fields like { First Name }"),
-});
+export const emailGenerationSchema = z.string().describe(
+  "Plain text email output starting with 'Subject:' line, containing Attio merge fields like { First Name }, { Company Name }, { Sender Name }"
+);
 
 /**
  * Map prompt names to their expected output schemas
@@ -204,6 +202,12 @@ export function schemaToDescription(schema: z.ZodSchema): string {
 export function getSchemaTree(schema: z.ZodSchema, indent = 0): string {
   const lines: string[] = [];
   const spaces = "  ".repeat(indent);
+
+  // Handle plain string schema (like email generation)
+  if (schema instanceof z.ZodString) {
+    const description = schema.description || "plain text output";
+    return `${spaces}(string) ${description}`;
+  }
 
   if (schema instanceof z.ZodObject) {
     const shape = schema.shape as Record<string, z.ZodTypeAny>;
