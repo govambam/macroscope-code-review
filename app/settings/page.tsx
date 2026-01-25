@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
+import { MobileMenu } from "@/components/MobileMenu";
 
 // Fork types for autocomplete
 interface ForkRecord {
@@ -413,8 +414,11 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Sidebar */}
-      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
+      {/* Mobile Menu - visible only on mobile */}
+      <MobileMenu />
+
+      {/* Left Sidebar - hidden on mobile */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-border flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
           <Image
@@ -453,17 +457,17 @@ export default function SettingsPage() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 bg-bg-subtle h-screen overflow-y-auto">
+      <main className="flex-1 bg-bg-subtle min-h-screen md:h-screen overflow-y-auto pt-14 md:pt-0">
         {/* Sticky Header */}
-        <div className="sticky top-0 z-10 bg-bg-subtle px-8 pt-8 pb-0 border-b border-border shadow-sm">
-          <h1 className="text-2xl font-semibold text-accent tracking-tight">Settings</h1>
-          <p className="mt-2 text-text-secondary">Configure prompts and application settings</p>
+        <div className="sticky top-14 md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-0 border-b border-border shadow-sm">
+          <h1 className="text-xl md:text-2xl font-semibold text-accent tracking-tight">Settings</h1>
+          <p className="mt-1 md:mt-2 text-sm md:text-base text-text-secondary">Configure prompts and application settings</p>
 
           {/* Tabs */}
-          <div className="flex gap-6 mt-6">
+          <div className="flex gap-4 md:gap-6 mt-4 md:mt-6">
             <button
               onClick={() => setActiveTab("prompts")}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors min-h-[44px] ${
                 activeTab === "prompts"
                   ? "border-primary text-primary"
                   : "border-transparent text-text-secondary hover:text-accent hover:border-border"
@@ -473,7 +477,7 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={() => setActiveTab("caching")}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors min-h-[44px] ${
                 activeTab === "caching"
                   ? "border-primary text-primary"
                   : "border-transparent text-text-secondary hover:text-accent hover:border-border"
@@ -485,10 +489,10 @@ export default function SettingsPage() {
         </div>
 
         {/* Content */}
-        <div className="px-8 py-6">
+        <div className="px-4 md:px-8 py-4 md:py-6">
           {/* Prompts Section */}
           {activeTab === "prompts" && (
-          <div className="bg-white border border-border rounded-xl shadow-sm">
+          <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-border">
               <h2 className="text-lg font-semibold text-accent">Prompts</h2>
               <p className="text-sm text-text-secondary mt-1">

@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
+import { MobileMenu } from "@/components/MobileMenu";
+import { PRCard, RepoGroupHeader } from "@/components/PRCard";
 
 type FilterMode = "all" | "mine";
 type InternalFilter = "all" | "internal" | "external";
@@ -1349,8 +1351,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Sidebar - Logo only */}
-      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
+      {/* Mobile Menu - visible only on mobile */}
+      <MobileMenu />
+
+      {/* Left Sidebar - hidden on mobile */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-border flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
           <Image
@@ -1389,21 +1394,21 @@ export default function Home() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 bg-bg-subtle h-screen overflow-y-auto">
+      <main className="flex-1 bg-bg-subtle min-h-screen md:h-screen overflow-y-auto pt-14 md:pt-0">
         {/* Sticky Header Section */}
-        <div className="sticky top-0 z-10 bg-bg-subtle px-8 pt-8 pb-4 border-b border-border shadow-sm">
+        <div className="sticky top-14 md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-4 border-b border-border shadow-sm">
           {/* Page Header */}
-          <div className="flex items-start justify-between mb-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4 md:mb-6">
             <div>
-              <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
-              <p className="mt-2 text-text-secondary">View and analyze pull requests grouped by repository</p>
+              <h1 className="text-xl md:text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
+              <p className="mt-1 md:mt-2 text-sm md:text-base text-text-secondary hidden md:block">View and analyze pull requests grouped by repository</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {totalSelected > 0 && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   disabled={deleteLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                 >
                   {deleteLoading ? (
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -1415,12 +1420,12 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   )}
-                  Delete
+                  <span className="hidden sm:inline">Delete</span>
                 </button>
               )}
               <button
                 onClick={() => setShowAnalyzeCard(!showAnalyzeCard)}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] text-sm font-medium rounded-lg transition-colors ${
                   showAnalyzeCard
                     ? "bg-primary text-white"
                     : "bg-white border border-border text-accent hover:bg-bg-subtle"
@@ -1429,16 +1434,18 @@ export default function Home() {
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                Import PR
+                <span className="hidden sm:inline">Import PR</span>
+                <span className="sm:hidden">Import</span>
               </button>
               <button
                 onClick={openCreatePRModal}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                 </svg>
-                Simulate PR
+                <span className="hidden sm:inline">Simulate PR</span>
+                <span className="sm:hidden">Simulate</span>
               </button>
             </div>
           </div>
@@ -1531,7 +1538,7 @@ export default function Home() {
           )}
 
           {/* Search and Filters */}
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <div className="flex-1 relative" ref={searchContainerRef}>
               <input
                 type="text"
@@ -1542,7 +1549,7 @@ export default function Home() {
                 }}
                 onFocus={() => setShowSearchAutocomplete(true)}
                 placeholder="Search repos or PR titles..."
-                className="w-full pl-10 pr-4 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                className="w-full pl-10 pr-4 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
               />
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1598,14 +1605,14 @@ export default function Home() {
             <div className="relative" ref={filtersRef}>
               <button
                 onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
-                className={`px-3 py-2 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors flex items-center gap-1.5 ${
+                className={`px-3 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors flex items-center gap-1.5 ${
                   (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
                 }`}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                 </svg>
-                Filters
+                <span className="hidden sm:inline">Filters</span>
                 {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
                   <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
                     {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
@@ -1768,7 +1775,7 @@ export default function Home() {
             <button
               onClick={refreshFromGitHub}
               disabled={isRefreshingFromGitHub}
-              className="px-3 py-2 bg-white border border-border rounded-lg text-sm text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="px-3 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-1.5"
             >
               {isRefreshingFromGitHub ? (
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -1786,9 +1793,9 @@ export default function Home() {
         </div>
 
         {/* Content Area */}
-        <div className="px-8 py-6">
+        <div className="px-4 md:px-8 py-4 md:py-6">
           {/* My Repos Section */}
-          <div className="bg-white border border-border rounded-xl shadow-sm">
+          <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
             {/* Error display */}
             {forksError && (
               <div className="mx-6 mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
@@ -1861,13 +1868,13 @@ export default function Home() {
                         <div key={fork.forkUrl}>
                           {/* Repo Header - Clickable Accordion */}
                           <div
-                            className="flex items-center px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                            className="flex items-center px-4 md:px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors min-h-[52px]"
                             onClick={() => toggleRepoExpand(fork.repoName)}
                           >
                             {/* Expand/Collapse Arrow */}
                             <div className="w-6 flex-shrink-0">
                               <svg
-                                className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                                className={`h-5 w-5 md:h-4 md:w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -1890,12 +1897,12 @@ export default function Home() {
                                   toggleRepoSelection(fork.repoName);
                                 }}
                                 onClick={(e) => e.stopPropagation()}
-                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                                className="h-5 w-5 md:h-4 md:w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
                               />
                             </div>
 
                             {/* Repo Name and PR Count */}
-                            <div className="flex-1 flex items-center gap-3 ml-2">
+                            <div className="flex-1 flex items-center gap-2 md:gap-3 ml-2 flex-wrap">
                               <a
                                 href={fork.forkUrl}
                                 target="_blank"
@@ -1958,8 +1965,8 @@ export default function Home() {
                           {/* PR List - Collapsible */}
                           {isExpanded && fork.prs.length > 0 && (
                             <div className="bg-white">
-                              {/* PR Table Header */}
-                              <div className="flex items-center px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {/* PR Table Header - Desktop only */}
+                              <div className="hidden md:flex items-center px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 <div className="w-6 flex-shrink-0"></div>
                                 <div className="w-10 flex-shrink-0"></div>
                                 <div className="flex-1 ml-2"></div>
@@ -1970,8 +1977,23 @@ export default function Home() {
                                 <div className="w-[100px] text-center">Owner</div>
                               </div>
 
-                              {/* PR Rows */}
-                              <div className="divide-y divide-gray-100">
+                              {/* Mobile PR Cards */}
+                              <div className="md:hidden p-3 space-y-3">
+                                {fork.prs.map((pr) => (
+                                  <PRCard
+                                    key={`mobile-${fork.repoName}-${pr.prNumber}`}
+                                    pr={pr}
+                                    repoName={fork.repoName}
+                                    isSelected={selection.prs.has(`${fork.repoName}:${pr.prNumber}`)}
+                                    onToggleSelect={() => togglePrSelection(fork.repoName, pr.prNumber)}
+                                    onAction={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis ?? false, pr.prTitle)}
+                                    owner={pr.createdBy}
+                                  />
+                                ))}
+                              </div>
+
+                              {/* PR Rows - Desktop */}
+                              <div className="hidden md:block divide-y divide-gray-100">
                                 {fork.prs.map((pr) => {
                                   // Bug count badge styling - softer pastel colors
                                   const getBugBadgeStyle = () => {
@@ -1985,7 +2007,7 @@ export default function Home() {
 
                                   return (
                                     <div
-                                      key={`${fork.repoName}-${pr.prNumber}`}
+                                      key={`desktop-${fork.repoName}-${pr.prNumber}`}
                                       className="flex items-center px-6 py-4 hover:bg-gray-50/50 transition-colors"
                                     >
                                       {/* Empty space for arrow alignment */}
@@ -2263,24 +2285,24 @@ export default function Home() {
       />
       {/* Modal Container */}
       <div
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+        className={`fixed inset-0 z-50 flex items-center justify-center p-0 md:p-4 transition-opacity duration-200 ${
           showAnalysisModal ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
         <div
-          className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ease-out ${
+          className={`bg-white shadow-lg flex flex-col transition-all duration-200 ease-out ${
             showAnalysisModal ? "scale-100 opacity-100" : "scale-95 opacity-0"
           } ${
             modalExpanded
-              ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
-              : "w-full max-w-4xl h-[700px]"
+              ? "w-full h-full md:w-[calc(100%-2rem)] md:h-[calc(100%-2rem)] max-w-none rounded-none md:rounded-xl"
+              : "w-full h-full md:max-w-4xl md:h-[700px] md:rounded-xl rounded-none"
           }`}
           onClick={(e) => e.stopPropagation()}
         >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-10 py-4 border-b border-border shrink-0">
+            <div className="flex items-center justify-between px-4 md:px-10 py-3 md:py-4 border-b border-border shrink-0">
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-semibold text-accent truncate">
+                <h2 className="text-base md:text-lg font-semibold text-accent truncate">
                   {selectedPrTitle || "PR Analysis"}
                 </h2>
                 {analysisForkedUrl && (
@@ -2288,17 +2310,17 @@ export default function Home() {
                     href={analysisForkedUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline truncate block"
+                    className="text-xs md:text-sm text-primary hover:underline truncate block"
                   >
                     {analysisForkedUrl}
                   </a>
                 )}
               </div>
-              <div className="flex items-center gap-2 ml-4">
-                {/* Expand/Collapse Button */}
+              <div className="flex items-center gap-1 md:gap-2 ml-2 md:ml-4">
+                {/* Expand/Collapse Button - hidden on mobile */}
                 <button
                   onClick={() => setModalExpanded(!modalExpanded)}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="hidden md:flex p-2 min-h-[44px] min-w-[44px] items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                   title={modalExpanded ? "Collapse" : "Expand"}
                 >
                   {modalExpanded ? (
@@ -2314,9 +2336,9 @@ export default function Home() {
                 {/* Close Button */}
                 <button
                   onClick={closeAnalysisModal}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -2324,10 +2346,10 @@ export default function Home() {
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex border-b border-border px-10 shrink-0">
+            <div className="flex border-b border-border px-4 md:px-10 shrink-0">
               <button
                 onClick={() => setModalTab("analysis")}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
                   modalTab === "analysis"
                     ? "border-primary text-primary"
                     : "border-transparent text-text-secondary hover:text-accent"
@@ -2657,22 +2679,22 @@ export default function Home() {
 
       {/* Create PR Modal */}
       {showCreatePRModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-2 md:p-4 z-50">
           <div
             className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ${
               createPRModalExpanded
-                ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
-                : "w-full max-w-xl max-h-[90vh]"
+                ? "w-full h-full md:w-[calc(100%-2rem)] md:h-[calc(100%-2rem)] max-w-none rounded-none md:rounded-xl"
+                : "w-full max-w-xl max-h-[95vh] md:max-h-[90vh]"
             }`}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-border shrink-0">
               <h2 className="text-lg font-semibold text-accent">Create PR</h2>
-              <div className="flex items-center gap-2">
-                {/* Expand/Collapse Button */}
+              <div className="flex items-center gap-1 md:gap-2">
+                {/* Expand/Collapse Button - hidden on mobile */}
                 <button
                   onClick={() => setCreatePRModalExpanded(!createPRModalExpanded)}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="hidden md:flex p-2 min-h-[44px] min-w-[44px] items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                   title={createPRModalExpanded ? "Collapse" : "Expand"}
                 >
                   {createPRModalExpanded ? (
@@ -2688,9 +2710,9 @@ export default function Home() {
                 {/* Close Button */}
                 <button
                   onClick={closeCreatePRModal}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -2698,11 +2720,11 @@ export default function Home() {
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex border-b border-border px-6 shrink-0">
+            <div className="flex border-b border-border px-4 md:px-6 shrink-0">
               <button
                 onClick={() => handleCreateModeChange("pr")}
                 disabled={loading}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
                   createMode === "pr"
                     ? "border-primary text-primary"
                     : "border-transparent text-text-secondary hover:text-accent"
@@ -2713,7 +2735,7 @@ export default function Home() {
               <button
                 onClick={() => handleCreateModeChange("commit")}
                 disabled={loading}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
                   createMode === "commit"
                     ? "border-primary text-primary"
                     : "border-transparent text-text-secondary hover:text-accent"
