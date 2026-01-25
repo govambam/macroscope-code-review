@@ -15,8 +15,12 @@ export interface MacroscopeComment {
   created_at: string;
 }
 
+// ============================================================================
+// OLD FORMAT TYPES (schema version 1) - for backwards compatibility
+// ============================================================================
+
 /**
- * Result when no meaningful bugs are found.
+ * Result when no meaningful bugs are found (OLD FORMAT).
  */
 export interface NoMeaningfulBugsResult {
   meaningful_bugs_found: false;
@@ -25,7 +29,7 @@ export interface NoMeaningfulBugsResult {
 }
 
 /**
- * Information about a single bug.
+ * Information about a single bug (OLD FORMAT).
  */
 export interface BugSnippet {
   title: string;
@@ -37,7 +41,7 @@ export interface BugSnippet {
 }
 
 /**
- * Result when meaningful bugs are found.
+ * Result when meaningful bugs are found (OLD FORMAT).
  */
 export interface MeaningfulBugsResult {
   meaningful_bugs_found: true;
@@ -47,9 +51,94 @@ export interface MeaningfulBugsResult {
 }
 
 /**
- * Union type for all possible analysis results.
+ * Union type for old analysis results (schema version 1).
  */
-export type PRAnalysisResult = NoMeaningfulBugsResult | MeaningfulBugsResult;
+export type PRAnalysisResultV1 = NoMeaningfulBugsResult | MeaningfulBugsResult;
+
+// ============================================================================
+// NEW FORMAT TYPES (schema version 2)
+// ============================================================================
+
+/**
+ * Category for an analyzed comment.
+ */
+export type CommentCategory =
+  | "bug_critical"
+  | "bug_high"
+  | "bug_medium"
+  | "bug_low"
+  | "suggestion"
+  | "style"
+  | "nitpick";
+
+/**
+ * A single analyzed comment from the new format.
+ */
+export interface AnalysisComment {
+  index: number;
+  macroscope_comment_text: string;
+  file_path: string;
+  line_number: number | null;
+  category: CommentCategory;
+  title: string;
+  explanation: string;
+  explanation_short: string | null; // Only for meaningful bugs
+  impact_scenario: string | null; // Only for meaningful bugs
+  code_suggestion: string | null;
+  is_meaningful_bug: boolean;
+  outreach_ready: boolean;
+  outreach_skip_reason: string | null; // Required when outreach_ready is false
+}
+
+/**
+ * Summary of the analysis by severity and type.
+ */
+export interface AnalysisSummary {
+  bugs_by_severity: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  non_bugs: {
+    suggestions: number;
+    style: number;
+    nitpicks: number;
+  };
+  recommendation: string;
+}
+
+/**
+ * New PR analysis response format (schema version 2).
+ */
+export interface PRAnalysisResultV2 {
+  total_comments_processed: number;
+  meaningful_bugs_count: number;
+  outreach_ready_count: number;
+  best_bug_for_outreach_index: number | null;
+  all_comments: AnalysisComment[];
+  summary: AnalysisSummary;
+}
+
+/**
+ * Union type for all possible analysis results (supports both formats).
+ * Use isV2AnalysisResult() to determine which format you have.
+ */
+export type PRAnalysisResult = PRAnalysisResultV1 | PRAnalysisResultV2;
+
+/**
+ * Type guard to check if result is the new format (V2).
+ */
+export function isV2AnalysisResult(result: PRAnalysisResult): result is PRAnalysisResultV2 {
+  return "all_comments" in result && "summary" in result;
+}
+
+/**
+ * Type guard to check if result is the old format (V1).
+ */
+export function isV1AnalysisResult(result: PRAnalysisResult): result is PRAnalysisResultV1 {
+  return "meaningful_bugs_found" in result;
+}
 
 /**
  * Input for PR analysis.
@@ -174,6 +263,117 @@ export function extractOriginalPRUrl(prBody: string): string | null {
 }
 
 /**
+ * Calculate dynamic max_tokens based on the number of Macroscope comments.
+ * More comments = more output tokens needed.
+ */
+function calculateMaxTokens(commentCount: number): number {
+  const estimatedTokensPerComment = 500; // Each comment analysis needs ~500 tokens
+  const baseTokens = 2000; // Base tokens for structure, summary, etc.
+  const maxTokensCap = 16384; // Cap at 16k tokens
+
+  const calculated = baseTokens + commentCount * estimatedTokensPerComment;
+  return Math.min(calculated, maxTokensCap);
+}
+
+/**
+ * Validates the new format (V2) analysis response.
+ * Throws an error if validation fails.
+ */
+function validateV2Response(data: unknown): PRAnalysisResultV2 {
+  if (!data || typeof data !== "object") {
+    throw new Error("Response is not an object");
+  }
+
+  const response = data as Record<string, unknown>;
+
+  // Check required top-level fields
+  const requiredFields = [
+    "total_comments_processed",
+    "meaningful_bugs_count",
+    "outreach_ready_count",
+    "all_comments",
+    "summary",
+  ];
+
+  for (const field of requiredFields) {
+    if (!(field in response)) {
+      throw new Error(`Missing required field: ${field}`);
+    }
+  }
+
+  if (!Array.isArray(response.all_comments)) {
+    throw new Error("all_comments must be an array");
+  }
+
+  // Validate each comment has required fields
+  for (let i = 0; i < response.all_comments.length; i++) {
+    const comment = response.all_comments[i] as Record<string, unknown>;
+    const commentRequiredFields = [
+      "index",
+      "macroscope_comment_text",
+      "file_path",
+      "category",
+      "title",
+      "explanation",
+      "is_meaningful_bug",
+      "outreach_ready",
+    ];
+
+    for (const field of commentRequiredFields) {
+      if (!(field in comment)) {
+        throw new Error(`Comment ${i} missing required field: ${field}`);
+      }
+    }
+  }
+
+  // Validate summary structure
+  const summary = response.summary as Record<string, unknown>;
+  if (!summary || typeof summary !== "object") {
+    throw new Error("summary must be an object");
+  }
+
+  if (!summary.bugs_by_severity || typeof summary.bugs_by_severity !== "object") {
+    throw new Error("summary.bugs_by_severity is required");
+  }
+
+  if (!summary.recommendation || typeof summary.recommendation !== "string") {
+    throw new Error("summary.recommendation is required");
+  }
+
+  return data as PRAnalysisResultV2;
+}
+
+/**
+ * Validates the old format (V1) analysis response.
+ * Throws an error if validation fails.
+ */
+function validateV1Response(result: PRAnalysisResultV1): void {
+  if (typeof result.meaningful_bugs_found !== "boolean") {
+    throw new Error("Invalid response: missing meaningful_bugs_found field");
+  }
+
+  if (result.meaningful_bugs_found) {
+    const bugsResult = result as MeaningfulBugsResult;
+    if (!bugsResult.bugs || !Array.isArray(bugsResult.bugs)) {
+      throw new Error("Invalid response: missing bugs array for meaningful bugs");
+    }
+    if (bugsResult.bugs.length === 0) {
+      throw new Error("Invalid response: bugs array is empty");
+    }
+    for (const bug of bugsResult.bugs) {
+      if (!bug.title || !bug.explanation || !bug.file_path || !bug.severity) {
+        throw new Error("Invalid response: bug missing required fields");
+      }
+    }
+  } else {
+    const nobugsResult = result as NoMeaningfulBugsResult;
+    if (!nobugsResult.reason) {
+      throw new Error("Invalid response: missing reason for no meaningful bugs");
+    }
+  }
+}
+
+/**
  * Analyzes a PR using Claude to determine if Macroscope found meaningful bugs.
  *
  * This function:
@@ -211,7 +411,7 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
   );
 
   if (macroscopeComments.length === 0) {
-    // No Macroscope comments found - return early
+    // No Macroscope comments found - return early with V1 format for consistency
     return {
       meaningful_bugs_found: false,
       reason: "No Macroscope review comments were found on this PR. The bot may not have reviewed it yet, or there were no issues to report.",
@@ -233,57 +433,132 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
   const metadata = getPromptMetadata("pr-analysis");
   const model = metadata.model || DEFAULT_MODEL;
 
+  // Calculate dynamic max_tokens based on comment count
+  const maxTokens = calculateMaxTokens(macroscopeComments.length);
+
   // Send to Claude and parse response
   const result = await sendMessageAndParseJSON<PRAnalysisResult>(prompt, {
     model,
-    maxTokens: 8192, // Increased for multiple bugs
+    maxTokens,
     temperature: 0, // Deterministic output for analysis
   });
 
-  // Validate the response structure
-  if (typeof result.meaningful_bugs_found !== "boolean") {
-    throw new Error("Invalid response: missing meaningful_bugs_found field");
-  }
-
-  if (result.meaningful_bugs_found) {
-    // Validate MeaningfulBugsResult structure
-    const bugsResult = result as MeaningfulBugsResult;
-    if (!bugsResult.bugs || !Array.isArray(bugsResult.bugs)) {
-      throw new Error("Invalid response: missing bugs array for meaningful bugs");
-    }
-    if (bugsResult.bugs.length === 0) {
-      throw new Error("Invalid response: bugs array is empty");
-    }
-    // Validate each bug has required fields
-    for (const bug of bugsResult.bugs) {
-      if (!bug.title || !bug.explanation || !bug.file_path || !bug.severity) {
-        throw new Error("Invalid response: bug missing required fields");
-      }
-    }
+  // Determine which format we received and validate accordingly
+  if (isV2AnalysisResult(result)) {
+    // New format - validate V2 structure
+    validateV2Response(result);
+  } else if (isV1AnalysisResult(result)) {
+    // Old format - validate V1 structure
+    validateV1Response(result);
   } else {
-    // Validate NoMeaningfulBugsResult structure
-    const nobugsResult = result as NoMeaningfulBugsResult;
-    if (!nobugsResult.reason) {
-      throw new Error("Invalid response: missing reason for no meaningful bugs");
-    }
+    throw new Error("Invalid response format: does not match V1 or V2 schema");
   }
 
   return result;
 }
 
 /**
- * Type guard to check if result has meaningful bugs.
+ * Type guard to check if result has meaningful bugs (works with both formats).
  */
-export function hasMeaningfulBugs(
-  result: PRAnalysisResult
-): result is MeaningfulBugsResult {
+export function hasMeaningfulBugs(result: PRAnalysisResult): boolean {
+  if (isV2AnalysisResult(result)) {
+    return result.meaningful_bugs_count > 0;
+  }
   return result.meaningful_bugs_found === true;
 }
 
 /**
- * Gets the most impactful bug from the analysis result.
+ * Gets the most impactful bug from the analysis result (OLD FORMAT - V1).
  */
 export function getMostImpactfulBug(result: MeaningfulBugsResult): BugSnippet | null {
   const mostImpactful = result.bugs.find(bug => bug.is_most_impactful);
   return mostImpactful || result.bugs[0] || null;
+}
+
+/**
+ * Gets the best bug for outreach from the analysis result (NEW FORMAT - V2).
+ * Returns null if no outreach-ready bug exists.
+ */
+export function getBestBugForOutreach(result: PRAnalysisResultV2): AnalysisComment | null {
+  if (result.best_bug_for_outreach_index === null) {
+    return null;
+  }
+  return result.all_comments.find(c => c.index === result.best_bug_for_outreach_index) || null;
+}
+
+/**
+ * Gets all meaningful bugs from V2 result, sorted by severity.
+ */
+export function getMeaningfulBugsV2(result: PRAnalysisResultV2): AnalysisComment[] {
+  const severityOrder: Record<CommentCategory, number> = {
+    bug_critical: 0,
+    bug_high: 1,
+    bug_medium: 2,
+    bug_low: 3,
+    suggestion: 4,
+    style: 5,
+    nitpick: 6,
+  };
+
+  return result.all_comments
+    .filter(c => c.is_meaningful_bug)
+    .sort((a, b) => severityOrder[a.category] - severityOrder[b.category]);
+}
+
+/**
+ * Gets outreach-ready comments from V2 result.
+ */
+export function getOutreachReadyComments(result: PRAnalysisResultV2): AnalysisComment[] {
+  return result.all_comments.filter(c => c.outreach_ready);
+}
+
+/**
+ * Converts a V2 AnalysisComment to a V1 BugSnippet for backwards compatibility.
+ * Useful when existing code expects the old format.
+ */
+export function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean = false): BugSnippet {
+  // Map V2 categories to V1 severity
+  const severityMap: Partial<Record<CommentCategory, "critical" | "high" | "medium">> = {
+    bug_critical: "critical",
+    bug_high: "high",
+    bug_medium: "medium",
+    bug_low: "medium",
+  };
+
+  return {
+    title: comment.title,
+    explanation: comment.explanation,
+    file_path: comment.file_path,
+    severity: severityMap[comment.category] || "medium",
+    is_most_impactful: isMostImpactful,
+    macroscope_comment_text: comment.macroscope_comment_text,
+  };
+}
+
+/**
+ * Converts a V2 result to V1 format for backwards compatibility.
+ * Useful when existing code expects the old format.
+ */
+export function convertV2ToV1(result: PRAnalysisResultV2): PRAnalysisResultV1 {
+  const meaningfulBugs = getMeaningfulBugsV2(result);
+
+  if (meaningfulBugs.length === 0) {
+    return {
+      meaningful_bugs_found: false,
+      reason: result.summary.recommendation || "No meaningful bugs found in this PR.",
+      macroscope_comments_found: result.total_comments_processed,
+    };
+  }
+
+  const bestBugIndex = result.best_bug_for_outreach_index;
+  const bugs = meaningfulBugs.map(comment =>
+    commentToBugSnippet(comment, comment.index === bestBugIndex)
+  );
+
+  return {
+    meaningful_bugs_found: true,
+    bugs,
+    total_macroscope_bugs_found: meaningfulBugs.length,
+    macroscope_comments_found: result.total_comments_processed,
+  };
 }

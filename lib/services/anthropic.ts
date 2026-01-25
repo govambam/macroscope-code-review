@@ -115,12 +115,34 @@ export async function sendMessage(
 }
 
 /**
+ * Checks if a JSON string appears to be complete (not truncated).
+ * @param str - The string to check
+ * @returns true if JSON looks complete, false if likely truncated
+ */
+function isCompleteJSON(str: string): boolean {
+  const trimmed = str.trim();
+
+  // Check if it ends with a closing brace or bracket
+  if (!trimmed.endsWith("}") && !trimmed.endsWith("]")) {
+    return false;
+  }
+
+  // Try to parse it - if it fails, it's likely truncated
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Extracts and parses JSON from a response that may contain markdown code fences
  * or other formatting. Handles special characters and newlines in string fields.
  *
  * @param response - The raw response string from Claude
  * @returns The parsed JSON object
- * @throws Error if parsing fails
+ * @throws Error if parsing fails or response is truncated
  */
 function extractAndParseJSON<T>(response: string): T {
   let jsonStr = response.trim();
@@ -188,7 +210,19 @@ function extractAndParseJSON<T>(response: string): T {
     }
   }
 
-  // Step 3: Try parsing the JSON
+  // Step 3: Check for truncation before parsing
+  // If the JSON doesn't end properly, it was likely truncated
+  if (!isCompleteJSON(jsonStr)) {
+    const responseLength = response.length;
+    throw new Error(
+      `Claude response was truncated (${responseLength} chars). ` +
+        `This usually means the PR has too many comments for the token limit. ` +
+        `Try a PR with fewer Macroscope comments, or the analysis prompt may need optimization. ` +
+        `Response ends with: "${jsonStr.slice(-100)}"`
+    );
+  }
+
+  // Step 4: Try parsing the JSON
   try {
     return JSON.parse(jsonStr) as T;
   } catch (parseError) {
@@ -196,7 +230,7 @@ function extractAndParseJSON<T>(response: string): T {
     console.error("JSON parse error:", parseError);
     console.error("Attempted to parse:", jsonStr.substring(0, 1000));
 
-    // Step 4: Try to fix common issues and retry
+    // Step 5: Try to fix common issues and retry
     try {
       // Sometimes there are control characters that break parsing
       // Remove control characters except newlines and tabs in strings
