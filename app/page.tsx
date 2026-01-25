@@ -1001,50 +1001,78 @@ export default function Home() {
     return result;
   }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, selectedOwner, internalFilter, sortMode]);
 
-  // Pagination data - flatten all PRs and paginate
+  // Pagination data - count rows (each repo header + each PR = 1 row)
   const paginationData = useMemo(() => {
     const filtered = filteredForks();
-    // Flatten all PRs from all forks
-    const allPRs: Array<{ fork: ForkRecord; pr: PRRecord }> = [];
+
+    // Build a list of rows: each row is either a repo header or a PR
+    type Row =
+      | { type: 'repo'; fork: ForkRecord }
+      | { type: 'pr'; fork: ForkRecord; pr: PRRecord };
+
+    const allRows: Row[] = [];
 
     filtered.forEach(fork => {
+      // Add repo header row
+      allRows.push({ type: 'repo', fork });
+      // Add PR rows
       fork.prs.forEach(pr => {
-        allPRs.push({ fork, pr });
+        allRows.push({ type: 'pr', fork, pr });
       });
     });
 
-    const totalItems = allPRs.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
-    // Ensure currentPage is valid
+    const totalRows = allRows.length;
+    const totalPRs = filtered.reduce((sum, fork) => sum + fork.prs.length, 0);
+    const totalPages = Math.max(1, Math.ceil(totalRows / ITEMS_PER_PAGE));
     const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
     const startIndex = (validCurrentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems);
-    const currentItems = allPRs.slice(startIndex, endIndex);
+    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalRows);
+    const currentRows = allRows.slice(startIndex, endIndex);
 
     return {
-      totalItems,
+      totalRows,
+      totalPRs,
       totalPages,
       currentPage: validCurrentPage,
       startIndex,
       endIndex,
-      currentItems,
+      currentRows,
     };
   }, [filteredForks, currentPage, ITEMS_PER_PAGE]);
 
-  // Group current page items back by fork for display
+  // Group current page rows into forks for display
   const paginatedForks = useMemo(() => {
-    const forkMap = new Map<string, { fork: ForkRecord; prs: PRRecord[] }>();
+    const result: Array<{ fork: ForkRecord; prs: PRRecord[]; showHeader: boolean }> = [];
+    let currentGroup: { fork: ForkRecord; prs: PRRecord[]; showHeader: boolean } | null = null;
 
-    paginationData.currentItems.forEach(({ fork, pr }) => {
-      const key = fork.forkUrl;
-      if (!forkMap.has(key)) {
-        forkMap.set(key, { fork, prs: [] });
+    paginationData.currentRows.forEach(row => {
+      if (row.type === 'repo') {
+        // Start a new fork group with header
+        if (currentGroup) {
+          result.push(currentGroup);
+        }
+        currentGroup = { fork: row.fork, prs: [], showHeader: true };
+      } else {
+        // It's a PR row
+        if (currentGroup && currentGroup.fork.forkUrl === row.fork.forkUrl) {
+          // Add to current fork group
+          currentGroup.prs.push(row.pr);
+        } else {
+          // This PR is from a repo whose header was on a previous page
+          if (currentGroup) {
+            result.push(currentGroup);
+          }
+          currentGroup = { fork: row.fork, prs: [row.pr], showHeader: false };
+        }
       }
-      forkMap.get(key)!.prs.push(pr);
     });
 
-    return Array.from(forkMap.values());
-  }, [paginationData.currentItems]);
+    if (currentGroup) {
+      result.push(currentGroup);
+    }
+
+    return result;
+  }, [paginationData.currentRows]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -1052,9 +1080,11 @@ export default function Home() {
   }, [selectedOwner, searchQuery, showOnlyWithIssues, internalFilter, sortMode]);
 
   // Scroll to top when page changes
+  const prevPageRef = useRef(currentPage);
   useEffect(() => {
-    if (currentPage > 1) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (prevPageRef.current !== currentPage) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      prevPageRef.current = currentPage;
     }
   }, [currentPage]);
 
@@ -2142,7 +2172,7 @@ export default function Home() {
                   Create a PR to get started, or click &quot;Refresh&quot; to load existing repos from GitHub.
                 </p>
               </div>
-            ) : paginationData.totalItems === 0 ? (
+            ) : paginationData.totalRows === 0 ? (
               <div className="text-center py-12">
                 {searchQuery.trim() && isPrUrl(searchQuery) ? (
                   <>
@@ -2199,12 +2229,13 @@ export default function Home() {
               </div>
             ) : (
               <div className="divide-y divide-border">
-                    {paginatedForks.map(({ fork, prs: pagePrs }) => {
+                    {paginatedForks.map(({ fork, prs: pagePrs, showHeader }) => {
                       const checkboxState = getRepoCheckboxState(fork.repoName);
                       const isExpanded = expandedRepos.has(fork.repoName);
                       return (
-                        <div key={fork.forkUrl}>
-                          {/* Repo Header - Clickable Accordion */}
+                        <div key={`${fork.forkUrl}-${showHeader ? 'header' : 'cont'}`}>
+                          {/* Repo Header - Clickable Accordion (only shown if header row is on this page) */}
+                          {showHeader ? (
                           <div
                             className="flex items-center px-4 md:px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors min-h-[52px]"
                             onClick={() => toggleRepoExpand(fork.repoName)}
@@ -2299,6 +2330,19 @@ export default function Home() {
                               </span>
                             </div>
                           </div>
+                          ) : (
+                            /* Continuation indicator when repo header is on previous page */
+                            <div className="flex items-center px-4 md:px-6 py-2 bg-gray-100/50 border-b border-gray-200">
+                              <div className="w-6 flex-shrink-0"></div>
+                              <div className="w-10 flex-shrink-0"></div>
+                              <div className="flex-1 flex items-center gap-2 ml-2 text-sm text-gray-500 italic">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                </svg>
+                                {fork.repoName} (continued) - {pagePrs.length} PR{pagePrs.length !== 1 ? "s" : ""}
+                              </div>
+                            </div>
+                          )}
 
                           {/* PR List - Collapsible */}
                           {isExpanded && pagePrs.length > 0 && (
@@ -2604,10 +2648,10 @@ export default function Home() {
               {forks.length > 0 && (
                 <div className="mt-4 text-center">
                   <p className="text-sm text-text-muted">
-                    {paginationData.totalItems > 0 ? (
+                    {paginationData.totalRows > 0 ? (
                       <>
-                        Showing PRs {paginationData.startIndex + 1}-{paginationData.endIndex} of {paginationData.totalItems}
-                        {selectedOwner !== "all" && ` (filtered by @${selectedOwner})`}
+                        Page {paginationData.currentPage} of {paginationData.totalPages} ({paginationData.totalPRs} PR{paginationData.totalPRs !== 1 ? "s" : ""} total)
+                        {selectedOwner !== "all" && ` - filtered by @${selectedOwner}`}
                       </>
                     ) : (
                       "No PRs match the current filters"
