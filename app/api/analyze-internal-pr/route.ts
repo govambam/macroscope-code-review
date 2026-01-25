@@ -222,7 +222,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Update PR with bug count based on analysis format
     const meaningfulBugCount = isV2AnalysisResult(analysisResult)
       ? analysisResult.meaningful_bugs_count
-      : (hasMeaningfulBugs(analysisResult) ? (analysisResult as { total_macroscope_bugs_found: number }).total_macroscope_bugs_found : 0);
+      : (hasMeaningfulBugs(analysisResult) ? (analysisResult as { bugs: unknown[] }).bugs.length : 0);
 
     savePR(
       forkId,
