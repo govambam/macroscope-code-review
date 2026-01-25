@@ -243,8 +243,13 @@ export default function SettingsPage() {
   };
 
   // Simple hash function for tracking content changes
+  // Uses length + samples from start, middle, and end to detect any changes
   const hashContent = (content: string, model: string) => {
-    return `${content.length}-${content.slice(0, 100)}-${model}`;
+    const len = content.length;
+    const start = content.slice(0, 100);
+    const middle = len > 200 ? content.slice(Math.floor(len / 2) - 50, Math.floor(len / 2) + 50) : "";
+    const end = content.slice(-100);
+    return `${len}-${start}-${middle}-${end}-${model}`;
   };
 
   // Handle save with schema validation
