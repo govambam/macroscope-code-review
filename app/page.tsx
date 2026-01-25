@@ -165,6 +165,7 @@ interface AnalysisApiResponse {
   cached?: boolean;
   analysisId?: number;
   cachedEmail?: string;
+  needsOriginalPrUrl?: boolean;
 }
 
 interface ApiResponse {
@@ -372,6 +373,8 @@ export default function Home() {
   const [modalTab, setModalTab] = useState<"analysis" | "email">("analysis");
   const [modalExpanded, setModalExpanded] = useState(false);
   const [selectedPrTitle, setSelectedPrTitle] = useState("");
+  const [showUrlPrompt, setShowUrlPrompt] = useState(false);
+  const [pendingForceRefresh, setPendingForceRefresh] = useState(false);
 
   // Analyze Internal PR state
   const [showAnalyzeCard, setShowAnalyzeCard] = useState(false);
@@ -1238,6 +1241,7 @@ export default function Home() {
     setCopiedBugIndex(null);
     setCurrentAnalysisId(null);
     setIsViewingCached(false);
+    setShowUrlPrompt(false);
 
     // If forcing refresh (regenerate), we're running a new analysis
     if (forceRefresh) {
@@ -1256,6 +1260,16 @@ export default function Home() {
       });
 
       const data: AnalysisApiResponse = await response.json();
+
+      // Check if we need to prompt for original PR URL
+      if (data.needsOriginalPrUrl) {
+        setShowUrlPrompt(true);
+        setPendingForceRefresh(forceRefresh);
+        setAnalysisLoading(false);
+        setExpectingCachedResult(false);
+        return;
+      }
+
       setAnalysisResult(data);
 
       // Track analysis ID and cache status
@@ -1301,6 +1315,16 @@ export default function Home() {
     }
   };
 
+  // Handle submission of original PR URL when prompted
+  const handleOriginalUrlSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!analysisOriginalUrl.trim()) return;
+    setShowUrlPrompt(false);
+    // Re-run analysis with the provided URL
+    const syntheticEvent = { preventDefault: () => {} } as React.FormEvent;
+    handleAnalysis(syntheticEvent, pendingForceRefresh);
+  };
+
   const startAnalysisFromForks = (prUrl: string, hasExistingAnalysis = false, prTitle = "") => {
     setAnalysisForkedUrl(prUrl);
     setAnalysisOriginalUrl("");
@@ -1337,6 +1361,8 @@ export default function Home() {
     setShowAnalysisModal(false);
     setModalExpanded(false);
     setModalTab("analysis");
+    setShowUrlPrompt(false);
+    setPendingForceRefresh(false);
   };
 
   const copyBugExplanation = async (text: string, index: number) => {
@@ -2541,50 +2567,89 @@ export default function Home() {
 
                   {/* Loading State - Skeleton Screen */}
                   {(analysisLoading || (expectingCachedResult && !analysisResult)) && (
-                    <div className="space-y-6 animate-pulse">
-                      {/* Header skeleton */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-2">
-                          <div className="h-6 w-48 bg-gray-200 rounded" />
-                          <div className="h-4 w-32 bg-gray-200 rounded" />
-                        </div>
-                        <div className="h-8 w-24 bg-gray-200 rounded" />
-                      </div>
-
-                      {/* Bug cards skeleton */}
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="border border-gray-200 rounded-lg p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="h-5 w-16 bg-gray-200 rounded-full" />
-                              <div className="h-5 w-24 bg-gray-200 rounded" />
-                            </div>
-                            <div className="h-4 w-20 bg-gray-200 rounded" />
-                          </div>
-                          <div className="space-y-2">
-                            <div className="h-4 w-full bg-gray-200 rounded" />
-                            <div className="h-4 w-5/6 bg-gray-200 rounded" />
-                            <div className="h-4 w-4/6 bg-gray-200 rounded" />
-                          </div>
-                          <div className="pt-2 border-t border-gray-100">
-                            <div className="h-3 w-40 bg-gray-200 rounded" />
-                          </div>
-                        </div>
-                      ))}
-
-                      {/* Loading indicator text */}
-                      <div className="flex items-center justify-center gap-2 text-text-secondary text-sm">
-                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <div className="space-y-6">
+                      {/* Loading indicator - at top for visibility */}
+                      <div className="flex items-center justify-center gap-3 py-4 bg-primary/5 rounded-lg border border-primary/20">
+                        <svg className="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                         </svg>
-                        <span>{expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR..."}</span>
+                        <span className="text-primary font-medium">
+                          {expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR with AI..."}
+                        </span>
+                      </div>
+
+                      {/* Minimal skeleton preview */}
+                      <div className="animate-pulse space-y-4">
+                        {/* Single skeleton card */}
+                        <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-5 w-16 bg-gray-200 rounded-full" />
+                            <div className="h-5 w-32 bg-gray-200 rounded" />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="h-4 w-full bg-gray-200 rounded" />
+                            <div className="h-4 w-3/4 bg-gray-200 rounded" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Prompt for Original PR URL */}
+                  {showUrlPrompt && (
+                    <div className="py-8 px-4">
+                      <div className="max-w-md mx-auto">
+                        <div className="text-center mb-6">
+                          <svg className="mx-auto h-12 w-12 text-amber-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                          <h3 className="text-lg font-medium text-accent mb-2">Original PR URL Required</h3>
+                          <p className="text-sm text-text-secondary">
+                            We couldn&apos;t determine the original PR URL automatically. Please enter it below to continue with the analysis.
+                          </p>
+                        </div>
+                        <form onSubmit={handleOriginalUrlSubmit} className="space-y-4">
+                          <div>
+                            <label htmlFor="original-pr-url" className="block text-sm font-medium text-text-primary mb-1">
+                              Original PR URL
+                            </label>
+                            <input
+                              id="original-pr-url"
+                              type="url"
+                              value={analysisOriginalUrl}
+                              onChange={(e) => setAnalysisOriginalUrl(e.target.value)}
+                              placeholder="https://github.com/owner/repo/pull/123"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary text-sm"
+                              autoFocus
+                            />
+                            <p className="mt-1 text-xs text-text-muted">
+                              Enter the URL of the original PR that was simulated
+                            </p>
+                          </div>
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setShowUrlPrompt(false)}
+                              className="flex-1 px-4 py-2 border border-gray-300 text-text-secondary hover:bg-gray-50 font-medium rounded-lg transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={!analysisOriginalUrl.trim()}
+                              className="flex-1 px-4 py-2 bg-primary hover:bg-primary-hover disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                            >
+                              Continue Analysis
+                            </button>
+                          </div>
+                        </form>
                       </div>
                     </div>
                   )}
 
                   {/* No Analysis Yet - Show Run Button */}
-                  {!analysisLoading && !analysisResult && !expectingCachedResult && (
+                  {!analysisLoading && !analysisResult && !expectingCachedResult && !showUrlPrompt && (
                     <div className="text-center py-12">
                       <svg className="mx-auto h-12 w-12 text-text-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -2949,26 +3014,37 @@ export default function Home() {
                     <>
                       <div className="flex items-center justify-between">
                         <h3 className="text-sm font-medium text-accent">Generated Email</h3>
-                        <button
-                          onClick={copyEmail}
-                          className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary-hover font-medium"
-                        >
-                          {emailCopied ? (
-                            <>
-                              <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                              Copied!
-                            </>
-                          ) : (
-                            <>
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
-                              Copy to Clipboard
-                            </>
-                          )}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleGenerateEmail}
+                            className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-accent font-medium"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Regenerate
+                          </button>
+                          <button
+                            onClick={copyEmail}
+                            className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary-hover font-medium"
+                          >
+                            {emailCopied ? (
+                              <>
+                                <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                                Copied!
+                              </>
+                            ) : (
+                              <>
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                Copy to Clipboard
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                       <div className="bg-bg-subtle border border-border rounded-lg p-4">
                         <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
