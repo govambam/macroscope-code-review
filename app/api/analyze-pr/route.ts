@@ -37,6 +37,7 @@ interface AnalyzeResponse {
   cached?: boolean; // Whether the result was loaded from cache
   analysisId?: number; // Database ID of the analysis
   cachedEmail?: string; // Previously generated email content
+  needsOriginalPrUrl?: boolean; // If true, client should prompt user for the original PR URL
 }
 
 /**
@@ -160,9 +161,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const octokit = new Octokit({ auth: githubToken });
 
-    // Fetch the forked PR to extract the original PR URL from the description
-    // Format in PR body: "Original PR: https://github.com/owner/repo/pull/123 by @user"
+    // Try to get original PR URL from multiple sources:
+    // 1. Request body (already provided)
+    // 2. Database (stored from previous simulation/analysis)
+    // 3. PR body description (extracted via regex)
     if (!originalPrUrl) {
+      // First, check database for stored original_pr_url
+      try {
+        const prRecord = getPRByUrl(forkedPrUrl);
+        if (prRecord?.original_pr_url) {
+          originalPrUrl = prRecord.original_pr_url;
+        }
+      } catch {
+        // Continue to try other sources
+      }
+    }
+
+    if (!originalPrUrl) {
+      // Try to extract from PR body description
       try {
         const { data: forkedPr } = await octokit.pulls.get({
           owner: parsedForkedPr.owner,
@@ -177,17 +193,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             originalPrUrl = extractedUrl;
           }
         }
-
-        if (!originalPrUrl) {
-          return NextResponse.json<AnalyzeResponse>(
-            {
-              success: false,
-              error:
-                "Could not extract original PR URL from the forked PR description.",
-            },
-            { status: 400 }
-          );
-        }
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -199,6 +204,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           { status: 500 }
         );
       }
+    }
+
+    // If we still don't have the original PR URL, ask the client to provide it
+    if (!originalPrUrl) {
+      return NextResponse.json<AnalyzeResponse>(
+        {
+          success: false,
+          needsOriginalPrUrl: true,
+          forkedPrUrl,
+          error:
+            "Could not determine the original PR URL. Please provide it manually.",
+        },
+        { status: 200 } // Use 200 since this is a recoverable situation
+      );
     }
 
     // Validate original PR URL
