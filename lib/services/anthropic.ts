@@ -124,7 +124,13 @@ export async function sendMessage(
 function isCompleteJSON(str: string): boolean {
   const trimmed = str.trim();
 
-  // Check if it ends with a closing brace or bracket
+  // JSON primitives (true, false, null, numbers, strings) are always complete
+  // They don't start with { or [, so return true early for these cases
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return true;
+  }
+
+  // For objects/arrays, check if it ends with a closing brace or bracket
   if (!trimmed.endsWith("}") && !trimmed.endsWith("]")) {
     return false;
   }
