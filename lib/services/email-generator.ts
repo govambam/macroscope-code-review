@@ -94,19 +94,23 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
   let mergedDateFormatted = "";
   if (prMergedAt) {
     const mergedDate = new Date(prMergedAt);
-    const now = new Date();
-    const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) {
-      mergedDateFormatted = "today";
-    } else if (diffDays === 1) {
-      mergedDateFormatted = "yesterday";
-    } else if (diffDays < 7) {
-      mergedDateFormatted = `${diffDays} days ago`;
-    } else if (diffDays < 30) {
-      const weeks = Math.floor(diffDays / 7);
-      mergedDateFormatted = `${weeks} week${weeks > 1 ? "s" : ""} ago`;
+    if (isNaN(mergedDate.getTime())) {
+      mergedDateFormatted = "unknown";
     } else {
-      mergedDateFormatted = mergedDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      const now = new Date();
+      const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays === 0) {
+        mergedDateFormatted = "today";
+      } else if (diffDays === 1) {
+        mergedDateFormatted = "yesterday";
+      } else if (diffDays < 7) {
+        mergedDateFormatted = `${diffDays} days ago`;
+      } else if (diffDays < 30) {
+        const weeks = Math.floor(diffDays / 7);
+        mergedDateFormatted = `${weeks} week${weeks > 1 ? "s" : ""} ago`;
+      } else {
+        mergedDateFormatted = mergedDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      }
     }
   }
 
