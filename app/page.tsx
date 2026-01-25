@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
+import { MobileMenu } from "@/components/MobileMenu";
+import { PRCard, RepoGroupHeader } from "@/components/PRCard";
 
 type FilterMode = "all" | "mine";
 type InternalFilter = "all" | "internal" | "external";
@@ -1349,8 +1351,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Sidebar - Logo only */}
-      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
+      {/* Mobile Menu - visible only on mobile */}
+      <MobileMenu />
+
+      {/* Left Sidebar - hidden on mobile */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-border flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
           <Image
@@ -1389,21 +1394,29 @@ export default function Home() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 bg-bg-subtle h-screen overflow-y-auto">
-        {/* Sticky Header Section */}
-        <div className="sticky top-0 z-10 bg-bg-subtle px-8 pt-8 pb-4 border-b border-border shadow-sm">
+      <main className="flex-1 bg-bg-subtle min-h-screen md:h-screen overflow-y-auto pt-14 md:pt-0">
+        {/* Header Section - sticky on desktop only */}
+        <div className="md:sticky md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-4 border-b border-border md:shadow-sm">
           {/* Page Header */}
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
-              <p className="mt-2 text-text-secondary">View and analyze pull requests grouped by repository</p>
+          <div className="flex flex-col gap-3 mb-4">
+            {/* Title row - only on desktop */}
+            <div className="hidden md:flex md:items-start md:justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
+                <p className="mt-2 text-base text-text-secondary">View and analyze pull requests grouped by repository</p>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* Mobile title */}
+            <h1 className="text-xl font-semibold text-accent tracking-tight md:hidden">PR Reviews</h1>
+
+            {/* Action buttons row - Import, Simulate, Filters, Refresh */}
+            <div className="flex items-center gap-2 flex-wrap">
               {totalSelected > 0 && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   disabled={deleteLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-3 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                 >
                   {deleteLoading ? (
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -1415,12 +1428,12 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   )}
-                  Delete
+                  <span className="hidden sm:inline ml-1.5">Delete</span>
                 </button>
               )}
               <button
                 onClick={() => setShowAnalyzeCard(!showAnalyzeCard)}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] text-sm font-medium rounded-lg transition-colors ${
                   showAnalyzeCard
                     ? "bg-primary text-white"
                     : "bg-white border border-border text-accent hover:bg-bg-subtle"
@@ -1429,16 +1442,209 @@ export default function Home() {
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                Import PR
+                Import
               </button>
               <button
                 onClick={openCreatePRModal}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                 </svg>
-                Simulate PR
+                Simulate
+              </button>
+
+              {/* Spacer to push filter/refresh to right on desktop */}
+              <div className="hidden md:flex flex-1"></div>
+
+              {/* Filters button - icon only on mobile */}
+              <div className="relative" ref={filtersRef}>
+                <button
+                  onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
+                  className={`inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:px-3 md:gap-1.5 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors ${
+                    (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
+                  }`}
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  <span className="hidden md:inline">Filters</span>
+                  {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
+                    <span className="hidden md:inline ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
+                      {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
+                    </span>
+                  )}
+                </button>
+
+                {/* Filters dropdown - moved here */}
+                {showFiltersDropdown && (
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden max-h-[70vh] overflow-y-auto">
+                    {/* User Filter */}
+                    <div className="p-3 border-b border-border">
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
+                      <div className="space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="filterMode"
+                            checked={filterMode === "all"}
+                            onChange={() => setFilterMode("all")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">All Users</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="filterMode"
+                            checked={filterMode === "mine"}
+                            onChange={() => setFilterMode("mine")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">My PRs Only</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* PR Type Filter */}
+                    <div className="p-3 border-b border-border">
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">PR Type</p>
+                      <div className="space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="internalFilter"
+                            checked={internalFilter === "all"}
+                            onChange={() => setInternalFilter("all")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">All PRs</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="internalFilter"
+                            checked={internalFilter === "internal"}
+                            onChange={() => setInternalFilter("internal")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Internal Only</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="internalFilter"
+                            checked={internalFilter === "external"}
+                            onChange={() => setInternalFilter("external")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Simulated Only</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Sort Options */}
+                    <div className="p-3 border-b border-border">
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort Repos By</p>
+                      <div className="space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "created-desc"}
+                            onChange={() => setSortMode("created-desc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Newest First</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "created-asc"}
+                            onChange={() => setSortMode("created-asc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Oldest First</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "alpha-asc"}
+                            onChange={() => setSortMode("alpha-asc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">A → Z</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "alpha-desc"}
+                            onChange={() => setSortMode("alpha-desc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Z → A</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "prs-desc"}
+                            onChange={() => setSortMode("prs-desc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Most PRs</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "prs-asc"}
+                            onChange={() => setSortMode("prs-asc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Fewest PRs</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Reset Button */}
+                    {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
+                      <div className="p-3 border-t border-border">
+                        <button
+                          onClick={() => {
+                            setFilterMode("all");
+                            setInternalFilter("all");
+                            setSortMode("created-desc");
+                          }}
+                          className="w-full text-sm text-text-secondary hover:text-accent py-1.5 transition-colors"
+                        >
+                          Reset Filters
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Refresh button - icon only */}
+              <button
+                onClick={refreshFromGitHub}
+                disabled={isRefreshingFromGitHub}
+                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] bg-white border border-border rounded-lg text-accent hover:bg-bg-subtle transition-colors disabled:opacity-50"
+              >
+                {isRefreshingFromGitHub ? (
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>
@@ -1530,265 +1736,74 @@ export default function Home() {
             </div>
           )}
 
-          {/* Search and Filters */}
-          <div className="flex gap-2">
-            <div className="flex-1 relative" ref={searchContainerRef}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setShowSearchAutocomplete(true);
-                }}
-                onFocus={() => setShowSearchAutocomplete(true)}
-                placeholder="Search repos or PR titles..."
-                className="w-full pl-10 pr-4 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-              />
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
+          {/* Search */}
+          <div className="relative" ref={searchContainerRef}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowSearchAutocomplete(true);
+              }}
+              onFocus={() => setShowSearchAutocomplete(true)}
+              placeholder="Search repos or PR titles..."
+              className="w-full pl-10 pr-4 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            />
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
 
-              {/* Search Autocomplete Dropdown */}
-              {showSearchAutocomplete && searchSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[240px] overflow-y-auto">
-                  {searchSuggestions.slice(0, 20).map((suggestion, index) => (
-                    <button
-                      key={`${suggestion.type}-${suggestion.repoName}-${suggestion.prNumber || index}`}
-                      onClick={() => {
-                        if (suggestion.type === 'repo') {
-                          setSearchQuery(suggestion.repoName);
-                          // Auto-expand the repo
-                          setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
-                        } else {
-                          setSearchQuery(suggestion.prTitle || `#${suggestion.prNumber}`);
-                          // Auto-expand the repo containing this PR
-                          setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
-                        }
-                        setShowSearchAutocomplete(false);
-                      }}
-                      className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
-                    >
-                      {suggestion.type === 'repo' ? (
-                        <>
-                          <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                          </svg>
-                          <span className="text-sm text-accent truncate">{suggestion.repoName}</span>
-                          <span className="text-xs text-text-muted ml-auto">Repo</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="h-4 w-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                          </svg>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-sm text-primary">#{suggestion.prNumber}</span>
-                            <span className="text-sm text-accent ml-1.5 truncate">{suggestion.prTitle}</span>
-                          </div>
-                          <span className="text-xs text-text-muted flex-shrink-0">{suggestion.repoName}</span>
-                        </>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Filters Dropdown */}
-            <div className="relative" ref={filtersRef}>
-              <button
-                onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
-                className={`px-3 py-2 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors flex items-center gap-1.5 ${
-                  (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
-                }`}
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                Filters
-                {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
-                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
-                    {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
-                  </span>
-                )}
-              </button>
-
-              {showFiltersDropdown && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden max-h-[70vh] overflow-y-auto">
-                  {/* User Filter */}
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
-                    <div className="space-y-1">
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="filterMode"
-                          checked={filterMode === "all"}
-                          onChange={() => setFilterMode("all")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">All Users</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="filterMode"
-                          checked={filterMode === "mine"}
-                          onChange={() => setFilterMode("mine")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">My PRs Only</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* PR Type Filter */}
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">PR Type</p>
-                    <div className="space-y-1">
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="internalFilter"
-                          checked={internalFilter === "all"}
-                          onChange={() => setInternalFilter("all")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">All PRs</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="internalFilter"
-                          checked={internalFilter === "internal"}
-                          onChange={() => setInternalFilter("internal")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Internal Only</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="internalFilter"
-                          checked={internalFilter === "external"}
-                          onChange={() => setInternalFilter("external")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Simulated Only</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Sort Options */}
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort Repos By</p>
-                    <div className="space-y-1">
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "created-desc"}
-                          onChange={() => setSortMode("created-desc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Newest First</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "created-asc"}
-                          onChange={() => setSortMode("created-asc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Oldest First</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "alpha-asc"}
-                          onChange={() => setSortMode("alpha-asc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">A → Z</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "alpha-desc"}
-                          onChange={() => setSortMode("alpha-desc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Z → A</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "prs-desc"}
-                          onChange={() => setSortMode("prs-desc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Most PRs</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "prs-asc"}
-                          onChange={() => setSortMode("prs-asc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Fewest PRs</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Reset Button */}
-                  {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
-                    <div className="p-3 border-t border-border">
-                      <button
-                        onClick={() => {
-                          setFilterMode("all");
-                          setInternalFilter("all");
-                          setSortMode("created-desc");
-                        }}
-                        className="w-full text-sm text-text-secondary hover:text-accent py-1.5 transition-colors"
-                      >
-                        Reset Filters
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={refreshFromGitHub}
-              disabled={isRefreshingFromGitHub}
-              className="px-3 py-2 bg-white border border-border rounded-lg text-sm text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-1.5"
-            >
-              {isRefreshingFromGitHub ? (
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              ) : (
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              )}
-              {isRefreshingFromGitHub ? "Refreshing..." : "Refresh"}
-            </button>
+            {/* Search Autocomplete Dropdown */}
+            {showSearchAutocomplete && searchSuggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[240px] overflow-y-auto">
+                {searchSuggestions.slice(0, 20).map((suggestion, index) => (
+                  <button
+                    key={`${suggestion.type}-${suggestion.repoName}-${suggestion.prNumber || index}`}
+                    onClick={() => {
+                      if (suggestion.type === 'repo') {
+                        setSearchQuery(suggestion.repoName);
+                        // Auto-expand the repo
+                        setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
+                      } else {
+                        setSearchQuery(suggestion.prTitle || `#${suggestion.prNumber}`);
+                        // Auto-expand the repo containing this PR
+                        setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
+                      }
+                      setShowSearchAutocomplete(false);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
+                  >
+                    {suggestion.type === 'repo' ? (
+                      <>
+                        <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                        <span className="text-sm text-accent truncate">{suggestion.repoName}</span>
+                        <span className="text-xs text-text-muted ml-auto">Repo</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm text-primary">#{suggestion.prNumber}</span>
+                          <span className="text-sm text-accent ml-1.5 truncate">{suggestion.prTitle}</span>
+                        </div>
+                        <span className="text-xs text-text-muted flex-shrink-0">{suggestion.repoName}</span>
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Content Area */}
-        <div className="px-8 py-6">
+        <div className="px-4 md:px-8 pt-4 pb-4 md:py-6">
           {/* My Repos Section */}
-          <div className="bg-white border border-border rounded-xl shadow-sm">
+          <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden pt-2 md:pt-0">
             {/* Error display */}
             {forksError && (
               <div className="mx-6 mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
@@ -1803,7 +1818,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Repos List */}
+            {/* Repos List - with top padding on mobile to ensure first repo header is visible */}
             {forks.length === 0 ? (
               <div className="text-center py-12">
                 <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1861,13 +1876,13 @@ export default function Home() {
                         <div key={fork.forkUrl}>
                           {/* Repo Header - Clickable Accordion */}
                           <div
-                            className="flex items-center px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                            className="flex items-center px-4 md:px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors min-h-[52px]"
                             onClick={() => toggleRepoExpand(fork.repoName)}
                           >
                             {/* Expand/Collapse Arrow */}
                             <div className="w-6 flex-shrink-0">
                               <svg
-                                className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                                className={`h-5 w-5 md:h-4 md:w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -1890,12 +1905,12 @@ export default function Home() {
                                   toggleRepoSelection(fork.repoName);
                                 }}
                                 onClick={(e) => e.stopPropagation()}
-                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                                className="h-5 w-5 md:h-4 md:w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
                               />
                             </div>
 
                             {/* Repo Name and PR Count */}
-                            <div className="flex-1 flex items-center gap-3 ml-2">
+                            <div className="flex-1 flex items-center gap-2 md:gap-3 ml-2 flex-wrap">
                               <a
                                 href={fork.forkUrl}
                                 target="_blank"
@@ -1958,8 +1973,8 @@ export default function Home() {
                           {/* PR List - Collapsible */}
                           {isExpanded && fork.prs.length > 0 && (
                             <div className="bg-white">
-                              {/* PR Table Header */}
-                              <div className="flex items-center px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              {/* PR Table Header - Desktop only */}
+                              <div className="hidden md:flex items-center px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 <div className="w-6 flex-shrink-0"></div>
                                 <div className="w-10 flex-shrink-0"></div>
                                 <div className="flex-1 ml-2"></div>
@@ -1970,8 +1985,23 @@ export default function Home() {
                                 <div className="w-[100px] text-center">Owner</div>
                               </div>
 
-                              {/* PR Rows */}
-                              <div className="divide-y divide-gray-100">
+                              {/* Mobile PR Cards */}
+                              <div className="md:hidden p-3 space-y-3">
+                                {fork.prs.map((pr) => (
+                                  <PRCard
+                                    key={`mobile-${fork.repoName}-${pr.prNumber}`}
+                                    pr={pr}
+                                    repoName={fork.repoName}
+                                    isSelected={selection.prs.has(`${fork.repoName}:${pr.prNumber}`)}
+                                    onToggleSelect={() => togglePrSelection(fork.repoName, pr.prNumber)}
+                                    onAction={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis ?? false, pr.prTitle)}
+                                    owner={pr.createdBy}
+                                  />
+                                ))}
+                              </div>
+
+                              {/* PR Rows - Desktop */}
+                              <div className="hidden md:block divide-y divide-gray-100">
                                 {fork.prs.map((pr) => {
                                   // Bug count badge styling - softer pastel colors
                                   const getBugBadgeStyle = () => {
@@ -1985,7 +2015,7 @@ export default function Home() {
 
                                   return (
                                     <div
-                                      key={`${fork.repoName}-${pr.prNumber}`}
+                                      key={`desktop-${fork.repoName}-${pr.prNumber}`}
                                       className="flex items-center px-6 py-4 hover:bg-gray-50/50 transition-colors"
                                     >
                                       {/* Empty space for arrow alignment */}
@@ -2263,24 +2293,24 @@ export default function Home() {
       />
       {/* Modal Container */}
       <div
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+        className={`fixed inset-0 z-50 flex items-center justify-center p-0 md:p-4 transition-opacity duration-200 ${
           showAnalysisModal ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
         <div
-          className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ease-out ${
+          className={`bg-white shadow-lg flex flex-col transition-all duration-200 ease-out ${
             showAnalysisModal ? "scale-100 opacity-100" : "scale-95 opacity-0"
           } ${
             modalExpanded
-              ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
-              : "w-full max-w-4xl h-[700px]"
+              ? "w-full h-full md:w-[calc(100%-2rem)] md:h-[calc(100%-2rem)] max-w-none rounded-none md:rounded-xl"
+              : "w-full h-full md:max-w-4xl md:h-[700px] md:rounded-xl rounded-none"
           }`}
           onClick={(e) => e.stopPropagation()}
         >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-10 py-4 border-b border-border shrink-0">
+            <div className="flex items-center justify-between px-4 md:px-10 py-3 md:py-4 border-b border-border shrink-0">
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-semibold text-accent truncate">
+                <h2 className="text-base md:text-lg font-semibold text-accent truncate">
                   {selectedPrTitle || "PR Analysis"}
                 </h2>
                 {analysisForkedUrl && (
@@ -2288,17 +2318,17 @@ export default function Home() {
                     href={analysisForkedUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline truncate block"
+                    className="text-xs md:text-sm text-primary hover:underline truncate block"
                   >
                     {analysisForkedUrl}
                   </a>
                 )}
               </div>
-              <div className="flex items-center gap-2 ml-4">
-                {/* Expand/Collapse Button */}
+              <div className="flex items-center gap-1 md:gap-2 ml-2 md:ml-4">
+                {/* Expand/Collapse Button - hidden on mobile */}
                 <button
                   onClick={() => setModalExpanded(!modalExpanded)}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="hidden md:flex p-2 min-h-[44px] min-w-[44px] items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                   title={modalExpanded ? "Collapse" : "Expand"}
                 >
                   {modalExpanded ? (
@@ -2314,9 +2344,9 @@ export default function Home() {
                 {/* Close Button */}
                 <button
                   onClick={closeAnalysisModal}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -2324,10 +2354,10 @@ export default function Home() {
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex border-b border-border px-10 shrink-0">
+            <div className="flex border-b border-border px-4 md:px-10 shrink-0">
               <button
                 onClick={() => setModalTab("analysis")}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
                   modalTab === "analysis"
                     ? "border-primary text-primary"
                     : "border-transparent text-text-secondary hover:text-accent"
@@ -2657,22 +2687,22 @@ export default function Home() {
 
       {/* Create PR Modal */}
       {showCreatePRModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-2 md:p-4 z-50">
           <div
             className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ${
               createPRModalExpanded
-                ? "w-[calc(100%-2rem)] h-[calc(100%-2rem)] max-w-none"
-                : "w-full max-w-xl max-h-[90vh]"
+                ? "w-full h-full md:w-[calc(100%-2rem)] md:h-[calc(100%-2rem)] max-w-none rounded-none md:rounded-xl"
+                : "w-full max-w-xl max-h-[95vh] md:max-h-[90vh]"
             }`}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-border shrink-0">
               <h2 className="text-lg font-semibold text-accent">Create PR</h2>
-              <div className="flex items-center gap-2">
-                {/* Expand/Collapse Button */}
+              <div className="flex items-center gap-1 md:gap-2">
+                {/* Expand/Collapse Button - hidden on mobile */}
                 <button
                   onClick={() => setCreatePRModalExpanded(!createPRModalExpanded)}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="hidden md:flex p-2 min-h-[44px] min-w-[44px] items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                   title={createPRModalExpanded ? "Collapse" : "Expand"}
                 >
                   {createPRModalExpanded ? (
@@ -2688,9 +2718,9 @@ export default function Home() {
                 {/* Close Button */}
                 <button
                   onClick={closeCreatePRModal}
-                  className="p-2 text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+                  className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -2698,11 +2728,11 @@ export default function Home() {
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex border-b border-border px-6 shrink-0">
+            <div className="flex border-b border-border px-4 md:px-6 shrink-0">
               <button
                 onClick={() => handleCreateModeChange("pr")}
                 disabled={loading}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
                   createMode === "pr"
                     ? "border-primary text-primary"
                     : "border-transparent text-text-secondary hover:text-accent"
@@ -2713,7 +2743,7 @@ export default function Home() {
               <button
                 onClick={() => handleCreateModeChange("commit")}
                 disabled={loading}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
                   createMode === "commit"
                     ? "border-primary text-primary"
                     : "border-transparent text-text-secondary hover:text-accent"
