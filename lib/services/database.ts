@@ -21,6 +21,8 @@ export interface PRRecord {
   forked_pr_url: string;
   original_pr_url: string | null;
   original_pr_title: string | null;
+  original_pr_state: string | null; // 'open', 'merged', or 'closed'
+  original_pr_merged_at: string | null; // ISO timestamp if merged
   has_macroscope_bugs: boolean;
   bug_count: number | null;
   state: string | null;
@@ -210,6 +212,16 @@ function initializeSchema(db: Database.Database): void {
     console.log("Added created_by column to prs table");
   }
 
+  // Migration: Add original PR state columns for email personalization
+  if (!columnNames.includes("original_pr_state")) {
+    db.exec("ALTER TABLE prs ADD COLUMN original_pr_state TEXT");
+    console.log("Added original_pr_state column to prs table");
+  }
+  if (!columnNames.includes("original_pr_merged_at")) {
+    db.exec("ALTER TABLE prs ADD COLUMN original_pr_merged_at TEXT");
+    console.log("Added original_pr_merged_at column to prs table");
+  }
+
   // Create PR analyses table
   db.exec(`
     CREATE TABLE IF NOT EXISTS pr_analyses (
@@ -369,6 +381,8 @@ export function savePR(
   bugCount: number | null = null,
   options: {
     originalPrTitle?: string | null;
+    originalPrState?: string | null; // 'open', 'merged', or 'closed'
+    originalPrMergedAt?: string | null; // ISO timestamp if merged
     state?: string | null;
     commitCount?: number | null;
     updateBugCheckTime?: boolean;
@@ -380,14 +394,16 @@ export function savePR(
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, original_pr_state, original_pr_merged_at, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
       forked_pr_url = excluded.forked_pr_url,
       original_pr_url = COALESCE(excluded.original_pr_url, prs.original_pr_url),
       original_pr_title = COALESCE(excluded.original_pr_title, prs.original_pr_title),
+      original_pr_state = COALESCE(excluded.original_pr_state, prs.original_pr_state),
+      original_pr_merged_at = COALESCE(excluded.original_pr_merged_at, prs.original_pr_merged_at),
       has_macroscope_bugs = excluded.has_macroscope_bugs,
       bug_count = COALESCE(excluded.bug_count, prs.bug_count),
       state = COALESCE(excluded.state, prs.state),
@@ -407,6 +423,8 @@ export function savePR(
     forkedPrUrl,
     originalPrUrl,
     options.originalPrTitle ?? null,
+    options.originalPrState ?? null,
+    options.originalPrMergedAt ?? null,
     hasBugs ? 1 : 0,
     bugCount,
     options.state ?? null,
@@ -477,15 +495,27 @@ export function updatePROriginalTitle(prId: number, originalPrTitle: string): vo
 /**
  * Update original PR URL and title for a PR.
  */
-export function updatePROriginalInfo(prId: number, originalPrUrl: string, originalPrTitle: string | null): void {
+export function updatePROriginalInfo(
+  prId: number,
+  originalPrUrl: string,
+  originalPrTitle: string | null,
+  originalPrState?: string | null,
+  originalPrMergedAt?: string | null
+): void {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    UPDATE prs SET original_pr_url = ?, original_pr_title = COALESCE(?, original_pr_title), updated_at = ? WHERE id = ?
+    UPDATE prs SET
+      original_pr_url = ?,
+      original_pr_title = COALESCE(?, original_pr_title),
+      original_pr_state = COALESCE(?, original_pr_state),
+      original_pr_merged_at = COALESCE(?, original_pr_merged_at),
+      updated_at = ?
+    WHERE id = ?
   `);
 
-  stmt.run(originalPrUrl, originalPrTitle, now, prId);
+  stmt.run(originalPrUrl, originalPrTitle, originalPrState ?? null, originalPrMergedAt ?? null, now, prId);
 }
 
 /**

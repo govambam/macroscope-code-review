@@ -22,6 +22,8 @@ export interface EmailBugInput {
 export interface EmailGenerationInput {
   originalPrUrl: string; // URL to their original PR in their repo
   prTitle?: string; // Optional - will use default based on PR number if not provided
+  prStatus?: "open" | "merged" | "closed"; // Status of the original PR
+  prMergedAt?: string | null; // ISO timestamp if merged
   forkedPrUrl: string; // URL to our fork with Macroscope review
   bug: BugSnippet | EmailBugInput; // Supports both V1 and V2 formats
   totalBugs: number;
@@ -66,6 +68,8 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
   const {
     originalPrUrl,
     prTitle,
+    prStatus,
+    prMergedAt,
     forkedPrUrl,
     bug,
     totalBugs,
@@ -86,11 +90,37 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
   const bugInput = bug as EmailBugInput;
   const bugExplanation = bugInput.explanation_short || bug.explanation;
 
+  // Format merged date for context (e.g., "3 days ago" or "January 15, 2024")
+  let mergedDateFormatted = "";
+  if (prMergedAt) {
+    const mergedDate = new Date(prMergedAt);
+    if (isNaN(mergedDate.getTime())) {
+      mergedDateFormatted = "unknown";
+    } else {
+      const now = new Date();
+      const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays === 0) {
+        mergedDateFormatted = "today";
+      } else if (diffDays === 1) {
+        mergedDateFormatted = "yesterday";
+      } else if (diffDays < 7) {
+        mergedDateFormatted = `${diffDays} days ago`;
+      } else if (diffDays < 30) {
+        const weeks = Math.floor(diffDays / 7);
+        mergedDateFormatted = `${weeks} week${weeks > 1 ? "s" : ""} ago`;
+      } else {
+        mergedDateFormatted = mergedDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      }
+    }
+  }
+
   // Load the prompt and interpolate variables
   const prompt = loadPrompt("email-generation", {
     ORIGINAL_PR_NUMBER: originalPrNumber,
     ORIGINAL_PR_URL: originalPrUrl,
     PR_TITLE: prTitle || `PR #${originalPrNumber}`,
+    PR_STATUS: prStatus || "open",
+    PR_MERGED_DATE: mergedDateFormatted || "unknown",
     FORKED_PR_URL: forkedPrUrl,
     BUG_TITLE: bug.title,
     BUG_EXPLANATION: bugExplanation,
