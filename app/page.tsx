@@ -1001,92 +1001,76 @@ export default function Home() {
     return result;
   }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, selectedOwner, internalFilter, sortMode]);
 
-  // Pagination data - count rows (each repo header + each PR = 1 row)
+  // Pagination data - keep repos together (don't split across pages)
   const paginationData = useMemo(() => {
     const filtered = filteredForks();
+    const totalPRs = filtered.reduce((sum, fork) => sum + fork.prs.length, 0);
+    const totalRows = filtered.reduce((sum, fork) => sum + 1 + fork.prs.length, 0); // 1 header + PRs per repo
 
-    // Build a list of rows: each row is either a repo header or a PR
-    type Row =
-      | { type: 'repo'; fork: ForkRecord }
-      | { type: 'pr'; fork: ForkRecord; pr: PRRecord };
-
-    const allRows: Row[] = [];
+    // Build pages by adding complete repos until page is full
+    const pages: ForkRecord[][] = [];
+    let currentPageRepos: ForkRecord[] = [];
+    let currentPageRows = 0;
 
     filtered.forEach(fork => {
-      // Add repo header row
-      allRows.push({ type: 'repo', fork });
-      // Add PR rows
-      fork.prs.forEach(pr => {
-        allRows.push({ type: 'pr', fork, pr });
-      });
+      const repoRows = 1 + fork.prs.length; // 1 header + PRs
+
+      // If adding this repo would exceed the limit AND we already have items on the page
+      if (currentPageRows + repoRows > ITEMS_PER_PAGE && currentPageRepos.length > 0) {
+        // Push current page and start a new one
+        pages.push(currentPageRepos);
+        currentPageRepos = [fork];
+        currentPageRows = repoRows;
+      } else {
+        // Add repo to current page
+        currentPageRepos.push(fork);
+        currentPageRows += repoRows;
+      }
     });
 
-    const totalRows = allRows.length;
-    const totalPRs = filtered.reduce((sum, fork) => sum + fork.prs.length, 0);
-    const totalPages = Math.max(1, Math.ceil(totalRows / ITEMS_PER_PAGE));
+    // Don't forget the last page
+    if (currentPageRepos.length > 0) {
+      pages.push(currentPageRepos);
+    }
+
+    const totalPages = Math.max(1, pages.length);
     const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-    const startIndex = (validCurrentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalRows);
-    const currentRows = allRows.slice(startIndex, endIndex);
+    const currentPageForks = pages[validCurrentPage - 1] || [];
 
     return {
       totalRows,
       totalPRs,
       totalPages,
       currentPage: validCurrentPage,
-      startIndex,
-      endIndex,
-      currentRows,
+      currentPageForks,
     };
   }, [filteredForks, currentPage, ITEMS_PER_PAGE]);
 
-  // Group current page rows into forks for display
+  // For display, map to the expected format (showHeader is always true now since repos stay together)
   const paginatedForks = useMemo(() => {
-    const result: Array<{ fork: ForkRecord; prs: PRRecord[]; showHeader: boolean }> = [];
-    let currentGroup: { fork: ForkRecord; prs: PRRecord[]; showHeader: boolean } | null = null;
+    return paginationData.currentPageForks.map(fork => ({
+      fork,
+      prs: fork.prs,
+      showHeader: true,
+    }));
+  }, [paginationData.currentPageForks]);
 
-    paginationData.currentRows.forEach(row => {
-      if (row.type === 'repo') {
-        // Start a new fork group with header
-        if (currentGroup) {
-          result.push(currentGroup);
-        }
-        currentGroup = { fork: row.fork, prs: [], showHeader: true };
-      } else {
-        // It's a PR row
-        if (currentGroup && currentGroup.fork.forkUrl === row.fork.forkUrl) {
-          // Add to current fork group
-          currentGroup.prs.push(row.pr);
-        } else {
-          // This PR is from a repo whose header was on a previous page
-          if (currentGroup) {
-            result.push(currentGroup);
-          }
-          currentGroup = { fork: row.fork, prs: [row.pr], showHeader: false };
-        }
-      }
-    });
-
-    if (currentGroup) {
-      result.push(currentGroup);
+  // Helper to change page and scroll to top
+  const goToPage = useCallback((page: number) => {
+    const validPage = Math.min(Math.max(1, page), paginationData.totalPages);
+    if (validPage !== currentPage) {
+      setCurrentPage(validPage);
+      // Use setTimeout to ensure scroll happens after React renders the new page
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      }, 0);
     }
-
-    return result;
-  }, [paginationData.currentRows]);
+  }, [currentPage, paginationData.totalPages]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedOwner, searchQuery, showOnlyWithIssues, internalFilter, sortMode]);
-
-  // Scroll to top when page changes
-  const prevPageRef = useRef(currentPage);
-  useEffect(() => {
-    if (prevPageRef.current !== currentPage) {
-      window.scrollTo({ top: 0, behavior: 'instant' });
-      prevPageRef.current = currentPage;
-    }
-  }, [currentPage]);
 
   // Update URL with page parameter
   useEffect(() => {
@@ -2229,13 +2213,12 @@ export default function Home() {
               </div>
             ) : (
               <div className="divide-y divide-border">
-                    {paginatedForks.map(({ fork, prs: pagePrs, showHeader }) => {
+                    {paginatedForks.map(({ fork, prs: pagePrs }) => {
                       const checkboxState = getRepoCheckboxState(fork.repoName);
                       const isExpanded = expandedRepos.has(fork.repoName);
                       return (
-                        <div key={`${fork.forkUrl}-${showHeader ? 'header' : 'cont'}`}>
-                          {/* Repo Header - Clickable Accordion (only shown if header row is on this page) */}
-                          {showHeader ? (
+                        <div key={fork.forkUrl}>
+                          {/* Repo Header - Clickable Accordion */}
                           <div
                             className="flex items-center px-4 md:px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors min-h-[52px]"
                             onClick={() => toggleRepoExpand(fork.repoName)}
@@ -2326,23 +2309,10 @@ export default function Home() {
                                 </span>
                               </button>
                               <span className="text-sm text-gray-500">
-                                ({pagePrs.length} PR{pagePrs.length !== 1 ? "s" : ""} on page)
+                                ({pagePrs.length} PR{pagePrs.length !== 1 ? "s" : ""})
                               </span>
                             </div>
                           </div>
-                          ) : (
-                            /* Continuation indicator when repo header is on previous page */
-                            <div className="flex items-center px-4 md:px-6 py-2 bg-gray-100/50 border-b border-gray-200">
-                              <div className="w-6 flex-shrink-0"></div>
-                              <div className="w-10 flex-shrink-0"></div>
-                              <div className="flex-1 flex items-center gap-2 ml-2 text-sm text-gray-500 italic">
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                </svg>
-                                {fork.repoName} (continued) - {pagePrs.length} PR{pagePrs.length !== 1 ? "s" : ""}
-                              </div>
-                            </div>
-                          )}
 
                           {/* PR List - Collapsible */}
                           {isExpanded && pagePrs.length > 0 && (
@@ -2565,7 +2535,7 @@ export default function Home() {
                   <div className="flex items-center justify-center gap-2 py-4 border-t border-border mt-4">
                     {/* Previous Button */}
                     <button
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                      onClick={() => goToPage(currentPage - 1)}
                       disabled={currentPage <= 1}
                       className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-border bg-white hover:bg-bg-subtle disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
@@ -2614,7 +2584,7 @@ export default function Home() {
                           ) : (
                             <button
                               key={page}
-                              onClick={() => setCurrentPage(page)}
+                              onClick={() => goToPage(page)}
                               className={`min-w-[36px] h-9 px-3 text-sm font-medium rounded-lg transition-colors ${
                                 page === currentPage
                                   ? "bg-primary text-white"
@@ -2630,7 +2600,7 @@ export default function Home() {
 
                     {/* Next Button */}
                     <button
-                      onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
+                      onClick={() => goToPage(currentPage + 1)}
                       disabled={currentPage >= paginationData.totalPages}
                       className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-border bg-white hover:bg-bg-subtle disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
