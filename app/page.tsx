@@ -9,7 +9,6 @@ import { UserMenu } from "@/components/UserMenu";
 import { MobileMenu } from "@/components/MobileMenu";
 import { PRCard, RepoGroupHeader } from "@/components/PRCard";
 
-type FilterMode = "all" | "mine";
 type InternalFilter = "all" | "internal" | "external";
 type SortMode = "alpha-asc" | "alpha-desc" | "created-desc" | "created-asc" | "prs-desc" | "prs-asc";
 
@@ -231,8 +230,12 @@ export default function Home() {
   const { data: session } = useSession();
   const currentUserLogin = session?.user?.login;
 
-  // Filter mode state
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  // Owner filter state - "all" or a specific username
+  const [selectedOwner, setSelectedOwner] = useState<string>("all");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
 
   // Create PR modal state
   const [showCreatePRModal, setShowCreatePRModal] = useState(false);
@@ -878,6 +881,37 @@ export default function Home() {
     return url.trim().toLowerCase().replace(/\/+$/, "");
   }, []);
 
+  // Get unique owners from all PRs (sorted alphabetically)
+  const allOwners = useMemo(() => {
+    const owners = new Set<string>();
+    forks.forEach(fork => {
+      fork.prs.forEach(pr => {
+        if (pr.createdBy) {
+          owners.add(pr.createdBy);
+        }
+      });
+    });
+    return Array.from(owners).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  }, [forks]);
+
+  // Count PRs per owner
+  const ownerCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    forks.forEach(fork => {
+      fork.prs.forEach(pr => {
+        if (pr.createdBy) {
+          counts[pr.createdBy] = (counts[pr.createdBy] || 0) + 1;
+        }
+      });
+    });
+    return counts;
+  }, [forks]);
+
+  // Total PR count for "All Users"
+  const totalPRCount = useMemo(() => {
+    return forks.reduce((sum, fork) => sum + fork.prs.length, 0);
+  }, [forks]);
+
   const filteredForks = useCallback(() => {
     let result = forks;
 
@@ -927,12 +961,12 @@ export default function Home() {
         .filter((fork) => fork.prs.length > 0);
     }
 
-    // Apply "my PRs" filter
-    if (filterMode === "mine" && currentUserLogin) {
+    // Apply owner filter
+    if (selectedOwner !== "all") {
       result = result
         .map((fork) => ({
           ...fork,
-          prs: fork.prs.filter((pr) => pr.createdBy === currentUserLogin),
+          prs: fork.prs.filter((pr) => pr.createdBy === selectedOwner),
         }))
         .filter((fork) => fork.prs.length > 0);
     }
@@ -965,7 +999,87 @@ export default function Home() {
     });
 
     return result;
-  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, filterMode, currentUserLogin, internalFilter, sortMode]);
+  }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, selectedOwner, internalFilter, sortMode]);
+
+  // Pagination data - flatten all PRs and paginate
+  const paginationData = useMemo(() => {
+    const filtered = filteredForks();
+    // Flatten all PRs from all forks
+    const allPRs: Array<{ fork: ForkRecord; pr: PRRecord }> = [];
+
+    filtered.forEach(fork => {
+      fork.prs.forEach(pr => {
+        allPRs.push({ fork, pr });
+      });
+    });
+
+    const totalItems = allPRs.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+    // Ensure currentPage is valid
+    const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+    const startIndex = (validCurrentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems);
+    const currentItems = allPRs.slice(startIndex, endIndex);
+
+    return {
+      totalItems,
+      totalPages,
+      currentPage: validCurrentPage,
+      startIndex,
+      endIndex,
+      currentItems,
+    };
+  }, [filteredForks, currentPage, ITEMS_PER_PAGE]);
+
+  // Group current page items back by fork for display
+  const paginatedForks = useMemo(() => {
+    const forkMap = new Map<string, { fork: ForkRecord; prs: PRRecord[] }>();
+
+    paginationData.currentItems.forEach(({ fork, pr }) => {
+      const key = fork.forkUrl;
+      if (!forkMap.has(key)) {
+        forkMap.set(key, { fork, prs: [] });
+      }
+      forkMap.get(key)!.prs.push(pr);
+    });
+
+    return Array.from(forkMap.values());
+  }, [paginationData.currentItems]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedOwner, searchQuery, showOnlyWithIssues, internalFilter, sortMode]);
+
+  // Scroll to top when page changes
+  useEffect(() => {
+    if (currentPage > 1) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentPage]);
+
+  // Update URL with page parameter
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (currentPage > 1) {
+      url.searchParams.set('page', currentPage.toString());
+    } else {
+      url.searchParams.delete('page');
+    }
+    window.history.replaceState({}, '', url.toString());
+  }, [currentPage]);
+
+  // Initialize from URL parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pageParam = params.get('page');
+    if (pageParam) {
+      const page = parseInt(pageParam, 10);
+      if (!isNaN(page) && page > 0) {
+        setCurrentPage(page);
+      }
+    }
+  }, []);
 
   // Autocomplete suggestions for search
   const searchSuggestions = useMemo(() => {
@@ -1637,16 +1751,16 @@ export default function Home() {
                 <button
                   onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
                   className={`inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:px-3 md:gap-1.5 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors ${
-                    (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
+                    (selectedOwner !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
                   }`}
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                   </svg>
                   <span className="hidden md:inline">Filters</span>
-                  {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
+                  {(selectedOwner !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
                     <span className="hidden md:inline ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
-                      {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
+                      {(selectedOwner !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
                     </span>
                   )}
                 </button>
@@ -1656,28 +1770,52 @@ export default function Home() {
                   <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden max-h-[70vh] overflow-y-auto">
                     {/* User Filter */}
                     <div className="p-3 border-b border-border">
-                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
-                      <div className="space-y-1">
-                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                          <input
-                            type="radio"
-                            name="filterMode"
-                            checked={filterMode === "all"}
-                            onChange={() => setFilterMode("all")}
-                            className="text-primary focus:ring-primary"
-                          />
-                          <span className="text-sm text-accent">All Users</span>
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Filter by User</p>
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        <label className="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="ownerFilter"
+                              checked={selectedOwner === "all"}
+                              onChange={() => setSelectedOwner("all")}
+                              className="text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm text-accent">All Users</span>
+                          </div>
+                          <span className="text-xs text-text-muted bg-gray-100 px-1.5 py-0.5 rounded">{totalPRCount}</span>
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                          <input
-                            type="radio"
-                            name="filterMode"
-                            checked={filterMode === "mine"}
-                            onChange={() => setFilterMode("mine")}
-                            className="text-primary focus:ring-primary"
-                          />
-                          <span className="text-sm text-accent">My PRs Only</span>
-                        </label>
+                        {currentUserLogin && allOwners.includes(currentUserLogin) && (
+                          <label className="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle bg-blue-50">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name="ownerFilter"
+                                checked={selectedOwner === currentUserLogin}
+                                onChange={() => setSelectedOwner(currentUserLogin)}
+                                className="text-primary focus:ring-primary"
+                              />
+                              <span className="text-sm text-accent font-medium">@{currentUserLogin}</span>
+                              <span className="text-xs text-blue-600">(you)</span>
+                            </div>
+                            <span className="text-xs text-text-muted bg-gray-100 px-1.5 py-0.5 rounded">{ownerCounts[currentUserLogin] || 0}</span>
+                          </label>
+                        )}
+                        {allOwners.filter(owner => owner !== currentUserLogin).map(owner => (
+                          <label key={owner} className="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name="ownerFilter"
+                                checked={selectedOwner === owner}
+                                onChange={() => setSelectedOwner(owner)}
+                                className="text-primary focus:ring-primary"
+                              />
+                              <span className="text-sm text-accent">@{owner}</span>
+                            </div>
+                            <span className="text-xs text-text-muted bg-gray-100 px-1.5 py-0.5 rounded">{ownerCounts[owner] || 0}</span>
+                          </label>
+                        ))}
                       </div>
                     </div>
 
@@ -1786,11 +1924,11 @@ export default function Home() {
                     </div>
 
                     {/* Reset Button */}
-                    {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
+                    {(selectedOwner !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
                       <div className="p-3 border-t border-border">
                         <button
                           onClick={() => {
-                            setFilterMode("all");
+                            setSelectedOwner("all");
                             setInternalFilter("all");
                             setSortMode("created-desc");
                           }}
@@ -2004,9 +2142,9 @@ export default function Home() {
                   Create a PR to get started, or click &quot;Refresh&quot; to load existing repos from GitHub.
                 </p>
               </div>
-            ) : filteredForks().length === 0 && searchQuery.trim() ? (
+            ) : paginationData.totalItems === 0 ? (
               <div className="text-center py-12">
-                {isPrUrl(searchQuery) ? (
+                {searchQuery.trim() && isPrUrl(searchQuery) ? (
                   <>
                     <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -2033,18 +2171,35 @@ export default function Home() {
                 ) : (
                   <>
                     <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                     </svg>
-                    <h3 className="mt-4 text-sm font-medium text-accent">No matching repos or PRs</h3>
+                    <h3 className="mt-4 text-sm font-medium text-accent">No PRs match the current filters</h3>
                     <p className="mt-2 text-sm text-text-muted">
-                      Try a different search term, or paste a PR URL to check if it&apos;s been simulated.
+                      {selectedOwner !== "all"
+                        ? `No PRs found for @${selectedOwner}. Try selecting a different user or "All Users".`
+                        : searchQuery.trim()
+                        ? "Try a different search term, or paste a PR URL to check if it's been simulated."
+                        : "Try adjusting your filters to see more PRs."}
                     </p>
+                    {(selectedOwner !== "all" || showOnlyWithIssues || internalFilter !== "all") && (
+                      <button
+                        onClick={() => {
+                          setSelectedOwner("all");
+                          setShowOnlyWithIssues(false);
+                          setInternalFilter("all");
+                          setSearchQuery("");
+                        }}
+                        className="mt-4 inline-flex items-center px-4 py-2 rounded-lg border border-border text-accent font-medium text-sm hover:bg-bg-subtle transition-colors"
+                      >
+                        Clear All Filters
+                      </button>
+                    )}
                   </>
                 )}
               </div>
             ) : (
               <div className="divide-y divide-border">
-                    {filteredForks().map((fork) => {
+                    {paginatedForks.map(({ fork, prs: pagePrs }) => {
                       const checkboxState = getRepoCheckboxState(fork.repoName);
                       const isExpanded = expandedRepos.has(fork.repoName);
                       return (
@@ -2140,13 +2295,13 @@ export default function Home() {
                                 </span>
                               </button>
                               <span className="text-sm text-gray-500">
-                                ({fork.prs.length} PR{fork.prs.length !== 1 ? "s" : ""})
+                                ({pagePrs.length} PR{pagePrs.length !== 1 ? "s" : ""} on page)
                               </span>
                             </div>
                           </div>
 
                           {/* PR List - Collapsible */}
-                          {isExpanded && fork.prs.length > 0 && (
+                          {isExpanded && pagePrs.length > 0 && (
                             <div className="bg-white">
                               {/* PR Table Header - Desktop only */}
                               <div className="hidden md:flex items-center px-6 py-2 bg-gray-50/50 border-b border-gray-100 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -2162,7 +2317,7 @@ export default function Home() {
 
                               {/* Mobile PR Cards */}
                               <div className="md:hidden p-3 space-y-3">
-                                {fork.prs.map((pr) => (
+                                {pagePrs.map((pr) => (
                                   <PRCard
                                     key={`mobile-${fork.repoName}-${pr.prNumber}`}
                                     pr={pr}
@@ -2177,7 +2332,7 @@ export default function Home() {
 
                               {/* PR Rows - Desktop */}
                               <div className="hidden md:block divide-y divide-gray-100">
-                                {fork.prs.map((pr) => {
+                                {pagePrs.map((pr) => {
                                   // Bug count badge styling - softer pastel colors
                                   const getBugBadgeStyle = () => {
                                     if (!pr.hasAnalysis) return "bg-gray-100 text-gray-500";
@@ -2361,15 +2516,102 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Pagination Controls */}
+                {paginationData.totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-2 py-4 border-t border-border mt-4">
+                    {/* Previous Button */}
+                    <button
+                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                      disabled={currentPage <= 1}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-border bg-white hover:bg-bg-subtle disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                      </svg>
+                      Previous
+                    </button>
+
+                    {/* Page Numbers */}
+                    <div className="flex items-center gap-1">
+                      {(() => {
+                        const pages: (number | string)[] = [];
+                        const total = paginationData.totalPages;
+                        const current = currentPage;
+
+                        if (total <= 7) {
+                          // Show all pages if 7 or fewer
+                          for (let i = 1; i <= total; i++) pages.push(i);
+                        } else {
+                          // Always show first page
+                          pages.push(1);
+
+                          if (current > 3) {
+                            pages.push("...");
+                          }
+
+                          // Show pages around current
+                          for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+                            pages.push(i);
+                          }
+
+                          if (current < total - 2) {
+                            pages.push("...");
+                          }
+
+                          // Always show last page
+                          pages.push(total);
+                        }
+
+                        return pages.map((page, idx) =>
+                          typeof page === "string" ? (
+                            <span key={`ellipsis-${idx}`} className="px-2 text-text-muted">
+                              ...
+                            </span>
+                          ) : (
+                            <button
+                              key={page}
+                              onClick={() => setCurrentPage(page)}
+                              className={`min-w-[36px] h-9 px-3 text-sm font-medium rounded-lg transition-colors ${
+                                page === currentPage
+                                  ? "bg-primary text-white"
+                                  : "border border-border bg-white hover:bg-bg-subtle"
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          )
+                        );
+                      })()}
+                    </div>
+
+                    {/* Next Button */}
+                    <button
+                      onClick={() => setCurrentPage(Math.min(paginationData.totalPages, currentPage + 1))}
+                      disabled={currentPage >= paginationData.totalPages}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-border bg-white hover:bg-bg-subtle disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Next
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
               </div>
 
               {/* Summary */}
               {forks.length > 0 && (
                 <div className="mt-4 text-center">
                   <p className="text-sm text-text-muted">
-                    Showing {filteredForks().length} repo{filteredForks().length !== 1 ? "s" : ""} with{" "}
-                    {filteredForks().reduce((acc, f) => acc + f.prs.length, 0)} PR
-                    {filteredForks().reduce((acc, f) => acc + f.prs.length, 0) !== 1 ? "s" : ""}
+                    {paginationData.totalItems > 0 ? (
+                      <>
+                        Showing PRs {paginationData.startIndex + 1}-{paginationData.endIndex} of {paginationData.totalItems}
+                        {selectedOwner !== "all" && ` (filtered by @${selectedOwner})`}
+                      </>
+                    ) : (
+                      "No PRs match the current filters"
+                    )}
                   </p>
                 </div>
               )}
