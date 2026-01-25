@@ -149,6 +149,7 @@ The original PR might already be merged into `main`. If we create our review bra
 
 By creating our own `base-for-pr-{N}` branch at the exact commit where the original PR started, we get a pristine reproduction of the original diff.
 
+```
 // Create BOTH branches from this base
 await repoGit.checkout(["-b", baseBranchName, baseCommit]);  // base-for-pr-123
 await repoGit.checkout(["-b", branchName, baseCommit]);      // review-pr-123
