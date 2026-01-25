@@ -1108,10 +1108,15 @@ export function getRecentPRWithAnalysisAndEmail(): {
     return null;
   }
 
-  // Fetch full records
-  const pr = db.prepare("SELECT * FROM prs WHERE id = ?").get(result.pr_id) as PRRecord;
-  const analysis = db.prepare("SELECT * FROM pr_analyses WHERE id = ?").get(result.analysis_id) as PRAnalysisRecord;
-  const email = db.prepare("SELECT * FROM generated_emails WHERE id = ?").get(result.email_id) as GeneratedEmailRecord;
+  // Fetch full records (with null checks in case records were deleted between queries)
+  const pr = db.prepare("SELECT * FROM prs WHERE id = ?").get(result.pr_id) as PRRecord | undefined;
+  const analysis = db.prepare("SELECT * FROM pr_analyses WHERE id = ?").get(result.analysis_id) as PRAnalysisRecord | undefined;
+  const email = db.prepare("SELECT * FROM generated_emails WHERE id = ?").get(result.email_id) as GeneratedEmailRecord | undefined;
+
+  // Return null if any record is missing (could happen if deleted between queries)
+  if (!pr || !analysis || !email) {
+    return null;
+  }
 
   return { pr, analysis, email };
 }

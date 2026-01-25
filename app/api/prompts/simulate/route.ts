@@ -49,7 +49,8 @@ function interpolatePrompt(template: string, variables: Record<string, string>):
       new RegExp(`\\$\\{\\s*${key}\\s*\\}`, "g"),
     ];
     for (const pattern of patterns) {
-      result = result.replace(pattern, value);
+      // Use replacer function to avoid special pattern interpretation ($&, $`, etc.)
+      result = result.replace(pattern, () => value);
     }
   }
   return result;
@@ -75,7 +76,7 @@ function formatMergedDate(mergedAt: string | null): string {
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return "today";
+  if (diffDays <= 0) return "today"; // Handle negative values from clock skew
   if (diffDays === 1) return "yesterday";
   if (diffDays < 7) return `${diffDays} days ago`;
   if (diffDays < 30) {
@@ -138,7 +139,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Parse the analysis JSON
     let analysisResult: PRAnalysisResult;
     try {
-      analysisResult = JSON.parse(analysis.analysis_json);
+      const parsed = JSON.parse(analysis.analysis_json);
+      // Verify parsed result is a valid object (not null/primitive) before using 'in' operator
+      if (typeof parsed !== "object" || parsed === null) {
+        return NextResponse.json<SimulateResponse>({
+          success: false,
+          error: "Stored analysis JSON is not a valid object",
+        });
+      }
+      analysisResult = parsed;
     } catch {
       return NextResponse.json<SimulateResponse>({
         success: false,

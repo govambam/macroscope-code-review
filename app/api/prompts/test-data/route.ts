@@ -94,7 +94,7 @@ function formatMergedDate(mergedAt: string | null): string {
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return "today";
+  if (diffDays <= 0) return "today"; // Handle negative values from clock skew
   if (diffDays === 1) return "yesterday";
   if (diffDays < 7) return `${diffDays} days ago`;
   if (diffDays < 30) {
