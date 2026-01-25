@@ -1,6 +1,19 @@
 import { loadPrompt, getPromptMetadata } from "./prompt-loader";
 import { sendMessage, DEFAULT_MODEL } from "./anthropic";
-import { BugSnippet } from "./pr-analyzer";
+import { BugSnippet, AnalysisComment } from "./pr-analyzer";
+
+/**
+ * Extended bug info for email generation.
+ * Supports both V1 BugSnippet and V2 AnalysisComment-derived data.
+ */
+export interface EmailBugInput {
+  title: string;
+  explanation: string;
+  explanation_short?: string; // V2: Short version for concise emails
+  file_path: string;
+  severity: "critical" | "high" | "medium";
+  code_suggestion?: string; // V2: Suggested fix
+}
 
 /**
  * Input for email generation.
@@ -10,7 +23,7 @@ export interface EmailGenerationInput {
   originalPrUrl: string; // URL to their original PR in their repo
   prTitle?: string; // Optional - will use default based on PR number if not provided
   forkedPrUrl: string; // URL to our fork with Macroscope review
-  bug: BugSnippet;
+  bug: BugSnippet | EmailBugInput; // Supports both V1 and V2 formats
   totalBugs: number;
 }
 
@@ -69,6 +82,10 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
     throw new Error(`Could not extract PR number from original URL: ${originalPrUrl}`);
   }
 
+  // Use explanation_short if available (V2 format), otherwise use full explanation
+  const bugInput = bug as EmailBugInput;
+  const bugExplanation = bugInput.explanation_short || bug.explanation;
+
   // Load the prompt and interpolate variables
   const prompt = loadPrompt("email-generation", {
     ORIGINAL_PR_NUMBER: originalPrNumber,
@@ -76,9 +93,11 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
     PR_TITLE: prTitle || `PR #${originalPrNumber}`,
     FORKED_PR_URL: forkedPrUrl,
     BUG_TITLE: bug.title,
-    BUG_EXPLANATION: bug.explanation,
+    BUG_EXPLANATION: bugExplanation,
     BUG_SEVERITY: bug.severity,
     TOTAL_BUGS: totalBugs.toString(),
+    // Optional: code suggestion for V2 format
+    ...(bugInput.code_suggestion && { BUG_FIX_SUGGESTION: bugInput.code_suggestion }),
   });
 
   // Get model from prompt metadata, fallback to Sonnet

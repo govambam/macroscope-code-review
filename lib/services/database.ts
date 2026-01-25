@@ -38,6 +38,13 @@ export interface PRAnalysisRecord {
   analyzed_at: string;
   meaningful_bugs_found: boolean;
   analysis_json: string;
+  // New columns for enhanced analysis format
+  total_comments_processed: number | null;
+  meaningful_bugs_count: number | null;
+  outreach_ready_count: number | null;
+  best_bug_index: number | null;
+  summary_json: string | null;
+  schema_version: number; // 1 = old format, 2 = new format
 }
 
 export interface GeneratedEmailRecord {
@@ -214,6 +221,29 @@ function initializeSchema(db: Database.Database): void {
       FOREIGN KEY (pr_id) REFERENCES prs(id) ON DELETE CASCADE
     )
   `);
+
+  // Migration: Add new columns to pr_analyses table for enhanced analysis format
+  const analysisColumns = db.prepare("PRAGMA table_info(pr_analyses)").all() as { name: string }[];
+  const analysisColumnNames = analysisColumns.map(c => c.name);
+
+  if (!analysisColumnNames.includes("total_comments_processed")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN total_comments_processed INTEGER");
+  }
+  if (!analysisColumnNames.includes("meaningful_bugs_count")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN meaningful_bugs_count INTEGER");
+  }
+  if (!analysisColumnNames.includes("outreach_ready_count")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN outreach_ready_count INTEGER");
+  }
+  if (!analysisColumnNames.includes("best_bug_index")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN best_bug_index INTEGER");
+  }
+  if (!analysisColumnNames.includes("summary_json")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN summary_json TEXT");
+  }
+  if (!analysisColumnNames.includes("schema_version")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN schema_version INTEGER DEFAULT 1");
+  }
 
   // Create generated emails table
   db.exec(`
@@ -473,13 +503,26 @@ export function updatePROwner(prId: number, owner: string): void {
 }
 
 /**
+ * Options for saving an analysis with the new format.
+ */
+export interface SaveAnalysisOptions {
+  totalCommentsProcessed?: number;
+  meaningfulBugsCount?: number;
+  outreachReadyCount?: number;
+  bestBugIndex?: number | null;
+  summaryJson?: string;
+  schemaVersion?: number; // 1 = old format, 2 = new format
+}
+
+/**
  * Save a PR analysis.
  * Returns the analysis ID.
  */
 export function saveAnalysis(
   prId: number,
   meaningfulBugsFound: boolean,
-  analysisJson: string
+  analysisJson: string,
+  options: SaveAnalysisOptions = {}
 ): number {
   const db = getDatabase();
 
@@ -487,12 +530,26 @@ export function saveAnalysis(
   db.prepare(`DELETE FROM pr_analyses WHERE pr_id = ?`).run(prId);
 
   const stmt = db.prepare(`
-    INSERT INTO pr_analyses (pr_id, meaningful_bugs_found, analysis_json)
-    VALUES (?, ?, ?)
+    INSERT INTO pr_analyses (
+      pr_id, meaningful_bugs_found, analysis_json,
+      total_comments_processed, meaningful_bugs_count, outreach_ready_count,
+      best_bug_index, summary_json, schema_version
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING id
   `);
 
-  const result = stmt.get(prId, meaningfulBugsFound ? 1 : 0, analysisJson) as { id: number };
+  const result = stmt.get(
+    prId,
+    meaningfulBugsFound ? 1 : 0,
+    analysisJson,
+    options.totalCommentsProcessed ?? null,
+    options.meaningfulBugsCount ?? null,
+    options.outreachReadyCount ?? null,
+    options.bestBugIndex ?? null,
+    options.summaryJson ?? null,
+    options.schemaVersion ?? 1
+  ) as { id: number };
   return result.id;
 }
 

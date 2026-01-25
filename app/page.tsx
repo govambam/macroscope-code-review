@@ -15,27 +15,138 @@ type SortMode = "alpha-asc" | "alpha-desc" | "created-desc" | "created-asc" | "p
 
 type CreateMode = "commit" | "pr";
 
-// PR Analysis types
+// PR Analysis types - V1 format (old)
 interface BugSnippet {
   title: string;
   explanation: string;
   file_path: string;
   severity: "critical" | "high" | "medium";
   is_most_impactful: boolean;
+  macroscope_comment_text?: string;
 }
 
 interface NoMeaningfulBugsResult {
   meaningful_bugs_found: false;
   reason: string;
+  macroscope_comments_found?: number;
 }
 
 interface MeaningfulBugsResult {
   meaningful_bugs_found: true;
   bugs: BugSnippet[];
   total_macroscope_bugs_found: number;
+  macroscope_comments_found?: number;
 }
 
-type PRAnalysisResult = NoMeaningfulBugsResult | MeaningfulBugsResult;
+type PRAnalysisResultV1 = NoMeaningfulBugsResult | MeaningfulBugsResult;
+
+// PR Analysis types - V2 format (new)
+type CommentCategory =
+  | "bug_critical"
+  | "bug_high"
+  | "bug_medium"
+  | "bug_low"
+  | "suggestion"
+  | "style"
+  | "nitpick";
+
+interface AnalysisComment {
+  index: number;
+  macroscope_comment_text: string;
+  file_path: string;
+  line_number: number | null;
+  category: CommentCategory;
+  title: string;
+  explanation: string;
+  explanation_short: string | null;
+  impact_scenario: string | null;
+  code_suggestion: string | null;
+  is_meaningful_bug: boolean;
+  outreach_ready: boolean;
+  outreach_skip_reason: string | null;
+}
+
+interface AnalysisSummary {
+  bugs_by_severity: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  non_bugs: {
+    suggestions: number;
+    style: number;
+    nitpicks: number;
+  };
+  recommendation: string;
+}
+
+interface PRAnalysisResultV2 {
+  total_comments_processed: number;
+  meaningful_bugs_count: number;
+  outreach_ready_count: number;
+  best_bug_for_outreach_index: number | null;
+  all_comments: AnalysisComment[];
+  summary: AnalysisSummary;
+}
+
+// Union type for both formats
+type PRAnalysisResult = PRAnalysisResultV1 | PRAnalysisResultV2;
+
+// Type guards
+function isV2Result(result: PRAnalysisResult): result is PRAnalysisResultV2 {
+  return "all_comments" in result && "summary" in result;
+}
+
+function isV1Result(result: PRAnalysisResult): result is PRAnalysisResultV1 {
+  return "meaningful_bugs_found" in result;
+}
+
+// Helper to check if result has meaningful bugs (works with both formats)
+function resultHasMeaningfulBugs(result: PRAnalysisResult): boolean {
+  if (isV2Result(result)) {
+    return result.meaningful_bugs_count > 0;
+  }
+  return result.meaningful_bugs_found === true;
+}
+
+// Helper to get total bug count (works with both formats)
+function getTotalBugCount(result: PRAnalysisResult): number {
+  if (isV2Result(result)) {
+    return result.meaningful_bugs_count;
+  }
+  if (result.meaningful_bugs_found) {
+    return result.total_macroscope_bugs_found;
+  }
+  return 0;
+}
+
+// Extended BugSnippet with V2 fields for email generation
+interface ExtendedBugSnippet extends BugSnippet {
+  explanation_short?: string;
+  code_suggestion?: string;
+}
+
+// Helper to convert V2 comment to extended BugSnippet for email generation
+function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean = false): ExtendedBugSnippet {
+  const severityMap: Partial<Record<CommentCategory, "critical" | "high" | "medium">> = {
+    bug_critical: "critical",
+    bug_high: "high",
+    bug_medium: "medium",
+    bug_low: "medium",
+  };
+
+  return {
+    title: comment.title,
+    explanation: comment.explanation,
+    explanation_short: comment.explanation_short || undefined,
+    code_suggestion: comment.code_suggestion || undefined,
+    file_path: comment.file_path,
+    severity: severityMap[comment.category] || "medium",
+    is_most_impactful: isMostImpactful,
+    macroscope_comment_text: comment.macroscope_comment_text,
+  };
+}
 
 // Email Generation types
 interface EmailGenerationResponse {
@@ -1264,6 +1375,33 @@ export default function Home() {
     }
   };
 
+  // Helper to get the most impactful/best bug for outreach from either format
+  const getBestBugForEmail = (result: PRAnalysisResult): BugSnippet | null => {
+    if (isV2Result(result)) {
+      // V2 format - get the best bug for outreach
+      if (result.best_bug_for_outreach_index !== null) {
+        const bestComment = result.all_comments.find(
+          c => c.index === result.best_bug_for_outreach_index
+        );
+        if (bestComment) {
+          return commentToBugSnippet(bestComment, true);
+        }
+      }
+      // Fallback to first meaningful bug
+      const meaningfulBug = result.all_comments.find(c => c.is_meaningful_bug);
+      if (meaningfulBug) {
+        return commentToBugSnippet(meaningfulBug, true);
+      }
+      return null;
+    }
+
+    // V1 format - use existing logic
+    if (!result.meaningful_bugs_found) return null;
+    const mostImpactful = result.bugs.find((bug) => bug.is_most_impactful);
+    return mostImpactful || result.bugs[0] || null;
+  };
+
+  // Legacy helper for backwards compatibility
   const getMostImpactfulBug = (bugs: BugSnippet[]): BugSnippet | null => {
     const mostImpactful = bugs.find((bug) => bug.is_most_impactful);
     return mostImpactful || bugs[0] || null;
@@ -1285,10 +1423,14 @@ export default function Home() {
   };
 
   const handleGenerateEmail = async () => {
-    if (!analysisResult?.result || !analysisResult.result.meaningful_bugs_found) return;
+    if (!analysisResult?.result) return;
 
-    const mostImpactfulBug = getMostImpactfulBug(analysisResult.result.bugs);
-    if (!mostImpactfulBug) return;
+    // Check if there are meaningful bugs using format-agnostic helper
+    if (!resultHasMeaningfulBugs(analysisResult.result)) return;
+
+    // Get the best bug for outreach using format-aware helper
+    const bestBug = getBestBugForEmail(analysisResult.result);
+    if (!bestBug) return;
 
     // Get the original PR URL from the API response (always extracted from forked PR description)
     const originalPrUrl = analysisResult.originalPrUrl;
@@ -1303,6 +1445,9 @@ export default function Home() {
     // Switch to email tab immediately to show loading skeleton
     setModalTab("email");
 
+    // Get total bug count using format-aware helper
+    const totalBugs = getTotalBugCount(analysisResult.result);
+
     try {
       const response = await fetch("/api/generate-email", {
         method: "POST",
@@ -1311,8 +1456,8 @@ export default function Home() {
           originalPrUrl,
           prTitle: analysisResult.originalPrTitle, // Use the actual PR title from GitHub
           forkedPrUrl: analysisForkedUrl,
-          bug: mostImpactfulBug,
-          totalBugs: analysisResult.result.total_macroscope_bugs_found,
+          bug: bestBug,
+          totalBugs,
           analysisId: currentAnalysisId, // Link email to analysis in database
         }),
       });
@@ -2483,72 +2628,222 @@ export default function Home() {
                       )}
 
                       {analysisResult.success && analysisResult.result ? (
-                        analysisResult.result.meaningful_bugs_found ? (
+                        /* Check if result has meaningful bugs using format-agnostic helper */
+                        resultHasMeaningfulBugs(analysisResult.result) ? (
                           <>
-                            {/* Summary */}
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                              <div className="flex items-center gap-2 text-amber-800">
-                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                                <span className="font-semibold">
-                                  Found {analysisResult.result.total_macroscope_bugs_found} bug
-                                  {analysisResult.result.total_macroscope_bugs_found !== 1 ? "s" : ""}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Bug List */}
-                            <div className="space-y-4">
-                              {analysisResult.result.bugs.map((bug, index) => (
-                                <div
-                                  key={index}
-                                  className={`border rounded-lg overflow-hidden ${
-                                    bug.is_most_impactful ? "border-primary ring-1 ring-primary/20" : "border-border"
-                                  }`}
-                                >
-                                  <div className="px-4 py-3 bg-bg-subtle border-b border-border flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <span className={`px-2 py-0.5 text-xs font-medium rounded border ${getSeverityColor(bug.severity)}`}>
-                                        {bug.severity}
+                            {/* V2 Format Display */}
+                            {isV2Result(analysisResult.result) ? (
+                              <>
+                                {/* Summary Header */}
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                    <div className="flex items-center gap-2 text-amber-800">
+                                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                      </svg>
+                                      <span className="font-semibold">
+                                        {analysisResult.result.total_comments_processed} comments analyzed
                                       </span>
-                                      {bug.is_most_impactful && (
-                                        <span className="px-2 py-0.5 text-xs font-medium rounded bg-primary/10 text-primary border border-primary/20">
-                                          Most Impactful
+                                    </div>
+                                    <div className="flex items-center gap-3 text-sm">
+                                      <span className="text-amber-700">
+                                        {analysisResult.result.meaningful_bugs_count} meaningful bug{analysisResult.result.meaningful_bugs_count !== 1 ? "s" : ""}
+                                      </span>
+                                      {analysisResult.result.outreach_ready_count > 0 && (
+                                        <span className="text-green-700">
+                                          {analysisResult.result.outreach_ready_count} outreach ready
                                         </span>
                                       )}
                                     </div>
-                                    <button
-                                      onClick={() => copyBugExplanation(bug.explanation, index)}
-                                      className="text-xs text-text-secondary hover:text-accent flex items-center gap-1"
-                                    >
-                                      {copiedBugIndex === index ? (
-                                        <>
-                                          <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                          </svg>
-                                          Copied!
-                                        </>
-                                      ) : (
-                                        <>
-                                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                          </svg>
-                                          Copy
-                                        </>
-                                      )}
-                                    </button>
                                   </div>
-                                  <div className="p-4">
-                                    <h4 className="font-medium text-accent mb-2">{bug.title}</h4>
-                                    <p className="text-sm text-text-secondary mb-3">{bug.explanation}</p>
-                                    <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded inline-block">
-                                      {bug.file_path}
-                                    </div>
+                                  {/* Recommendation */}
+                                  {analysisResult.result.summary.recommendation && (
+                                    <p className="mt-3 text-sm text-amber-800 border-t border-amber-200 pt-3">
+                                      <span className="font-medium">Recommendation:</span> {analysisResult.result.summary.recommendation}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* Comments List - Grouped by Category */}
+                                <div className="space-y-4">
+                                  {analysisResult.result.all_comments.map((comment, index) => {
+                                    const v2Result = analysisResult.result as PRAnalysisResultV2;
+                                    const isBestForOutreach = comment.index === v2Result.best_bug_for_outreach_index;
+                                    const categoryColors: Record<CommentCategory, string> = {
+                                      bug_critical: "bg-red-100 text-red-800 border-red-200",
+                                      bug_high: "bg-orange-100 text-orange-800 border-orange-200",
+                                      bug_medium: "bg-yellow-100 text-yellow-800 border-yellow-200",
+                                      bug_low: "bg-blue-100 text-blue-800 border-blue-200",
+                                      suggestion: "bg-purple-100 text-purple-800 border-purple-200",
+                                      style: "bg-gray-100 text-gray-800 border-gray-200",
+                                      nitpick: "bg-gray-100 text-gray-600 border-gray-200",
+                                    };
+                                    const categoryLabels: Record<CommentCategory, string> = {
+                                      bug_critical: "Critical",
+                                      bug_high: "High",
+                                      bug_medium: "Medium",
+                                      bug_low: "Low",
+                                      suggestion: "Suggestion",
+                                      style: "Style",
+                                      nitpick: "Nitpick",
+                                    };
+                                    const categoryIcons: Record<CommentCategory, string> = {
+                                      bug_critical: "🔴",
+                                      bug_high: "🟠",
+                                      bug_medium: "🟡",
+                                      bug_low: "🔵",
+                                      suggestion: "💡",
+                                      style: "✨",
+                                      nitpick: "📝",
+                                    };
+
+                                    return (
+                                      <div
+                                        key={index}
+                                        className={`border rounded-lg overflow-hidden ${
+                                          isBestForOutreach ? "border-primary ring-1 ring-primary/20" : "border-border"
+                                        }`}
+                                      >
+                                        <div className="px-4 py-3 bg-bg-subtle border-b border-border flex items-center justify-between">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`px-2 py-0.5 text-xs font-medium rounded border ${categoryColors[comment.category]}`}>
+                                              {categoryIcons[comment.category]} {categoryLabels[comment.category]}
+                                            </span>
+                                            {comment.is_meaningful_bug && (
+                                              <span className="px-2 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                                Bug
+                                              </span>
+                                            )}
+                                            {comment.outreach_ready && (
+                                              <span className="px-2 py-0.5 text-xs font-medium rounded bg-green-100 text-green-800 border border-green-200">
+                                                Outreach Ready
+                                              </span>
+                                            )}
+                                            {isBestForOutreach && (
+                                              <span className="px-2 py-0.5 text-xs font-medium rounded bg-primary/10 text-primary border border-primary/20">
+                                                Best for Outreach
+                                              </span>
+                                            )}
+                                          </div>
+                                          <button
+                                            onClick={() => copyBugExplanation(comment.explanation, index)}
+                                            className="text-xs text-text-secondary hover:text-accent flex items-center gap-1"
+                                          >
+                                            {copiedBugIndex === index ? (
+                                              <>
+                                                <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                Copied!
+                                              </>
+                                            ) : (
+                                              <>
+                                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                </svg>
+                                                Copy
+                                              </>
+                                            )}
+                                          </button>
+                                        </div>
+                                        <div className="p-4">
+                                          <h4 className="font-medium text-accent mb-2">{comment.title}</h4>
+                                          <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
+                                          {comment.impact_scenario && (
+                                            <p className="text-sm text-amber-700 bg-amber-50 p-2 rounded mb-3">
+                                              <span className="font-medium">Impact:</span> {comment.impact_scenario}
+                                            </p>
+                                          )}
+                                          {comment.code_suggestion && (
+                                            <pre className="text-xs bg-gray-100 p-2 rounded mb-3 overflow-x-auto">
+                                              <code>{comment.code_suggestion}</code>
+                                            </pre>
+                                          )}
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded">
+                                              {comment.file_path}{comment.line_number ? `:${comment.line_number}` : ""}
+                                            </div>
+                                            {!comment.outreach_ready && comment.outreach_skip_reason && (
+                                              <div className="text-xs text-gray-500 italic">
+                                                Skip reason: {comment.outreach_skip_reason}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            ) : (
+                              /* V1 Format Display (legacy) */
+                              <>
+                                {/* Summary */}
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                  <div className="flex items-center gap-2 text-amber-800">
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <span className="font-semibold">
+                                      Found {(analysisResult.result as MeaningfulBugsResult).total_macroscope_bugs_found} bug
+                                      {(analysisResult.result as MeaningfulBugsResult).total_macroscope_bugs_found !== 1 ? "s" : ""}
+                                    </span>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
+
+                                {/* Bug List */}
+                                <div className="space-y-4">
+                                  {(analysisResult.result as MeaningfulBugsResult).bugs.map((bug, index) => (
+                                    <div
+                                      key={index}
+                                      className={`border rounded-lg overflow-hidden ${
+                                        bug.is_most_impactful ? "border-primary ring-1 ring-primary/20" : "border-border"
+                                      }`}
+                                    >
+                                      <div className="px-4 py-3 bg-bg-subtle border-b border-border flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <span className={`px-2 py-0.5 text-xs font-medium rounded border ${getSeverityColor(bug.severity)}`}>
+                                            {bug.severity}
+                                          </span>
+                                          {bug.is_most_impactful && (
+                                            <span className="px-2 py-0.5 text-xs font-medium rounded bg-primary/10 text-primary border border-primary/20">
+                                              Most Impactful
+                                            </span>
+                                          )}
+                                        </div>
+                                        <button
+                                          onClick={() => copyBugExplanation(bug.explanation, index)}
+                                          className="text-xs text-text-secondary hover:text-accent flex items-center gap-1"
+                                        >
+                                          {copiedBugIndex === index ? (
+                                            <>
+                                              <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                              </svg>
+                                              Copied!
+                                            </>
+                                          ) : (
+                                            <>
+                                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                              </svg>
+                                              Copy
+                                            </>
+                                          )}
+                                        </button>
+                                      </div>
+                                      <div className="p-4">
+                                        <h4 className="font-medium text-accent mb-2">{bug.title}</h4>
+                                        <p className="text-sm text-text-secondary mb-3">{bug.explanation}</p>
+                                        <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded inline-block">
+                                          {bug.file_path}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            )}
 
                             {/* Generate Email Button - only show if no email exists */}
                             {!generatedEmail && (
@@ -2589,7 +2884,11 @@ export default function Home() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                             <h3 className="text-lg font-medium text-accent mb-2">No Meaningful Bugs Found</h3>
-                            <p className="text-sm text-text-secondary">{analysisResult.result.reason}</p>
+                            <p className="text-sm text-text-secondary">
+                              {isV2Result(analysisResult.result)
+                                ? analysisResult.result.summary.recommendation
+                                : (analysisResult.result as NoMeaningfulBugsResult).reason}
+                            </p>
                           </div>
                         )
                       ) : (
