@@ -20,8 +20,20 @@ interface ValidateSchemaRequest {
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: ValidateSchemaRequest = await request.json();
-    const { promptType, promptContent } = body;
+    const body = await request.json();
+
+    // Validate that body is a non-null object before destructuring
+    if (typeof body !== "object" || body === null) {
+      return NextResponse.json<SchemaValidationResult>(
+        {
+          compatible: true,
+          warnings: ["Invalid request body"],
+        },
+        { status: 400 }
+      );
+    }
+
+    const { promptType, promptContent } = body as ValidateSchemaRequest;
 
     if (!promptType || !promptContent) {
       return NextResponse.json<SchemaValidationResult>(

@@ -131,17 +131,36 @@ export function getAllFieldPaths(schema: z.ZodSchema, prefix = ""): string[] {
       // Recursively get nested fields
       let innerSchema: z.ZodTypeAny = value;
 
-      // Unwrap nullable/optional
-      if (innerSchema instanceof z.ZodNullable) {
-        innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
-      }
-      if (innerSchema instanceof z.ZodOptional) {
-        innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
+      // Unwrap all layers of nullable/optional (handles z.string().nullable().optional() etc.)
+      let unwrapped = true;
+      while (unwrapped) {
+        unwrapped = false;
+        if (innerSchema instanceof z.ZodNullable) {
+          innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
+          unwrapped = true;
+        }
+        if (innerSchema instanceof z.ZodOptional) {
+          innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
+          unwrapped = true;
+        }
       }
 
-      // Handle arrays - get the element schema
+      // Handle arrays - get the element schema (also unwrap element schema)
       if (innerSchema instanceof z.ZodArray) {
-        const elementSchema = innerSchema.element;
+        let elementSchema: z.ZodTypeAny = innerSchema.element as z.ZodTypeAny;
+        // Unwrap array element schema as well
+        let elementUnwrapped = true;
+        while (elementUnwrapped) {
+          elementUnwrapped = false;
+          if (elementSchema instanceof z.ZodNullable) {
+            elementSchema = elementSchema.unwrap() as z.ZodTypeAny;
+            elementUnwrapped = true;
+          }
+          if (elementSchema instanceof z.ZodOptional) {
+            elementSchema = elementSchema.unwrap() as z.ZodTypeAny;
+            elementUnwrapped = true;
+          }
+        }
         if (elementSchema instanceof z.ZodObject) {
           const nestedPaths = getAllFieldPaths(elementSchema, `${fullPath}[]`);
           paths.push(...nestedPaths);
@@ -192,12 +211,19 @@ export function getSchemaTree(schema: z.ZodSchema, indent = 0): string {
       const typeInfo = getTypeDescription(value);
 
       // Check if it's an object or array that needs expansion
+      // Unwrap all layers of nullable/optional
       let innerSchema: z.ZodTypeAny = value;
-      if (innerSchema instanceof z.ZodNullable) {
-        innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
-      }
-      if (innerSchema instanceof z.ZodOptional) {
-        innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
+      let unwrapped = true;
+      while (unwrapped) {
+        unwrapped = false;
+        if (innerSchema instanceof z.ZodNullable) {
+          innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
+          unwrapped = true;
+        }
+        if (innerSchema instanceof z.ZodOptional) {
+          innerSchema = innerSchema.unwrap() as z.ZodTypeAny;
+          unwrapped = true;
+        }
       }
 
       if (innerSchema instanceof z.ZodObject) {
@@ -205,7 +231,20 @@ export function getSchemaTree(schema: z.ZodSchema, indent = 0): string {
         lines.push(getSchemaTree(innerSchema, indent + 1));
         lines.push(`${spaces}}`);
       } else if (innerSchema instanceof z.ZodArray) {
-        const elementSchema = innerSchema.element;
+        // Also unwrap array element schema
+        let elementSchema: z.ZodTypeAny = innerSchema.element as z.ZodTypeAny;
+        let elementUnwrapped = true;
+        while (elementUnwrapped) {
+          elementUnwrapped = false;
+          if (elementSchema instanceof z.ZodNullable) {
+            elementSchema = elementSchema.unwrap() as z.ZodTypeAny;
+            elementUnwrapped = true;
+          }
+          if (elementSchema instanceof z.ZodOptional) {
+            elementSchema = elementSchema.unwrap() as z.ZodTypeAny;
+            elementUnwrapped = true;
+          }
+        }
         if (elementSchema instanceof z.ZodObject) {
           lines.push(`${spaces}${key}: [`);
           lines.push(`${spaces}  {`);

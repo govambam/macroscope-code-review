@@ -518,18 +518,18 @@ export function getOutreachReadyComments(result: PRAnalysisResultV2): AnalysisCo
  */
 export function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean = false): BugSnippet {
   // Map V2 categories to V1 severity
-  const severityMap: Partial<Record<CommentCategory, "critical" | "high" | "medium">> = {
-    bug_critical: "critical",
-    bug_high: "high",
-    bug_medium: "medium",
-    bug_low: "medium",
-  };
+  // Use Object.create(null) to prevent prototype pollution
+  const severityMap: Record<string, "critical" | "high" | "medium"> = Object.create(null);
+  severityMap["bug_critical"] = "critical";
+  severityMap["bug_high"] = "high";
+  severityMap["bug_medium"] = "medium";
+  severityMap["bug_low"] = "medium";
 
   return {
     title: comment.title,
     explanation: comment.explanation,
     file_path: comment.file_path,
-    severity: severityMap[comment.category] || "medium",
+    severity: Object.hasOwn(severityMap, comment.category) ? severityMap[comment.category] : "medium",
     is_most_impactful: isMostImpactful,
     macroscope_comment_text: comment.macroscope_comment_text,
   };

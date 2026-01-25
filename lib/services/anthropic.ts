@@ -116,8 +116,10 @@ export async function sendMessage(
 
 /**
  * Checks if a JSON string appears to be complete (not truncated).
+ * Only checks structural completeness, not full JSON validity.
+ * This avoids false "truncated" errors from control characters.
  * @param str - The string to check
- * @returns true if JSON looks complete, false if likely truncated
+ * @returns true if JSON looks structurally complete, false if likely truncated
  */
 function isCompleteJSON(str: string): boolean {
   const trimmed = str.trim();
@@ -127,13 +129,41 @@ function isCompleteJSON(str: string): boolean {
     return false;
   }
 
-  // Try to parse it - if it fails, it's likely truncated
-  try {
-    JSON.parse(trimmed);
-    return true;
-  } catch {
-    return false;
+  // Check for balanced braces/brackets (structural completeness)
+  // This avoids JSON.parse which fails on control characters
+  let braceCount = 0;
+  let bracketCount = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === "{") braceCount++;
+      else if (char === "}") braceCount--;
+      else if (char === "[") bracketCount++;
+      else if (char === "]") bracketCount--;
+    }
   }
+
+  // If counts are balanced and we end with } or ], it's structurally complete
+  return braceCount === 0 && bracketCount === 0;
 }
 
 /**
