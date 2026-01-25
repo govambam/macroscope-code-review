@@ -179,7 +179,7 @@ ${comment.macroscope_comment_text}
     } else if (promptType === "email-generation") {
       isJsonPrompt = false;
 
-      // Get best bug for outreach
+      // Get best bug for outreach (with safe defaults)
       let bugTitle = "Sample Bug";
       let bugExplanation = "Sample bug explanation";
       let bugSeverity = "high";
@@ -188,35 +188,36 @@ ${comment.macroscope_comment_text}
       if (isV2AnalysisResult(analysisResult)) {
         const best = getBestBugForOutreach(analysisResult);
         if (best) {
-          bugTitle = best.title;
-          bugExplanation = best.explanation_short || best.explanation;
-          bugSeverity = best.category.replace("bug_", "") || "high";
+          bugTitle = best.title || "Untitled Bug";
+          bugExplanation = best.explanation_short || best.explanation || "No explanation available";
+          bugSeverity = (best.category?.replace("bug_", "") || "high");
         }
         totalBugs = analysisResult.meaningful_bugs_count ?? 1;
       } else if ("meaningful_bugs_found" in analysisResult && analysisResult.meaningful_bugs_found) {
         const v1Result = analysisResult as MeaningfulBugsResult;
         const best = getMostImpactfulBug(v1Result);
         if (best) {
-          bugTitle = best.title;
-          bugExplanation = best.explanation;
-          bugSeverity = best.severity;
+          bugTitle = best.title || "Untitled Bug";
+          bugExplanation = best.explanation || "No explanation available";
+          bugSeverity = best.severity || "high";
         }
-        totalBugs = v1Result.total_macroscope_bugs_found;
+        totalBugs = v1Result.total_macroscope_bugs_found ?? 1;
       }
 
-      const prNumber = pr.original_pr_url ? extractPrNumber(pr.original_pr_url) : "1";
+      const prNumber = pr.original_pr_url ? extractPrNumber(pr.original_pr_url) : null;
+      const prNumberStr = prNumber || "1";
 
       variables = {
-        ORIGINAL_PR_NUMBER: prNumber || "1",
+        ORIGINAL_PR_NUMBER: prNumberStr,
         ORIGINAL_PR_URL: pr.original_pr_url || "https://github.com/example/repo/pull/1",
-        PR_TITLE: pr.original_pr_title || `PR #${prNumber}`,
+        PR_TITLE: pr.original_pr_title || `PR #${prNumberStr}`,
         PR_STATUS: pr.original_pr_state || "open",
         PR_MERGED_DATE: formatMergedDate(pr.original_pr_merged_at),
-        FORKED_PR_URL: pr.forked_pr_url,
+        FORKED_PR_URL: pr.forked_pr_url || "https://github.com/example/fork/pull/1",
         BUG_TITLE: bugTitle,
         BUG_EXPLANATION: bugExplanation,
         BUG_SEVERITY: bugSeverity,
-        TOTAL_BUGS: totalBugs.toString(),
+        TOTAL_BUGS: String(totalBugs),
       };
     } else {
       return NextResponse.json<SimulateResponse>({
