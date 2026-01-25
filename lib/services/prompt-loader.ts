@@ -1,13 +1,15 @@
 import * as fs from "fs";
 import * as path from "path";
+import { getPrompt } from "./database";
 
 /**
- * Loads a prompt from the prompts directory and interpolates variables.
+ * Loads a prompt, checking the database first then falling back to the filesystem.
+ * Database prompts take precedence over filesystem prompts.
  *
- * @param promptName - The name of the prompt file (without .md extension)
+ * @param promptName - The name of the prompt (e.g., 'email-generation', 'pr-analysis')
  * @param variables - Optional key-value pairs to interpolate into the prompt
  * @returns The interpolated prompt string
- * @throws Error if the prompt file doesn't exist or can't be read
+ * @throws Error if the prompt doesn't exist in database or filesystem
  *
  * @example
  * const prompt = loadPrompt('pr-analysis', {
@@ -19,31 +21,38 @@ export function loadPrompt(
   promptName: string,
   variables?: Record<string, string>
 ): string {
-  // Construct the path to the prompt file
-  const promptPath = path.join(process.cwd(), "prompts", `${promptName}.md`);
+  let promptContent: string;
 
-  // Check if the file exists
-  if (!fs.existsSync(promptPath)) {
-    throw new Error(`Prompt file not found: ${promptName}.md`);
-  }
+  // First, try to load from database (user-customized prompts)
+  const dbPrompt = getPrompt(promptName);
+  if (dbPrompt) {
+    promptContent = dbPrompt.content;
+  } else {
+    // Fall back to filesystem
+    const promptPath = path.join(process.cwd(), "prompts", `${promptName}.md`);
 
-  // Read the prompt file
-  let promptContent = fs.readFileSync(promptPath, "utf-8");
+    if (!fs.existsSync(promptPath)) {
+      throw new Error(`Prompt not found: ${promptName} (checked database and prompts/${promptName}.md)`);
+    }
 
-  // Extract just the prompt body (between the header separator and variables section)
-  // The format is: Header --- Body --- Variables
-  const parts = promptContent.split("---");
-  if (parts.length >= 2) {
-    // Take everything after the first separator, up to the Variables section
-    const bodyParts = parts.slice(1);
-    // Find where the Variables section starts and exclude it
-    const variablesIndex = bodyParts.findIndex((part) =>
-      part.trim().startsWith("Variables:")
-    );
-    if (variablesIndex !== -1) {
-      promptContent = bodyParts.slice(0, variablesIndex).join("---").trim();
-    } else {
-      promptContent = bodyParts.join("---").trim();
+    // Read the prompt file
+    promptContent = fs.readFileSync(promptPath, "utf-8");
+
+    // Extract just the prompt body (between the header separator and variables section)
+    // The format is: Header --- Body --- Variables
+    const parts = promptContent.split("---");
+    if (parts.length >= 2) {
+      // Take everything after the first separator, up to the Variables section
+      const bodyParts = parts.slice(1);
+      // Find where the Variables section starts and exclude it
+      const variablesIndex = bodyParts.findIndex((part) =>
+        part.trim().startsWith("Variables:")
+      );
+      if (variablesIndex !== -1) {
+        promptContent = bodyParts.slice(0, variablesIndex).join("---").trim();
+      } else {
+        promptContent = bodyParts.join("---").trim();
+      }
     }
   }
 
@@ -59,19 +68,29 @@ export function loadPrompt(
 }
 
 /**
- * Extracts metadata from a prompt file header.
+ * Extracts metadata from a prompt, checking database first then filesystem.
  *
- * @param promptName - The name of the prompt file (without .md extension)
- * @returns Object containing model and purpose from the header
+ * @param promptName - The name of the prompt
+ * @returns Object containing model and purpose
  */
 export function getPromptMetadata(promptName: string): {
   model?: string;
   purpose?: string;
 } {
+  // First, try to get metadata from database
+  const dbPrompt = getPrompt(promptName);
+  if (dbPrompt) {
+    return {
+      model: dbPrompt.model || undefined,
+      purpose: dbPrompt.purpose || undefined,
+    };
+  }
+
+  // Fall back to filesystem
   const promptPath = path.join(process.cwd(), "prompts", `${promptName}.md`);
 
   if (!fs.existsSync(promptPath)) {
-    throw new Error(`Prompt file not found: ${promptName}.md`);
+    return {};
   }
 
   const content = fs.readFileSync(promptPath, "utf-8");
