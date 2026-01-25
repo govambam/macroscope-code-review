@@ -1395,20 +1395,28 @@ export default function Home() {
 
       {/* Main Content Area */}
       <main className="flex-1 bg-bg-subtle min-h-screen md:h-screen overflow-y-auto pt-14 md:pt-0">
-        {/* Sticky Header Section */}
-        <div className="sticky top-14 md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-4 border-b border-border shadow-sm">
+        {/* Header Section - sticky on desktop only */}
+        <div className="md:sticky md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-4 border-b border-border md:shadow-sm">
           {/* Page Header */}
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4 md:mb-6">
-            <div>
-              <h1 className="text-xl md:text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
-              <p className="mt-1 md:mt-2 text-sm md:text-base text-text-secondary hidden md:block">View and analyze pull requests grouped by repository</p>
+          <div className="flex flex-col gap-3 mb-4">
+            {/* Title row - only on desktop */}
+            <div className="hidden md:flex md:items-start md:justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-accent tracking-tight">PR Reviews</h1>
+                <p className="mt-2 text-base text-text-secondary">View and analyze pull requests grouped by repository</p>
+              </div>
             </div>
+
+            {/* Mobile title */}
+            <h1 className="text-xl font-semibold text-accent tracking-tight md:hidden">PR Reviews</h1>
+
+            {/* Action buttons row - Import, Simulate, Filters, Refresh */}
             <div className="flex items-center gap-2 flex-wrap">
               {totalSelected > 0 && (
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   disabled={deleteLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-3 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                 >
                   {deleteLoading ? (
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -1420,7 +1428,7 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   )}
-                  <span className="hidden sm:inline">Delete</span>
+                  <span className="hidden sm:inline ml-1.5">Delete</span>
                 </button>
               )}
               <button
@@ -1434,8 +1442,7 @@ export default function Home() {
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                <span className="hidden sm:inline">Import PR</span>
-                <span className="sm:hidden">Import</span>
+                Import
               </button>
               <button
                 onClick={openCreatePRModal}
@@ -1444,8 +1451,200 @@ export default function Home() {
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                 </svg>
-                <span className="hidden sm:inline">Simulate PR</span>
-                <span className="sm:hidden">Simulate</span>
+                Simulate
+              </button>
+
+              {/* Spacer to push filter/refresh to right on desktop */}
+              <div className="hidden md:flex flex-1"></div>
+
+              {/* Filters button - icon only on mobile */}
+              <div className="relative" ref={filtersRef}>
+                <button
+                  onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
+                  className={`inline-flex items-center justify-center min-h-[44px] min-w-[44px] md:px-3 md:gap-1.5 bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors ${
+                    (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
+                  }`}
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  <span className="hidden md:inline">Filters</span>
+                  {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
+                    <span className="hidden md:inline ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
+                      {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
+                    </span>
+                  )}
+                </button>
+
+                {/* Filters dropdown - moved here */}
+                {showFiltersDropdown && (
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden max-h-[70vh] overflow-y-auto">
+                    {/* User Filter */}
+                    <div className="p-3 border-b border-border">
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
+                      <div className="space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="filterMode"
+                            checked={filterMode === "all"}
+                            onChange={() => setFilterMode("all")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">All Users</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="filterMode"
+                            checked={filterMode === "mine"}
+                            onChange={() => setFilterMode("mine")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">My PRs Only</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* PR Type Filter */}
+                    <div className="p-3 border-b border-border">
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">PR Type</p>
+                      <div className="space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="internalFilter"
+                            checked={internalFilter === "all"}
+                            onChange={() => setInternalFilter("all")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">All PRs</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="internalFilter"
+                            checked={internalFilter === "internal"}
+                            onChange={() => setInternalFilter("internal")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Internal Only</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="internalFilter"
+                            checked={internalFilter === "external"}
+                            onChange={() => setInternalFilter("external")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Simulated Only</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Sort Options */}
+                    <div className="p-3 border-b border-border">
+                      <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort Repos By</p>
+                      <div className="space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "created-desc"}
+                            onChange={() => setSortMode("created-desc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Newest First</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "created-asc"}
+                            onChange={() => setSortMode("created-asc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Oldest First</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "alpha-asc"}
+                            onChange={() => setSortMode("alpha-asc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">A → Z</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "alpha-desc"}
+                            onChange={() => setSortMode("alpha-desc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Z → A</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "prs-desc"}
+                            onChange={() => setSortMode("prs-desc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Most PRs</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
+                          <input
+                            type="radio"
+                            name="sortMode"
+                            checked={sortMode === "prs-asc"}
+                            onChange={() => setSortMode("prs-asc")}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-sm text-accent">Fewest PRs</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Reset Button */}
+                    {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
+                      <div className="p-3 border-t border-border">
+                        <button
+                          onClick={() => {
+                            setFilterMode("all");
+                            setInternalFilter("all");
+                            setSortMode("created-desc");
+                          }}
+                          className="w-full text-sm text-text-secondary hover:text-accent py-1.5 transition-colors"
+                        >
+                          Reset Filters
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Refresh button - icon only */}
+              <button
+                onClick={refreshFromGitHub}
+                disabled={isRefreshingFromGitHub}
+                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] bg-white border border-border rounded-lg text-accent hover:bg-bg-subtle transition-colors disabled:opacity-50"
+              >
+                {isRefreshingFromGitHub ? (
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>
@@ -1537,265 +1736,74 @@ export default function Home() {
             </div>
           )}
 
-          {/* Search and Filters */}
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="flex-1 relative" ref={searchContainerRef}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setShowSearchAutocomplete(true);
-                }}
-                onFocus={() => setShowSearchAutocomplete(true)}
-                placeholder="Search repos or PR titles..."
-                className="w-full pl-10 pr-4 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-              />
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
+          {/* Search */}
+          <div className="relative" ref={searchContainerRef}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowSearchAutocomplete(true);
+              }}
+              onFocus={() => setShowSearchAutocomplete(true)}
+              placeholder="Search repos or PR titles..."
+              className="w-full pl-10 pr-4 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            />
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
 
-              {/* Search Autocomplete Dropdown */}
-              {showSearchAutocomplete && searchSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[240px] overflow-y-auto">
-                  {searchSuggestions.slice(0, 20).map((suggestion, index) => (
-                    <button
-                      key={`${suggestion.type}-${suggestion.repoName}-${suggestion.prNumber || index}`}
-                      onClick={() => {
-                        if (suggestion.type === 'repo') {
-                          setSearchQuery(suggestion.repoName);
-                          // Auto-expand the repo
-                          setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
-                        } else {
-                          setSearchQuery(suggestion.prTitle || `#${suggestion.prNumber}`);
-                          // Auto-expand the repo containing this PR
-                          setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
-                        }
-                        setShowSearchAutocomplete(false);
-                      }}
-                      className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
-                    >
-                      {suggestion.type === 'repo' ? (
-                        <>
-                          <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                          </svg>
-                          <span className="text-sm text-accent truncate">{suggestion.repoName}</span>
-                          <span className="text-xs text-text-muted ml-auto">Repo</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="h-4 w-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                          </svg>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-sm text-primary">#{suggestion.prNumber}</span>
-                            <span className="text-sm text-accent ml-1.5 truncate">{suggestion.prTitle}</span>
-                          </div>
-                          <span className="text-xs text-text-muted flex-shrink-0">{suggestion.repoName}</span>
-                        </>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Filters Dropdown */}
-            <div className="relative" ref={filtersRef}>
-              <button
-                onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
-                className={`px-3 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm font-medium hover:bg-bg-subtle transition-colors flex items-center gap-1.5 ${
-                  (filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") ? "text-primary border-primary" : "text-accent"
-                }`}
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                <span className="hidden sm:inline">Filters</span>
-                {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
-                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
-                    {(filterMode !== "all" ? 1 : 0) + (internalFilter !== "all" ? 1 : 0) + (sortMode !== "created-desc" ? 1 : 0)}
-                  </span>
-                )}
-              </button>
-
-              {showFiltersDropdown && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-border rounded-lg shadow-lg z-20 overflow-hidden max-h-[70vh] overflow-y-auto">
-                  {/* User Filter */}
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Show PRs</p>
-                    <div className="space-y-1">
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="filterMode"
-                          checked={filterMode === "all"}
-                          onChange={() => setFilterMode("all")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">All Users</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="filterMode"
-                          checked={filterMode === "mine"}
-                          onChange={() => setFilterMode("mine")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">My PRs Only</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* PR Type Filter */}
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">PR Type</p>
-                    <div className="space-y-1">
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="internalFilter"
-                          checked={internalFilter === "all"}
-                          onChange={() => setInternalFilter("all")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">All PRs</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="internalFilter"
-                          checked={internalFilter === "internal"}
-                          onChange={() => setInternalFilter("internal")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Internal Only</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="internalFilter"
-                          checked={internalFilter === "external"}
-                          onChange={() => setInternalFilter("external")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Simulated Only</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Sort Options */}
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Sort Repos By</p>
-                    <div className="space-y-1">
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "created-desc"}
-                          onChange={() => setSortMode("created-desc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Newest First</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "created-asc"}
-                          onChange={() => setSortMode("created-asc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Oldest First</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "alpha-asc"}
-                          onChange={() => setSortMode("alpha-asc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">A → Z</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "alpha-desc"}
-                          onChange={() => setSortMode("alpha-desc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Z → A</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "prs-desc"}
-                          onChange={() => setSortMode("prs-desc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Most PRs</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-bg-subtle">
-                        <input
-                          type="radio"
-                          name="sortMode"
-                          checked={sortMode === "prs-asc"}
-                          onChange={() => setSortMode("prs-asc")}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-sm text-accent">Fewest PRs</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Reset Button */}
-                  {(filterMode !== "all" || internalFilter !== "all" || sortMode !== "created-desc") && (
-                    <div className="p-3 border-t border-border">
-                      <button
-                        onClick={() => {
-                          setFilterMode("all");
-                          setInternalFilter("all");
-                          setSortMode("created-desc");
-                        }}
-                        className="w-full text-sm text-text-secondary hover:text-accent py-1.5 transition-colors"
-                      >
-                        Reset Filters
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={refreshFromGitHub}
-              disabled={isRefreshingFromGitHub}
-              className="px-3 py-2.5 md:py-2 min-h-[44px] bg-white border border-border rounded-lg text-sm text-accent font-medium hover:bg-bg-subtle transition-colors disabled:opacity-50 flex items-center gap-1.5"
-            >
-              {isRefreshingFromGitHub ? (
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              ) : (
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              )}
-              {isRefreshingFromGitHub ? "Refreshing..." : "Refresh"}
-            </button>
+            {/* Search Autocomplete Dropdown */}
+            {showSearchAutocomplete && searchSuggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[240px] overflow-y-auto">
+                {searchSuggestions.slice(0, 20).map((suggestion, index) => (
+                  <button
+                    key={`${suggestion.type}-${suggestion.repoName}-${suggestion.prNumber || index}`}
+                    onClick={() => {
+                      if (suggestion.type === 'repo') {
+                        setSearchQuery(suggestion.repoName);
+                        // Auto-expand the repo
+                        setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
+                      } else {
+                        setSearchQuery(suggestion.prTitle || `#${suggestion.prNumber}`);
+                        // Auto-expand the repo containing this PR
+                        setExpandedRepos(prev => new Set(prev).add(suggestion.repoName));
+                      }
+                      setShowSearchAutocomplete(false);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
+                  >
+                    {suggestion.type === 'repo' ? (
+                      <>
+                        <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                        <span className="text-sm text-accent truncate">{suggestion.repoName}</span>
+                        <span className="text-xs text-text-muted ml-auto">Repo</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm text-primary">#{suggestion.prNumber}</span>
+                          <span className="text-sm text-accent ml-1.5 truncate">{suggestion.prTitle}</span>
+                        </div>
+                        <span className="text-xs text-text-muted flex-shrink-0">{suggestion.repoName}</span>
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Content Area */}
-        <div className="px-4 md:px-8 py-4 md:py-6">
+        <div className="px-4 md:px-8 pt-4 pb-4 md:py-6">
           {/* My Repos Section */}
-          <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+          <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden pt-2 md:pt-0">
             {/* Error display */}
             {forksError && (
               <div className="mx-6 mt-4 p-3 rounded-lg bg-error-light border border-error/20 text-sm text-error">
@@ -1810,7 +1818,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Repos List */}
+            {/* Repos List - with top padding on mobile to ensure first repo header is visible */}
             {forks.length === 0 ? (
               <div className="text-center py-12">
                 <svg className="mx-auto h-12 w-12 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">

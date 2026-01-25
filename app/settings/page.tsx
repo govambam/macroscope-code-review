@@ -79,6 +79,11 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Modal state for card-based prompt editing
+  const [showPromptModal, setShowPromptModal] = useState(false);
+  const [editingField, setEditingField] = useState<"model" | "content" | null>(null);
+  const [fieldSaveResult, setFieldSaveResult] = useState<{ success: boolean; message: string } | null>(null);
+
   // Version history state
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<PromptVersion | null>(null);
@@ -93,7 +98,9 @@ export default function SettingsPage() {
   const [cacheNotes, setCacheNotes] = useState("");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showCacheAutocomplete, setShowCacheAutocomplete] = useState(false);
+  const [showAddCacheModal, setShowAddCacheModal] = useState(false);
   const cacheInputRef = useRef<HTMLDivElement>(null);
+  const modalCacheInputRef = useRef<HTMLDivElement>(null);
 
   // Fetch forks for autocomplete
   const { data: forksData = [] } = useQuery<ForkRecord[]>({
@@ -110,7 +117,8 @@ export default function SettingsPage() {
   // Close autocomplete when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (cacheInputRef.current && !cacheInputRef.current.contains(event.target as Node)) {
+      if (cacheInputRef.current && !cacheInputRef.current.contains(event.target as Node) &&
+          modalCacheInputRef.current && !modalCacheInputRef.current.contains(event.target as Node)) {
         setShowCacheAutocomplete(false);
       }
     }
@@ -176,6 +184,7 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["cache-info"] });
       setNewCacheRepo("");
       setCacheNotes("");
+      setShowAddCacheModal(false);
     },
   });
 
@@ -245,47 +254,50 @@ export default function SettingsPage() {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  // Auto-select first prompt when prompts load
-  useEffect(() => {
-    if (prompts.length > 0 && !selectedPrompt) {
-      selectPrompt(prompts[0]);
-    }
-  }, [prompts, selectedPrompt]);
-
-  const selectPrompt = (prompt: Prompt) => {
+  const openPromptModal = (prompt: Prompt) => {
     setSelectedPrompt(prompt);
     setEditedContent(prompt.content);
     setEditedModel(prompt.model || "");
     setEditedPurpose(prompt.purpose || "");
     setSaveResult(null);
+    setFieldSaveResult(null);
     setSelectedVersion(null);
     setShowVersionHistory(false);
+    setEditingField(null);
+    setShowPromptModal(true);
   };
 
-  const handleSave = async () => {
+  const closePromptModal = () => {
+    setShowPromptModal(false);
+    setSelectedPrompt(null);
+    setEditingField(null);
+    setFieldSaveResult(null);
+  };
+
+  const handleSaveField = async (field: "model" | "content") => {
     if (!selectedPrompt) return;
 
     const currentName = selectedPrompt.name;
 
     try {
       setSaving(true);
-      setSaveResult(null);
+      setFieldSaveResult(null);
 
       const response = await fetch("/api/prompts", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: currentName,
-          content: editedContent,
-          model: editedModel || null,
-          purpose: editedPurpose || null,
+          content: field === "content" ? editedContent : selectedPrompt.content,
+          model: field === "model" ? (editedModel || null) : selectedPrompt.model,
+          purpose: selectedPrompt.purpose,
         }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        setSaveResult({ success: true, message: "Prompt saved successfully" });
+        setFieldSaveResult({ success: true, message: `${field === "model" ? "Model" : "Content"} saved successfully` });
 
         // Invalidate queries to refresh data
         await queryClient.invalidateQueries({ queryKey: ["prompts"] });
@@ -294,20 +306,22 @@ export default function SettingsPage() {
         // Update selected prompt with new content
         setSelectedPrompt({
           ...selectedPrompt,
-          content: editedContent,
-          model: editedModel || null,
-          purpose: editedPurpose || null,
+          content: field === "content" ? editedContent : selectedPrompt.content,
+          model: field === "model" ? (editedModel || null) : selectedPrompt.model,
         });
 
+        // Close the edit mode
+        setEditingField(null);
+
         // Auto-hide success message after 3 seconds
-        setTimeout(() => setSaveResult(null), 3000);
+        setTimeout(() => setFieldSaveResult(null), 3000);
       } else {
-        setSaveResult({ success: false, message: data.error || "Failed to save prompt" });
+        setFieldSaveResult({ success: false, message: data.error || "Failed to save" });
       }
     } catch (err) {
-      setSaveResult({
+      setFieldSaveResult({
         success: false,
-        message: err instanceof Error ? err.message : "Failed to save prompt",
+        message: err instanceof Error ? err.message : "Failed to save",
       });
     } finally {
       setSaving(false);
@@ -372,11 +386,13 @@ export default function SettingsPage() {
     setSelectedVersion(null);
   };
 
-  const hasChanges = selectedPrompt && (
-    editedContent !== selectedPrompt.content ||
-    (editedModel || null) !== selectedPrompt.model ||
-    (editedPurpose || null) !== selectedPrompt.purpose
-  );
+  const hasModelChanges = selectedPrompt && (editedModel || null) !== selectedPrompt.model;
+  const hasContentChanges = selectedPrompt && editedContent !== selectedPrompt.content;
+
+  const truncateText = (text: string, maxLength: number) => {
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength).trim() + "...";
+  };
 
   const formatPromptName = (name: string) => {
     return name
@@ -458,8 +474,8 @@ export default function SettingsPage() {
 
       {/* Main Content Area */}
       <main className="flex-1 bg-bg-subtle min-h-screen md:h-screen overflow-y-auto pt-14 md:pt-0">
-        {/* Sticky Header */}
-        <div className="sticky top-14 md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-0 border-b border-border shadow-sm">
+        {/* Header Section - sticky on desktop only */}
+        <div className="md:sticky md:top-0 z-10 bg-bg-subtle px-4 md:px-8 pt-4 md:pt-8 pb-0 border-b border-border md:shadow-sm">
           <h1 className="text-xl md:text-2xl font-semibold text-accent tracking-tight">Settings</h1>
           <p className="mt-1 md:mt-2 text-sm md:text-base text-text-secondary">Configure prompts and application settings</p>
 
@@ -490,12 +506,11 @@ export default function SettingsPage() {
 
         {/* Content */}
         <div className="px-4 md:px-8 py-4 md:py-6">
-          {/* Prompts Section */}
+          {/* Prompts Section - Card Based */}
           {activeTab === "prompts" && (
-          <div className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-border">
-              <h2 className="text-lg font-semibold text-accent">Prompts</h2>
-              <p className="text-sm text-text-secondary mt-1">
+          <>
+            <div className="mb-4">
+              <p className="text-sm text-text-secondary">
                 View and edit the prompts used for PR analysis and email generation
               </p>
             </div>
@@ -508,290 +523,367 @@ export default function SettingsPage() {
                 </svg>
               </div>
             ) : error ? (
-              <div className="p-6">
-                <div className="rounded-lg bg-error-light border border-error/20 p-4 text-sm text-error">
-                  {error}
-                </div>
+              <div className="rounded-lg bg-error-light border border-error/20 p-4 text-sm text-error">
+                {error}
               </div>
             ) : (
-              <div className="flex">
-                {/* Prompt List */}
-                <div className="w-64 border-r border-border">
-                  <div className="p-2">
-                    {prompts.map((prompt) => (
-                      <button
-                        key={prompt.name}
-                        onClick={() => selectPrompt(prompt)}
-                        className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${
-                          selectedPrompt?.name === prompt.name
-                            ? "bg-primary/10 text-primary"
-                            : "text-text-secondary hover:bg-bg-subtle hover:text-accent"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {prompts.map((prompt) => (
+                  <button
+                    key={prompt.name}
+                    onClick={() => openPromptModal(prompt)}
+                    className="bg-white border border-border rounded-xl p-4 md:p-5 text-left hover:border-primary hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <h3 className="text-base font-semibold text-accent group-hover:text-primary transition-colors">
+                        {formatPromptName(prompt.name)}
+                      </h3>
+                      <svg className="h-5 w-5 text-text-muted group-hover:text-primary transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {prompt.model && (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-primary/10 text-primary text-xs font-medium">
+                          {prompt.model}
+                        </span>
+                      )}
+                      <span className="text-xs text-text-muted">
+                        Updated {formatRelativeTime(prompt.updatedAt)}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-text-secondary line-clamp-3">
+                      {truncateText(prompt.content, 150)}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Prompt Detail Modal */}
+            {showPromptModal && selectedPrompt && (
+              <>
+                {/* Backdrop */}
+                <div
+                  className="fixed inset-0 bg-black/50 z-50"
+                  onClick={closePromptModal}
+                />
+
+                {/* Modal */}
+                <div className="fixed inset-2 md:inset-8 bg-white rounded-xl z-50 flex flex-col overflow-hidden shadow-2xl">
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-4 md:px-6 py-4 border-b border-border bg-bg-subtle">
+                    <div>
+                      <h2 className="text-lg font-semibold text-accent">
+                        {formatPromptName(selectedPrompt.name)}
+                      </h2>
+                      <p className="text-sm text-text-muted">
+                        Last updated: {formatDate(selectedPrompt.updatedAt)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={closePromptModal}
+                      className="p-2 -mr-2 text-text-muted hover:text-accent transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                    >
+                      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Modal Content */}
+                  <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+                    {/* Save Result */}
+                    {fieldSaveResult && (
+                      <div
+                        className={`rounded-lg border p-3 text-sm ${
+                          fieldSaveResult.success
+                            ? "bg-success-light border-success/20 text-success"
+                            : "bg-error-light border-error/20 text-error"
                         }`}
                       >
-                        <div className="font-medium text-sm">{formatPromptName(prompt.name)}</div>
-                        {prompt.purpose && (
-                          <div className="text-xs text-text-muted mt-1 line-clamp-2">
-                            {prompt.purpose}
-                          </div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        {fieldSaveResult.message}
+                      </div>
+                    )}
 
-                {/* Prompt Editor */}
-                <div className="flex-1 p-6">
-                  {selectedPrompt ? (
-                    <div className="space-y-6">
-                      {/* Header */}
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="text-lg font-semibold text-accent">
-                            {formatPromptName(selectedPrompt.name)}
-                          </h3>
-                          <p className="text-sm text-text-muted mt-1">
-                            Last updated: {formatDate(selectedPrompt.updatedAt)}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={handleSave}
-                            disabled={saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {saving ? (
-                              <>
+                    {/* Model Section */}
+                    <div className="bg-bg-subtle rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="text-sm font-medium text-accent">Model</label>
+                        {editingField === "model" ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleSaveField("model")}
+                              disabled={saving || !hasModelChanges}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {saving ? (
                                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                                 </svg>
-                                Saving...
-                              </>
-                            ) : (
-                              <>
+                              ) : (
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                 </svg>
-                                Save Changes
-                              </>
-                            )}
+                              )}
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingField(null);
+                                setEditedModel(selectedPrompt.model || "");
+                              }}
+                              className="px-3 py-1.5 text-text-secondary hover:text-accent text-sm font-medium rounded-lg transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingField("model")}
+                            className="text-sm text-primary hover:text-primary-hover font-medium"
+                          >
+                            Edit
                           </button>
-                        </div>
+                        )}
                       </div>
-
-                      {/* Save Result */}
-                      {saveResult && (
-                        <div
-                          className={`rounded-lg border p-3 text-sm ${
-                            saveResult.success
-                              ? "bg-success-light border-success/20 text-success"
-                              : "bg-error-light border-error/20 text-error"
-                          }`}
-                        >
-                          {saveResult.message}
+                      {editingField === "model" ? (
+                        <input
+                          type="text"
+                          value={editedModel}
+                          onChange={(e) => setEditedModel(e.target.value)}
+                          placeholder="e.g., claude-sonnet-4-20250514"
+                          className="w-full px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                          autoFocus
+                        />
+                      ) : (
+                        <div className="px-3 py-2 bg-white border border-border rounded-lg text-sm text-black">
+                          {selectedPrompt.model || <span className="text-text-muted">No model specified</span>}
                         </div>
                       )}
+                    </div>
 
-                      {/* Metadata Fields */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-accent mb-2">
-                            Model
-                          </label>
-                          <input
-                            type="text"
-                            value={editedModel}
-                            onChange={(e) => setEditedModel(e.target.value)}
-                            placeholder="e.g., claude-sonnet-4-20250514"
-                            className="w-full px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-accent mb-2">
-                            Purpose
-                          </label>
-                          <input
-                            type="text"
-                            value={editedPurpose}
-                            onChange={(e) => setEditedPurpose(e.target.value)}
-                            placeholder="Brief description of what this prompt does"
-                            className="w-full px-3 py-2 bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                          />
-                        </div>
+                    {/* Purpose Section (read-only display) */}
+                    {selectedPrompt.purpose && (
+                      <div className="bg-bg-subtle rounded-lg p-4">
+                        <label className="text-sm font-medium text-accent block mb-3">Purpose</label>
+                        <p className="text-sm text-text-secondary">{selectedPrompt.purpose}</p>
                       </div>
+                    )}
 
-                      {/* Content Editor */}
-                      <div>
-                        <label className="block text-sm font-medium text-accent mb-2">
-                          Prompt Content
-                        </label>
-                        <textarea
-                          value={editedContent}
-                          onChange={(e) => setEditedContent(e.target.value)}
-                          rows={20}
-                          className="w-full px-4 py-3 bg-white border border-border rounded-lg text-sm text-black font-mono placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-y"
-                          placeholder="Enter prompt content..."
-                        />
-                        <p className="text-xs text-text-muted mt-2">
-                          Use {"{VARIABLE_NAME}"} syntax for variables that will be interpolated at runtime.
-                        </p>
-                      </div>
-
-                      {/* Version History Section */}
-                      <div className="border-t border-border pt-6">
-                        <button
-                          onClick={toggleVersionHistory}
-                          className="flex items-center gap-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
-                        >
-                          <svg
-                            className={`h-4 w-4 transition-transform ${showVersionHistory ? "rotate-90" : ""}`}
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          Version History
-                          {versions.length > 0 && (
-                            <span className="text-xs text-text-muted">({versions.length} versions)</span>
-                          )}
-                        </button>
-
-                        {showVersionHistory && (
-                          <div className="mt-4 space-y-4">
-                            {loadingVersions ? (
-                              <div className="flex items-center justify-center py-8">
-                                <svg className="animate-spin h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24">
+                    {/* Content Section */}
+                    <div className="bg-bg-subtle rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="text-sm font-medium text-accent">Prompt Content</label>
+                        {editingField === "content" ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleSaveField("content")}
+                              disabled={saving || !hasContentChanges}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {saving ? (
+                                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                                 </svg>
-                              </div>
-                            ) : versions.length === 0 ? (
-                              <p className="text-sm text-text-muted py-4">No version history yet. Save changes to create the first version.</p>
-                            ) : (
-                              <>
-                                {/* Version List */}
-                                <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
-                                  {versions.map((version) => (
-                                    <div
-                                      key={version.version_number}
-                                      className={`flex items-center justify-between px-4 py-3 ${
-                                        selectedVersion?.version_number === version.version_number
-                                          ? "bg-primary/5"
-                                          : "hover:bg-bg-subtle"
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-sm font-medium text-accent">
-                                          Version {version.version_number}
-                                        </span>
-                                        <span className="text-xs text-text-muted">
-                                          {formatRelativeTime(version.created_at)}
-                                          {version.created_by && ` by @${version.created_by}`}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          onClick={() => setSelectedVersion(
-                                            selectedVersion?.version_number === version.version_number
-                                              ? null
-                                              : version
-                                          )}
-                                          className="text-xs text-primary hover:text-primary-hover font-medium"
-                                        >
-                                          {selectedVersion?.version_number === version.version_number ? "Hide" : "View"}
-                                        </button>
-                                        {showRevertConfirm === version.version_number ? (
-                                          <div className="flex items-center gap-1">
-                                            <button
-                                              onClick={() => handleRevert(version.version_number)}
-                                              disabled={reverting}
-                                              className="text-xs text-error hover:text-error/80 font-medium"
-                                            >
-                                              {reverting ? "Reverting..." : "Confirm"}
-                                            </button>
-                                            <button
-                                              onClick={() => setShowRevertConfirm(null)}
-                                              className="text-xs text-text-muted hover:text-text-secondary font-medium"
-                                            >
-                                              Cancel
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            onClick={() => setShowRevertConfirm(version.version_number)}
-                                            className="text-xs text-text-secondary hover:text-accent font-medium"
-                                          >
-                                            Revert
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                {/* Version Preview */}
-                                {selectedVersion && (
-                                  <div className="border border-border rounded-lg p-4 bg-bg-subtle">
-                                    <div className="flex items-center justify-between mb-3">
-                                      <h4 className="text-sm font-medium text-accent">
-                                        Version {selectedVersion.version_number} Preview
-                                      </h4>
-                                      <span className="text-xs text-text-muted">
-                                        {formatDate(selectedVersion.created_at)}
-                                      </span>
-                                    </div>
-                                    {selectedVersion.model && (
-                                      <p className="text-xs text-text-muted mb-1">
-                                        <span className="font-medium">Model:</span> {selectedVersion.model}
-                                      </p>
-                                    )}
-                                    {selectedVersion.purpose && (
-                                      <p className="text-xs text-text-muted mb-1">
-                                        <span className="font-medium">Purpose:</span> {selectedVersion.purpose}
-                                      </p>
-                                    )}
-                                    {selectedVersion.created_by && (
-                                      <p className="text-xs text-text-muted mb-3">
-                                        <span className="font-medium">Created by:</span> @{selectedVersion.created_by}
-                                      </p>
-                                    )}
-                                    <textarea
-                                      value={selectedVersion.content}
-                                      readOnly
-                                      rows={20}
-                                      className="w-full px-4 py-3 bg-white border border-border rounded-lg text-sm text-black font-mono resize-none"
-                                    />
-                                  </div>
-                                )}
-                              </>
-                            )}
+                              ) : (
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingField(null);
+                                setEditedContent(selectedPrompt.content);
+                              }}
+                              className="px-3 py-1.5 text-text-secondary hover:text-accent text-sm font-medium rounded-lg transition-colors"
+                            >
+                              Cancel
+                            </button>
                           </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingField("content")}
+                            className="text-sm text-primary hover:text-primary-hover font-medium"
+                          >
+                            Edit
+                          </button>
                         )}
                       </div>
+                      {editingField === "content" ? (
+                        <>
+                          <textarea
+                            value={editedContent}
+                            onChange={(e) => setEditedContent(e.target.value)}
+                            rows={15}
+                            className="w-full px-4 py-3 bg-white border border-border rounded-lg text-sm text-black font-mono placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors resize-y"
+                            placeholder="Enter prompt content..."
+                            autoFocus
+                          />
+                          <p className="text-xs text-text-muted mt-2">
+                            Use {"{VARIABLE_NAME}"} syntax for variables that will be interpolated at runtime.
+                          </p>
+                        </>
+                      ) : (
+                        <div className="px-4 py-3 bg-white border border-border rounded-lg text-sm text-black font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+                          {selectedPrompt.content}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-64 text-text-muted">
-                      Select a prompt to view and edit
+
+                    {/* Version History Section */}
+                    <div className="border-t border-border pt-6">
+                      <button
+                        onClick={toggleVersionHistory}
+                        className="flex items-center gap-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
+                      >
+                        <svg
+                          className={`h-4 w-4 transition-transform ${showVersionHistory ? "rotate-90" : ""}`}
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Version History
+                        {versions.length > 0 && (
+                          <span className="text-xs text-text-muted">({versions.length} versions)</span>
+                        )}
+                      </button>
+
+                      {showVersionHistory && (
+                        <div className="mt-4 space-y-4">
+                          {loadingVersions ? (
+                            <div className="flex items-center justify-center py-8">
+                              <svg className="animate-spin h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                            </div>
+                          ) : versions.length === 0 ? (
+                            <p className="text-sm text-text-muted py-4">No version history yet. Save changes to create the first version.</p>
+                          ) : (
+                            <>
+                              {/* Version List */}
+                              <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
+                                {versions.map((version) => (
+                                  <div
+                                    key={version.version_number}
+                                    className={`flex flex-col md:flex-row md:items-center justify-between px-4 py-3 gap-2 ${
+                                      selectedVersion?.version_number === version.version_number
+                                        ? "bg-primary/5"
+                                        : "hover:bg-bg-subtle"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-sm font-medium text-accent">
+                                        Version {version.version_number}
+                                      </span>
+                                      <span className="text-xs text-text-muted">
+                                        {formatRelativeTime(version.created_at)}
+                                        {version.created_by && ` by @${version.created_by}`}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => setSelectedVersion(
+                                          selectedVersion?.version_number === version.version_number
+                                            ? null
+                                            : version
+                                        )}
+                                        className="text-xs text-primary hover:text-primary-hover font-medium"
+                                      >
+                                        {selectedVersion?.version_number === version.version_number ? "Hide" : "View"}
+                                      </button>
+                                      {showRevertConfirm === version.version_number ? (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={() => handleRevert(version.version_number)}
+                                            disabled={reverting}
+                                            className="text-xs text-error hover:text-error/80 font-medium"
+                                          >
+                                            {reverting ? "Reverting..." : "Confirm"}
+                                          </button>
+                                          <button
+                                            onClick={() => setShowRevertConfirm(null)}
+                                            className="text-xs text-text-muted hover:text-text-secondary font-medium"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => setShowRevertConfirm(version.version_number)}
+                                          className="text-xs text-text-secondary hover:text-accent font-medium"
+                                        >
+                                          Revert
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Version Preview */}
+                              {selectedVersion && (
+                                <div className="border border-border rounded-lg p-4 bg-white">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-sm font-medium text-accent">
+                                      Version {selectedVersion.version_number} Preview
+                                    </h4>
+                                    <span className="text-xs text-text-muted">
+                                      {formatDate(selectedVersion.created_at)}
+                                    </span>
+                                  </div>
+                                  {selectedVersion.model && (
+                                    <p className="text-xs text-text-muted mb-1">
+                                      <span className="font-medium">Model:</span> {selectedVersion.model}
+                                    </p>
+                                  )}
+                                  {selectedVersion.purpose && (
+                                    <p className="text-xs text-text-muted mb-1">
+                                      <span className="font-medium">Purpose:</span> {selectedVersion.purpose}
+                                    </p>
+                                  )}
+                                  {selectedVersion.created_by && (
+                                    <p className="text-xs text-text-muted mb-3">
+                                      <span className="font-medium">Created by:</span> @{selectedVersion.created_by}
+                                    </p>
+                                  )}
+                                  <div className="px-4 py-3 bg-bg-subtle border border-border rounded-lg text-sm text-black font-mono whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                                    {selectedVersion.content}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
+              </>
             )}
-          </div>
+          </>
           )}
 
           {/* Cache Management Section */}
           {activeTab === "caching" && (
           <div className="bg-white border border-border rounded-xl shadow-sm">
-            <div className="px-6 py-4 border-b border-border">
+            <div className="px-4 md:px-6 py-4 border-b border-border">
               <h2 className="text-lg font-semibold text-accent">Repository Cache</h2>
               <p className="text-sm text-text-secondary mt-1">
-                Manage cached repositories to speed up PR simulation. Only repos in the cache list will be cached on disk.
+                Manage cached repositories to speed up PR simulation.
               </p>
             </div>
 
@@ -803,15 +895,15 @@ export default function SettingsPage() {
                 </svg>
               </div>
             ) : cacheError ? (
-              <div className="p-6">
+              <div className="p-4 md:p-6">
                 <div className="rounded-lg bg-error-light border border-error/20 p-4 text-sm text-error">
                   {(cacheError as Error).message}
                 </div>
               </div>
             ) : cacheData ? (
-              <div className="p-6 space-y-6">
+              <div className="p-4 md:p-6 space-y-6">
                 {/* Cache Stats */}
-                <div className="flex items-center gap-6 pb-4 border-b border-border">
+                <div className="flex flex-wrap items-center gap-4 md:gap-6 pb-4 border-b border-border">
                   <div className="flex items-center gap-2">
                     <svg className="h-5 w-5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
@@ -827,20 +919,20 @@ export default function SettingsPage() {
                     <span className="text-sm font-semibold text-accent">{cacheData.reposOnDisk.length}</span>
                   </div>
                   {cacheData.reposOnDisk.length > 0 && (
-                    <div className="ml-auto">
+                    <div className="w-full md:w-auto md:ml-auto">
                       {showClearConfirm ? (
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-text-muted">Clear all cached repos?</span>
+                          <span className="text-sm text-text-muted hidden md:inline">Clear all?</span>
                           <button
                             onClick={() => clearCacheMutation.mutate()}
                             disabled={clearCacheMutation.isPending}
-                            className="px-3 py-1.5 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                            className="px-3 py-1.5 min-h-[44px] md:min-h-0 bg-error hover:bg-error/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                           >
                             {clearCacheMutation.isPending ? "Clearing..." : "Confirm"}
                           </button>
                           <button
                             onClick={() => setShowClearConfirm(false)}
-                            className="px-3 py-1.5 bg-bg-subtle hover:bg-border text-text-secondary text-sm font-medium rounded-lg transition-colors"
+                            className="px-3 py-1.5 min-h-[44px] md:min-h-0 bg-bg-subtle hover:bg-border text-text-secondary text-sm font-medium rounded-lg transition-colors"
                           >
                             Cancel
                           </button>
@@ -848,7 +940,7 @@ export default function SettingsPage() {
                       ) : (
                         <button
                           onClick={() => setShowClearConfirm(true)}
-                          className="px-3 py-1.5 bg-error/10 hover:bg-error/20 text-error text-sm font-medium rounded-lg transition-colors"
+                          className="px-3 py-1.5 min-h-[44px] md:min-h-0 bg-error/10 hover:bg-error/20 text-error text-sm font-medium rounded-lg transition-colors"
                         >
                           Clear All Cache
                         </button>
@@ -857,8 +949,19 @@ export default function SettingsPage() {
                   )}
                 </div>
 
-                {/* Add Repo to Cache List */}
-                <div>
+                {/* Mobile Add Button */}
+                <button
+                  onClick={() => setShowAddCacheModal(true)}
+                  className="md:hidden w-full inline-flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Repository
+                </button>
+
+                {/* Add Repo to Cache List - Desktop only */}
+                <div className="hidden md:block">
                   <label className="block text-sm font-medium text-accent mb-2">
                     Add Repository to Cache List
                   </label>
@@ -1024,6 +1127,128 @@ export default function SettingsPage() {
               </div>
             ) : null}
           </div>
+          )}
+
+          {/* Add Cache Repo Modal - Mobile */}
+          {showAddCacheModal && (
+            <>
+              {/* Backdrop */}
+              <div
+                className="fixed inset-0 bg-black/50 z-50"
+                onClick={() => {
+                  setShowAddCacheModal(false);
+                  setNewCacheRepo("");
+                  setCacheNotes("");
+                  setShowCacheAutocomplete(false);
+                }}
+              />
+
+              {/* Modal */}
+              <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 bg-white rounded-xl z-50 shadow-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                {/* Modal Header */}
+                <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+                  <h3 className="text-lg font-semibold text-accent">Add Repository</h3>
+                  <button
+                    onClick={() => {
+                      setShowAddCacheModal(false);
+                      setNewCacheRepo("");
+                      setCacheNotes("");
+                      setShowCacheAutocomplete(false);
+                    }}
+                    className="p-2 -mr-2 text-text-muted hover:text-accent transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  >
+                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Modal Content */}
+                <div className="p-4 space-y-4 overflow-y-auto">
+                  {/* Repo Input */}
+                  <div>
+                    <label className="block text-sm font-medium text-accent mb-2">
+                      Repository
+                    </label>
+                    <div className="relative" ref={modalCacheInputRef}>
+                      <input
+                        type="text"
+                        value={newCacheRepo}
+                        onChange={(e) => {
+                          setNewCacheRepo(e.target.value);
+                          setShowCacheAutocomplete(true);
+                        }}
+                        onFocus={() => setShowCacheAutocomplete(true)}
+                        placeholder="owner/repo (e.g., supabase/supabase)"
+                        className="w-full px-3 py-3 min-h-[44px] bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                        autoFocus
+                      />
+
+                      {/* Autocomplete Dropdown */}
+                      {showCacheAutocomplete && cacheSuggestions.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[200px] overflow-y-auto">
+                          {cacheSuggestions.slice(0, 10).map((suggestion, index) => (
+                            <button
+                              key={`modal-${suggestion.repoOwner}/${suggestion.repoName}-${index}`}
+                              onClick={() => {
+                                setNewCacheRepo(`${suggestion.repoOwner}/${suggestion.repoName}`);
+                                setShowCacheAutocomplete(false);
+                              }}
+                              className="w-full px-3 py-3 min-h-[44px] text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
+                            >
+                              <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                              </svg>
+                              <span className="text-sm text-accent truncate">{suggestion.repoOwner}/{suggestion.repoName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Notes Input */}
+                  <div>
+                    <label className="block text-sm font-medium text-accent mb-2">
+                      Notes <span className="text-text-muted font-normal">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={cacheNotes}
+                      onChange={(e) => setCacheNotes(e.target.value)}
+                      placeholder="e.g., Strategic account - Series B"
+                      className="w-full px-3 py-3 min-h-[44px] bg-white border border-border rounded-lg text-sm text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                    />
+                  </div>
+
+                  <p className="text-xs text-text-muted">
+                    Repos in this list will be cached on disk for faster PR simulation.
+                  </p>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="px-4 py-4 border-t border-border flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowAddCacheModal(false);
+                      setNewCacheRepo("");
+                      setCacheNotes("");
+                      setShowCacheAutocomplete(false);
+                    }}
+                    className="flex-1 px-4 py-3 min-h-[44px] bg-bg-subtle hover:bg-border text-text-secondary text-sm font-medium rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddCacheRepo}
+                    disabled={!newCacheRepo.trim() || addCacheRepoMutation.isPending}
+                    className="flex-1 px-4 py-3 min-h-[44px] bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {addCacheRepoMutation.isPending ? "Adding..." : "Add Repository"}
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </main>

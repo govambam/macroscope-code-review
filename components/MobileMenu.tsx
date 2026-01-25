@@ -53,12 +53,13 @@ export function MobileMenu({ className = '' }: MobileMenuProps) {
         {/* Logo */}
         <Link href="/" className="flex items-center">
           <Image
-            src="/Macroscope-black.png"
+            src="/Macroscope-text-logo.png"
             alt="Macroscope"
-            width={32}
-            height={32}
-            className="h-8 w-auto"
+            width={120}
+            height={24}
+            className="h-6 w-auto"
             priority
+            unoptimized
           />
         </Link>
 
@@ -105,6 +106,7 @@ export function MobileMenu({ className = '' }: MobileMenuProps) {
                 width={120}
                 height={24}
                 className="h-6 w-auto"
+                unoptimized
               />
               <button
                 onClick={() => setIsOpen(false)}
