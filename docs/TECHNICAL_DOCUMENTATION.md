@@ -1,6 +1,6 @@
-# Technical Documentation: PR Simulation & Repository Caching
+# Technical Documentation: PR Simulation, Repository Caching & AI Analysis
 
-This document provides in-depth technical documentation for two core features of the Macroscope Code Review tool: **PR Simulation** and **Repository Caching**. It's intended for engineers who want to understand the architecture, implementation details, and design decisions.
+This document provides in-depth technical documentation for three core features of the Macroscope Code Review tool: **PR Simulation**, **Repository Caching**, and **AI Analysis with Schema Validation**. It's intended for engineers who want to understand the architecture, implementation details, and design decisions.
 
 ---
 
@@ -23,6 +23,15 @@ This document provides in-depth technical documentation for two core features of
    - [Concurrency Control](#concurrency-control)
    - [Cache Architecture](#cache-architecture)
    - [Q&A: Caching](#qa-caching)
+
+3. [AI Analysis & Schema Validation](#ai-analysis--schema-validation)
+   - [Overview](#analysis-overview)
+   - [Analysis Pipeline](#analysis-pipeline)
+   - [Schema Versions (V1 vs V2)](#schema-versions-v1-vs-v2)
+   - [Dynamic Token Limits](#dynamic-token-limits)
+   - [Schema Registry with Zod](#schema-registry-with-zod)
+   - [Schema Validation Flow](#schema-validation-flow)
+   - [Q&A: AI Analysis](#qa-ai-analysis)
 
 ---
 
@@ -666,14 +675,416 @@ try {
 
 ---
 
+## AI Analysis & Schema Validation
+
+### Analysis Overview
+
+After Macroscope reviews a PR, we use Claude (Opus 4.5) to analyze the review comments and identify meaningful bugs. The AI filters out style suggestions, nitpicks, and minor issues to surface the bugs that matter most for developer outreach.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      AI ANALYSIS PIPELINE                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  MACROSCOPE REVIEW                   AI ANALYSIS                        │
+│  ─────────────────                   ───────────                        │
+│                                                                          │
+│  ┌─────────────────┐                 ┌─────────────────┐                │
+│  │ 15 review       │                 │ Categorized     │                │
+│  │ comments on PR  │ ───► Claude ───►│ results:        │                │
+│  │                 │                 │                 │                │
+│  │ • nitpicks      │                 │ • 2 critical    │                │
+│  │ • style issues  │                 │ • 3 high        │                │
+│  │ • bugs          │                 │ • 1 medium      │                │
+│  │ • suggestions   │                 │ • 9 filtered    │                │
+│  └─────────────────┘                 └─────────────────┘                │
+│                                             │                            │
+│                                             ▼                            │
+│                                      ┌─────────────────┐                │
+│                                      │ Best Bug for    │                │
+│                                      │ Outreach: #3    │                │
+│                                      │ (critical bug   │                │
+│                                      │  with clear fix)│                │
+│                                      └─────────────────┘                │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Analysis Pipeline
+
+The analysis flow spans multiple components:
+
+```typescript
+// 1. Fetch Macroscope comments from the PR
+const macroscopeComments = reviewComments.filter(
+  (comment) => comment.user?.login === "macroscopeapp[bot]"
+);
+
+// 2. Run AI analysis using the configured prompt
+const analysisResult = await analyzePR({
+  forkedPrUrl: prUrl,
+  originalPrUrl: originalUrl,
+});
+
+// 3. Save to database with schema version tracking
+const analysisId = saveAnalysis(prId, hasBugs, JSON.stringify(result), {
+  totalCommentsProcessed: result.total_comments_processed,
+  meaningfulBugsCount: result.meaningful_bugs_count,
+  outreachReadyCount: result.outreach_ready_count,
+  bestBugIndex: result.best_bug_for_outreach_index,
+  summaryJson: JSON.stringify(result.summary),
+  schemaVersion: 2,  // Track which format was used
+});
+```
+
+**Key files:**
+- `lib/services/pr-analyzer.ts` - Core analysis logic
+- `lib/services/anthropic.ts` - Claude API wrapper
+- `app/api/analyze-pr/route.ts` - API endpoint for simulated PRs
+- `app/api/analyze-internal-pr/route.ts` - API endpoint for internal PRs
+
+### Schema Versions (V1 vs V2)
+
+The analysis output schema has evolved over time. We maintain backwards compatibility:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SCHEMA VERSION COMPARISON                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  V1 (Original)                      V2 (Current)                        │
+│  ─────────────                      ────────────                        │
+│                                                                          │
+│  {                                  {                                   │
+│    meaningful_bugs_found: true,       total_comments_processed: 15,    │
+│    total_macroscope_bugs_found: 5,    meaningful_bugs_count: 6,        │
+│    bugs_found: [...]                  outreach_ready_count: 4,         │
+│  }                                    best_bug_for_outreach_index: 3,  │
+│                                       all_comments: [{                  │
+│                                         index: 0,                       │
+│                                         category: "bug_critical",       │
+│                                         title: "SQL Injection",         │
+│                                         explanation: "...",             │
+│                                         explanation_short: "...",       │
+│                                         impact_scenario: "...",         │
+│                                         code_suggestion: "...",         │
+│                                         is_meaningful_bug: true,        │
+│                                         outreach_ready: true,           │
+│                                       }, ...],                          │
+│                                       summary: {                        │
+│                                         bugs_by_severity: {...},        │
+│                                         non_bugs: {...},                │
+│                                         recommendation: "..."           │
+│                                       }                                 │
+│                                     }                                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Type guards for version detection:**
+
+```typescript
+export function isV2AnalysisResult(result: unknown): result is PRAnalysisResultV2 {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "all_comments" in result &&
+    "summary" in result &&
+    "total_comments_processed" in result
+  );
+}
+
+export function isV1AnalysisResult(result: unknown): result is PRAnalysisResultV1 {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "meaningful_bugs_found" in result &&
+    !("all_comments" in result)
+  );
+}
+```
+
+### Dynamic Token Limits
+
+Large PRs with many comments can produce responses that exceed Claude's default output limits. We dynamically calculate `max_tokens` based on comment count:
+
+```typescript
+function calculateMaxTokens(commentCount: number): number {
+  // Estimate ~500 tokens per comment analysis
+  const estimatedTokensPerComment = 500;
+  const baseTokens = 2000;  // For summary and structure
+  const maxTokensCap = 16384;  // Claude's max output
+
+  const calculated = baseTokens + commentCount * estimatedTokensPerComment;
+  return Math.min(calculated, maxTokensCap);
+}
+```
+
+**Truncation detection:**
+
+```typescript
+function isCompleteJSON(str: string): boolean {
+  const trimmed = str.trim();
+  // Quick check: complete JSON ends with } or ]
+  if (!trimmed.endsWith("}") && !trimmed.endsWith("]")) {
+    return false;
+  }
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// In the API call
+const response = await anthropic.messages.create({
+  model: promptModel,
+  max_tokens: calculateMaxTokens(commentCount),
+  // ...
+});
+
+if (!isCompleteJSON(responseText)) {
+  throw new Error("Response was truncated. Try with fewer comments.");
+}
+```
+
+### Schema Registry with Zod
+
+We use Zod to define and validate expected output schemas. This enables:
+1. Type-safe schema definitions
+2. Runtime validation
+3. Auto-generated documentation
+4. Compatibility checking
+
+```typescript
+// lib/schemas/prompt-schemas.ts
+
+import { z } from "zod";
+
+// Schema for individual comment analysis
+const analysisCommentSchema = z.object({
+  index: z.number(),
+  macroscope_comment_text: z.string(),
+  file_path: z.string(),
+  line_number: z.number().nullable(),
+  category: z.enum([
+    "bug_critical", "bug_high", "bug_medium", "bug_low",
+    "suggestion", "style", "nitpick",
+  ]),
+  title: z.string(),
+  explanation: z.string(),
+  explanation_short: z.string().nullable(),
+  impact_scenario: z.string().nullable(),
+  code_suggestion: z.string().nullable(),
+  is_meaningful_bug: z.boolean(),
+  outreach_ready: z.boolean(),
+  outreach_skip_reason: z.string().nullable(),
+});
+
+// Schema for PR Analysis output (V2)
+export const prAnalysisSchema = z.object({
+  total_comments_processed: z.number(),
+  meaningful_bugs_count: z.number(),
+  outreach_ready_count: z.number(),
+  best_bug_for_outreach_index: z.number().nullable(),
+  all_comments: z.array(analysisCommentSchema),
+  summary: z.object({
+    bugs_by_severity: z.object({
+      critical: z.number(),
+      high: z.number(),
+      medium: z.number(),
+      low: z.number(),
+    }),
+    non_bugs: z.object({
+      suggestions: z.number(),
+      style: z.number(),
+      nitpicks: z.number(),
+    }),
+    recommendation: z.string(),
+  }),
+});
+
+// Map prompt names to schemas
+export const promptSchemas: Record<string, z.ZodSchema> = {
+  "pr-analysis": prAnalysisSchema,
+  "email-generation": emailGenerationSchema,
+};
+```
+
+### Schema Validation Flow
+
+When users edit prompts, we validate their changes against the expected schema:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SCHEMA VALIDATION FLOW                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  User edits prompt                                                       │
+│        │                                                                 │
+│        ▼                                                                 │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
+│  │ Click       │────►│ POST to     │────►│ Claude      │               │
+│  │ "Validate   │     │ /api/prompts│     │ extracts    │               │
+│  │  Schema"    │     │ /validate-  │     │ schema from │               │
+│  │             │     │ schema      │     │ prompt text │               │
+│  └─────────────┘     └─────────────┘     └─────────────┘               │
+│                                                 │                        │
+│                                                 ▼                        │
+│                            ┌─────────────────────────────┐              │
+│                            │ Compare extracted schema    │              │
+│                            │ against Zod-defined schema: │              │
+│                            │                             │              │
+│                            │ • Missing required fields?  │              │
+│                            │ • Type mismatches?          │              │
+│                            │ • Renamed fields?           │              │
+│                            └─────────────────────────────┘              │
+│                                          │                              │
+│                       ┌──────────────────┴──────────────────┐          │
+│                       │                                      │          │
+│                       ▼                                      ▼          │
+│              ┌─────────────┐                        ┌─────────────┐    │
+│              │ Compatible  │                        │ Incompatible│    │
+│              │ ───────────►│                        │ ───────────►│    │
+│              │ Save prompt │                        │ Show warning│    │
+│              │ normally    │                        │ modal       │    │
+│              └─────────────┘                        └─────────────┘    │
+│                                                            │            │
+│                                          ┌─────────────────┴─────┐     │
+│                                          │                       │     │
+│                                          ▼                       ▼     │
+│                                   ┌───────────┐          ┌───────────┐ │
+│                                   │ "Go Back  │          │ "Save     │ │
+│                                   │  & Edit"  │          │  Anyway"  │ │
+│                                   └───────────┘          └───────────┘ │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Validation API endpoint:**
+
+```typescript
+// app/api/prompts/validate-schema/route.ts
+
+export async function POST(request: NextRequest) {
+  const { promptType, promptContent } = await request.json();
+
+  // Get expected schema from registry
+  const expectedSchema = getPromptSchema(promptType);
+  if (!expectedSchema) {
+    return NextResponse.json({ compatible: true, warnings: ["No schema defined"] });
+  }
+
+  // Use Claude to extract and compare schemas
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    messages: [{
+      role: "user",
+      content: `Compare the schema defined in this prompt against the expected schema...
+
+Expected Schema:
+${schemaToDescription(expectedSchema)}
+
+Prompt to validate:
+${promptContent}
+
+Identify:
+- Missing required fields
+- Type mismatches
+- Renamed fields
+- Breaking changes`
+    }]
+  });
+
+  // Return validation result
+  return NextResponse.json({
+    compatible: !hasBreakingChanges,
+    missing_fields: [...],
+    type_mismatches: [...],
+    summary: "..."
+  });
+}
+```
+
+**Schema info endpoint:**
+
+```typescript
+// app/api/prompts/schema-info/route.ts
+
+export async function GET(request: NextRequest) {
+  const promptType = request.nextUrl.searchParams.get("type");
+  const schemaInfo = getPromptSchemaInfo(promptType);
+
+  return NextResponse.json({
+    type: promptType,
+    hasSchema: true,
+    requiredFields: ["total_comments_processed", "meaningful_bugs_count", ...],
+    allFieldPaths: ["summary.bugs_by_severity.critical", ...],
+    schemaTree: `
+      total_comments_processed: number
+      meaningful_bugs_count: number
+      all_comments: [
+        {
+          index: number
+          category: enum(bug_critical | bug_high | ...)
+          ...
+        }
+      ]
+      summary: {
+        bugs_by_severity: { critical: number, ... }
+        ...
+      }
+    `
+  });
+}
+```
+
+### Q&A: AI Analysis
+
+**Q: Why use Claude to extract the schema instead of parsing the prompt directly?**
+
+A: Prompts define schemas in natural language (e.g., "Return a JSON object with fields..."). There's no standard format, and the schema may be specified across multiple sections with examples. Claude can understand the intent and extract the effective schema regardless of how it's written.
+
+**Q: What happens if validation fails during save?**
+
+A: The user sees a warning modal explaining what's wrong (missing fields, type changes). They can either:
+1. Go back and fix the prompt
+2. Force-save anyway (with a scary red button labeled "Save Anyway (Dangerous)")
+
+This allows expert users to bypass validation when they know what they're doing, while protecting against accidental breaking changes.
+
+**Q: How do you handle prompts that don't have a defined schema?**
+
+A: The schema registry only defines schemas for prompts where we have specific code expectations (like `pr-analysis`). For prompts without defined schemas, validation is skipped and the user can save freely.
+
+**Q: Why track schema_version in the database?**
+
+A: When displaying old analysis results, we need to know which format to expect. The `schema_version` column (1 or 2) tells the frontend how to render the data:
+- V1: Simple bug list display
+- V2: Rich categorized display with severity badges
+
+**Q: What if the AI returns truncated JSON?**
+
+A: We detect truncation before attempting to parse:
+1. Check if the response ends with `}` or `]`
+2. Try to parse as JSON
+3. If either fails, throw an error with a helpful message
+
+The frontend shows "Response was truncated" and suggests retrying with fewer comments.
+
+---
+
 ## Summary
 
 | Feature | Purpose | Key Technology |
 |---------|---------|----------------|
 | PR Simulation | Recreate external PRs for analysis | Git cherry-pick, dual-branch architecture |
 | Repository Caching | Speed up cloning | Git `--reference` flag, selective caching |
+| AI Analysis | Categorize and filter bugs | Claude API, dynamic token limits |
+| Schema Validation | Prevent breaking prompt changes | Zod schemas, Claude schema extraction |
 
-Both features work together: caching makes simulation fast, and simulation creates the isolated environment we need for code analysis.
+All features work together: caching makes simulation fast, simulation creates the isolated environment for Macroscope review, and AI analysis extracts actionable bugs from the review comments with schema validation ensuring prompt changes don't break the pipeline.
 
 ---
 
