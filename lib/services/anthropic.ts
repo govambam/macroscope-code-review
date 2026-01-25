@@ -115,12 +115,70 @@ export async function sendMessage(
 }
 
 /**
+ * Checks if a JSON string appears to be complete (not truncated).
+ * Only checks structural completeness, not full JSON validity.
+ * This avoids false "truncated" errors from control characters.
+ * @param str - The string to check
+ * @returns true if JSON looks structurally complete, false if likely truncated
+ */
+function isCompleteJSON(str: string): boolean {
+  const trimmed = str.trim();
+
+  // JSON primitives (true, false, null, numbers, strings) are always complete
+  // They don't start with { or [, so return true early for these cases
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return true;
+  }
+
+  // For objects/arrays, check if it ends with a closing brace or bracket
+  if (!trimmed.endsWith("}") && !trimmed.endsWith("]")) {
+    return false;
+  }
+
+  // Check for balanced braces/brackets (structural completeness)
+  // This avoids JSON.parse which fails on control characters
+  let braceCount = 0;
+  let bracketCount = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === "{") braceCount++;
+      else if (char === "}") braceCount--;
+      else if (char === "[") bracketCount++;
+      else if (char === "]") bracketCount--;
+    }
+  }
+
+  // If counts are balanced and we end with } or ], it's structurally complete
+  return braceCount === 0 && bracketCount === 0;
+}
+
+/**
  * Extracts and parses JSON from a response that may contain markdown code fences
  * or other formatting. Handles special characters and newlines in string fields.
  *
  * @param response - The raw response string from Claude
  * @returns The parsed JSON object
- * @throws Error if parsing fails
+ * @throws Error if parsing fails or response is truncated
  */
 function extractAndParseJSON<T>(response: string): T {
   let jsonStr = response.trim();
@@ -188,7 +246,19 @@ function extractAndParseJSON<T>(response: string): T {
     }
   }
 
-  // Step 3: Try parsing the JSON
+  // Step 3: Check for truncation before parsing
+  // If the JSON doesn't end properly, it was likely truncated
+  if (!isCompleteJSON(jsonStr)) {
+    const responseLength = response.length;
+    throw new Error(
+      `Claude response was truncated (${responseLength} chars). ` +
+        `This usually means the PR has too many comments for the token limit. ` +
+        `Try a PR with fewer Macroscope comments, or the analysis prompt may need optimization. ` +
+        `Response ends with: "${jsonStr.slice(-100)}"`
+    );
+  }
+
+  // Step 4: Try parsing the JSON
   try {
     return JSON.parse(jsonStr) as T;
   } catch (parseError) {
@@ -196,7 +266,7 @@ function extractAndParseJSON<T>(response: string): T {
     console.error("JSON parse error:", parseError);
     console.error("Attempted to parse:", jsonStr.substring(0, 1000));
 
-    // Step 4: Try to fix common issues and retry
+    // Step 5: Try to fix common issues and retry
     try {
       // Sometimes there are control characters that break parsing
       // Remove control characters except newlines and tabs in strings

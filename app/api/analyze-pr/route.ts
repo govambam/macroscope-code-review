@@ -7,6 +7,9 @@ import {
   analyzePR,
   extractOriginalPRUrl,
   PRAnalysisResult,
+  isV2AnalysisResult,
+  hasMeaningfulBugs,
+  PRAnalysisResultV2,
 } from "@/lib/services/pr-analyzer";
 import {
   getAnalysisByPRUrl,
@@ -250,14 +253,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           parsedForkedPr.repo,
           `https://github.com/${parsedForkedPr.owner}/${parsedForkedPr.repo}`
         );
+
+        // Determine bug count based on format
+        let bugCount = 0;
+        if (isV2AnalysisResult(result)) {
+          bugCount = result.meaningful_bugs_count;
+        } else if (result.meaningful_bugs_found) {
+          bugCount = result.total_macroscope_bugs_found;
+        }
+
         prId = savePR(
           forkId,
           parsedForkedPr.prNumber,
           null, // title not known
           forkedPrUrl,
           originalPrUrl,
-          result.meaningful_bugs_found,
-          result.meaningful_bugs_found ? result.total_macroscope_bugs_found : 0,
+          hasMeaningfulBugs(result),
+          bugCount,
           {
             originalPrTitle: originalPrTitle || null,
             createdBy,
@@ -265,12 +277,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         );
       }
 
-      // Save the analysis
-      analysisId = saveAnalysis(
-        prId,
-        result.meaningful_bugs_found,
-        JSON.stringify(result)
-      );
+      // Save the analysis with appropriate fields based on format
+      if (isV2AnalysisResult(result)) {
+        // New format (V2) - save all the new fields
+        analysisId = saveAnalysis(
+          prId,
+          result.meaningful_bugs_count > 0, // meaningful_bugs_found
+          JSON.stringify(result),
+          {
+            totalCommentsProcessed: result.total_comments_processed,
+            meaningfulBugsCount: result.meaningful_bugs_count,
+            outreachReadyCount: result.outreach_ready_count,
+            bestBugIndex: result.best_bug_for_outreach_index,
+            summaryJson: JSON.stringify(result.summary),
+            schemaVersion: 2,
+          }
+        );
+      } else {
+        // Old format (V1) - save as before
+        analysisId = saveAnalysis(
+          prId,
+          result.meaningful_bugs_found,
+          JSON.stringify(result),
+          {
+            schemaVersion: 1,
+          }
+        );
+      }
     } catch (dbError) {
       console.error("Failed to save analysis to database:", dbError);
       // Continue anyway - the analysis was still successful

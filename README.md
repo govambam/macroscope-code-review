@@ -60,11 +60,38 @@ The main dashboard shows all your review activity:
 After Macroscope reviews a PR, click the **Run** action (or **View** for PRs that have already be analyzed) to:
 
 1. **View Meaningful Bugs**: AI filters out style suggestions and minor issues
-2. **See Severity Levels**: Bugs are classified as Critical, High, or Medium
-3. **Find Most Impactful**: The single best bug for outreach is highlighted
+2. **See Severity Levels**: Bugs are classified by category (Critical, High, Medium, Low, Suggestion, Style, Nitpick)
+3. **Find Most Impactful**: The single best bug for outreach is highlighted with a star
 4. **Generate Emails**: Create outreach emails with Attio merge fields
 
-Behind the scenes we are using an Opus 4.5 to analyze the bugs found during Macroscope's review. The prompts and models used for analysis can be updated in Settings > Prompts.
+Behind the scenes we are using Claude Opus 4.5 to analyze the bugs found during Macroscope's review. The prompts and models used for analysis can be updated in Settings > Prompts.
+
+#### Analysis Output (V2 Format)
+
+The AI analysis returns structured data including:
+- **Bug Counts**: Total comments processed, meaningful bugs found, outreach-ready bugs
+- **Per-Comment Analysis**: Each comment is categorized with severity, explanation, impact scenario, and suggested fix
+- **Summary**: Bugs grouped by severity with an overall recommendation
+
+### Managing Prompts
+
+The Settings page allows you to customize the AI prompts used for analysis:
+
+1. Go to **Settings** > **Prompts** tab
+2. Select a prompt to edit (e.g., "pr-analysis" or "email-generation")
+3. Modify the prompt content, model, or purpose
+4. Click **Validate Schema** to check compatibility before saving
+5. Click **Save Changes**
+
+#### Schema Validation
+
+The tool validates prompt changes against expected output schemas to prevent breaking changes:
+
+- **Validate Schema button**: Check if your prompt changes are compatible before saving
+- **Required Output Schema section**: View what fields the code expects from each prompt
+- **Warning Modal**: If validation detects missing fields or type changes, you'll see a warning with options to fix or force-save
+
+This prevents accidentally removing required JSON fields that the application depends on.
 
 ### Tips & Best Practices
 
@@ -105,7 +132,7 @@ For faster PR simulations, you can cache repositories on the server. This is use
 
 ## Technical Documentation
 
-> **Deep Dive:** For detailed technical documentation on how PR Simulation and Repository Caching work under the hood (including architecture diagrams, code snippets, and Q&A), see **[Technical Documentation: PR Simulation & Caching](docs/TECHNICAL_DOCUMENTATION.md)**.
+> **Deep Dive:** For detailed technical documentation on how PR Simulation, Repository Caching, and AI Analysis work under the hood (including architecture diagrams, code snippets, and Q&A), see **[Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md)**.
 
 ### Tech Stack
 
@@ -201,15 +228,23 @@ Open [http://localhost:3000](http://localhost:3000)
 | `/api/prs/owner` | PATCH | Update PR owner |
 | `/api/generate-email` | POST | Generate outreach email |
 | `/api/prompts` | GET/POST | Manage analysis prompts |
+| `/api/prompts/versions` | GET | Get prompt version history |
+| `/api/prompts/versions/revert` | POST | Revert to a previous prompt version |
+| `/api/prompts/schema-info` | GET | Get expected output schema for a prompt type |
+| `/api/prompts/validate-schema` | POST | Validate prompt against expected schema |
+| `/api/cache` | GET/POST/DELETE | Manage repository cache list |
+| `/api/cache/clear` | POST | Clear all cached repositories |
 
 ### Database Schema
 
 The SQLite database stores:
 - **forks**: Repository forks created by the tool
 - **prs**: Pull requests tracked in each fork
-- **pr_analyses**: Cached AI analysis results
+- **pr_analyses**: Cached AI analysis results (supports V1 and V2 schema formats)
 - **generated_emails**: Generated outreach emails
-- **prompts**: Customizable analysis prompts
+- **prompts**: Customizable analysis prompts with version history
+- **prompt_versions**: Historical versions of each prompt for rollback
+- **cached_repos**: List of repositories to cache for faster cloning
 
 ### How PR Simulation Works
 

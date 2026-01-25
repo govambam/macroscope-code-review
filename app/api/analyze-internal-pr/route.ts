@@ -11,7 +11,7 @@ import {
   getPR,
   getAnalysis,
 } from "@/lib/services/database";
-import { analyzePR } from "@/lib/services/pr-analyzer";
+import { analyzePR, isV2AnalysisResult, hasMeaningfulBugs } from "@/lib/services/pr-analyzer";
 
 interface AnalyzeInternalPRRequest {
   prUrl: string;
@@ -190,18 +190,48 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       originalPrUrl: prUrl,
     });
 
-    // Save the analysis
-    const analysisId = saveAnalysis(prId, analysisResult.meaningful_bugs_found, JSON.stringify(analysisResult));
+    // Save the analysis with appropriate fields based on format
+    let analysisId: number;
+    if (isV2AnalysisResult(analysisResult)) {
+      // New format (V2) - save all the new fields
+      analysisId = saveAnalysis(
+        prId,
+        analysisResult.meaningful_bugs_count > 0, // meaningful_bugs_found
+        JSON.stringify(analysisResult),
+        {
+          totalCommentsProcessed: analysisResult.total_comments_processed,
+          meaningfulBugsCount: analysisResult.meaningful_bugs_count,
+          outreachReadyCount: analysisResult.outreach_ready_count,
+          bestBugIndex: analysisResult.best_bug_for_outreach_index,
+          summaryJson: JSON.stringify(analysisResult.summary),
+          schemaVersion: 2,
+        }
+      );
+    } else {
+      // Old format (V1) - save as before
+      analysisId = saveAnalysis(
+        prId,
+        hasMeaningfulBugs(analysisResult),
+        JSON.stringify(analysisResult),
+        {
+          schemaVersion: 1,
+        }
+      );
+    }
 
-    // Update PR with bug count
+    // Update PR with bug count based on analysis format
+    const meaningfulBugCount = isV2AnalysisResult(analysisResult)
+      ? analysisResult.meaningful_bugs_count
+      : (hasMeaningfulBugs(analysisResult) ? (analysisResult as { total_macroscope_bugs_found: number }).total_macroscope_bugs_found : 0);
+
     savePR(
       forkId,
       prNumber,
       prData.title,
       prUrl,
       prUrl,
-      macroscopeComments.length > 0,
-      macroscopeComments.length,
+      meaningfulBugCount > 0,
+      meaningfulBugCount,
       {
         originalPrTitle: prData.title,
         state: prData.state,

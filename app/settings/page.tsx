@@ -48,6 +48,28 @@ interface CacheInfo {
   reposDir: string;
 }
 
+// Schema validation types
+interface SchemaValidationResult {
+  compatible: boolean;
+  extracted_fields?: string[];
+  missing_fields?: string[];
+  type_mismatches?: Array<{ field: string; expected: string; found: string }>;
+  renamed_fields?: Array<{ expected: string; found: string; confidence: string }>;
+  warnings?: string[];
+  summary?: string;
+  error?: string;
+}
+
+interface PromptSchemaInfo {
+  type: string;
+  hasSchema: boolean;
+  requiredFields: string[];
+  allFieldPaths: string[];
+  schemaTree: string;
+  fullSchema: string;
+  warning?: string;
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
 
@@ -102,6 +124,14 @@ export default function SettingsPage() {
   const cacheInputRef = useRef<HTMLDivElement>(null);
   const modalCacheInputRef = useRef<HTMLDivElement>(null);
 
+  // Schema validation state
+  const [validationResult, setValidationResult] = useState<SchemaValidationResult | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [showSchemaWarningModal, setShowSchemaWarningModal] = useState(false);
+  const [showSchemaInfo, setShowSchemaInfo] = useState(false);
+  const [schemaInfo, setSchemaInfo] = useState<PromptSchemaInfo | null>(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState<"desktop" | "mobile-model" | "mobile-content" | null>(null);
+
   // Fetch forks for autocomplete
   const { data: forksData = [] } = useQuery<ForkRecord[]>({
     queryKey: ["forks-for-autocomplete"],
@@ -147,6 +177,109 @@ export default function SettingsPage() {
 
     return suggestions;
   }, [forksData, newCacheRepo]);
+
+  // Fetch schema info when a prompt is selected
+  useEffect(() => {
+    if (selectedPrompt?.name) {
+      fetch(`/api/prompts/schema-info?type=${encodeURIComponent(selectedPrompt.name)}`)
+        .then((r) => r.json())
+        .then((data) => setSchemaInfo(data))
+        .catch(() => setSchemaInfo(null));
+    } else {
+      setSchemaInfo(null);
+    }
+  }, [selectedPrompt?.name]);
+
+  // Validate prompt schema against expected output
+  const validatePromptSchema = async (promptType: string, promptContent: string): Promise<SchemaValidationResult> => {
+    setIsValidating(true);
+    setValidationResult(null);
+
+    try {
+      const response = await fetch("/api/prompts/validate-schema", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptType,
+          promptContent,
+        }),
+      });
+
+      const result = await response.json();
+      setValidationResult(result);
+      return result;
+    } catch (error) {
+      const errorResult: SchemaValidationResult = {
+        compatible: true,
+        warnings: ["Validation unavailable - network error"],
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+      setValidationResult(errorResult);
+      return errorResult;
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  // Handle save with schema validation
+  const handleValidatedSave = async (saveAction: "desktop" | "mobile-model" | "mobile-content") => {
+    if (!selectedPrompt) return;
+
+    // Only validate content changes, not model changes
+    if (saveAction === "mobile-model") {
+      // Model changes don't affect schema, save directly
+      handleSaveField("model");
+      return;
+    }
+
+    // Check if content has changed
+    const contentToValidate = saveAction === "desktop" ? editedContent : editedContent;
+    if (contentToValidate === selectedPrompt.content) {
+      // No content changes, save directly
+      if (saveAction === "desktop") {
+        handleSave();
+      } else {
+        handleSaveField("content");
+      }
+      return;
+    }
+
+    // Validate the schema
+    const result = await validatePromptSchema(selectedPrompt.name, contentToValidate);
+
+    if (!result.compatible) {
+      // Show warning modal
+      setPendingSaveAction(saveAction);
+      setShowSchemaWarningModal(true);
+      return;
+    }
+
+    // Schema is compatible, save directly
+    if (saveAction === "desktop") {
+      handleSave();
+    } else {
+      handleSaveField("content");
+    }
+  };
+
+  // Force save despite schema incompatibility
+  const handleForceSave = () => {
+    setShowSchemaWarningModal(false);
+
+    if (pendingSaveAction === "desktop") {
+      handleSave();
+    } else if (pendingSaveAction === "mobile-content") {
+      handleSaveField("content");
+    }
+
+    setPendingSaveAction(null);
+  };
+
+  // Cancel the save and go back to editing
+  const handleCancelSave = () => {
+    setShowSchemaWarningModal(false);
+    setPendingSaveAction(null);
+  };
 
   // Fetch cache info
   const {
@@ -705,9 +838,34 @@ export default function SettingsPage() {
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
+                              {/* Validate Button */}
                               <button
-                                onClick={handleSave}
-                                disabled={saving || !hasChanges}
+                                onClick={() => selectedPrompt && validatePromptSchema(selectedPrompt.name, editedContent)}
+                                disabled={isValidating || !hasChanges}
+                                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {isValidating ? (
+                                  <>
+                                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    Validating...
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Validate Schema
+                                  </>
+                                )}
+                              </button>
+
+                              {/* Save Button */}
+                              <button
+                                onClick={() => handleValidatedSave("desktop")}
+                                disabled={saving || isValidating || !hasChanges}
                                 className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {saving ? (
@@ -729,6 +887,42 @@ export default function SettingsPage() {
                               </button>
                             </div>
                           </div>
+
+                          {/* Validation Result */}
+                          {validationResult && (
+                            <div
+                              className={`rounded-lg border p-3 text-sm ${
+                                validationResult.compatible
+                                  ? "bg-green-50 border-green-200 text-green-700"
+                                  : "bg-yellow-50 border-yellow-200 text-yellow-700"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                {validationResult.compatible ? (
+                                  <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                ) : (
+                                  <svg className="h-4 w-4 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                )}
+                                <span className="font-medium">
+                                  {validationResult.compatible ? "Schema compatible" : "Schema changes detected"}
+                                </span>
+                              </div>
+                              {validationResult.summary && (
+                                <p className="mt-1 text-sm">{validationResult.summary}</p>
+                              )}
+                              {validationResult.warnings && validationResult.warnings.length > 0 && (
+                                <ul className="mt-1 text-xs list-disc list-inside">
+                                  {validationResult.warnings.map((w, i) => (
+                                    <li key={i}>{w}</li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
 
                           {/* Save Result */}
                           {saveResult && (
@@ -787,6 +981,87 @@ export default function SettingsPage() {
                               Use {"{VARIABLE_NAME}"} syntax for variables that will be interpolated at runtime.
                             </p>
                           </div>
+
+                          {/* Expected Schema Info Section */}
+                          {schemaInfo && schemaInfo.hasSchema && (
+                            <div className="border-t border-border pt-6">
+                              <button
+                                onClick={() => setShowSchemaInfo(!showSchemaInfo)}
+                                className="flex items-center gap-2 text-sm font-medium text-text-secondary hover:text-accent transition-colors"
+                              >
+                                <svg
+                                  className={`h-4 w-4 transition-transform ${showSchemaInfo ? "rotate-90" : ""}`}
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                </svg>
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Required Output Schema
+                                <span className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded">
+                                  {schemaInfo.requiredFields.length} required fields
+                                </span>
+                              </button>
+
+                              {showSchemaInfo && (
+                                <div className="mt-4 space-y-4">
+                                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <p className="text-sm text-yellow-700 mb-2">
+                                      <strong>Warning:</strong> The application code expects this prompt to return JSON matching
+                                      the schema below. Removing or renaming these fields will break the application.
+                                    </p>
+                                  </div>
+
+                                  {/* Required Fields List */}
+                                  <div>
+                                    <h4 className="text-sm font-medium text-accent mb-2">Top-Level Required Fields:</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                      {schemaInfo.requiredFields.map((field) => (
+                                        <span
+                                          key={field}
+                                          className="px-2 py-1 bg-gray-100 text-gray-700 rounded font-mono text-xs"
+                                        >
+                                          {field}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Schema Tree */}
+                                  <div>
+                                    <h4 className="text-sm font-medium text-accent mb-2">Full Schema Structure:</h4>
+                                    <pre className="p-3 bg-gray-50 rounded-lg text-xs font-mono overflow-x-auto border border-gray-200 whitespace-pre-wrap">
+                                      {schemaInfo.schemaTree}
+                                    </pre>
+                                  </div>
+
+                                  {/* All Field Paths */}
+                                  <div>
+                                    <h4 className="text-sm font-medium text-accent mb-2">All Field Paths:</h4>
+                                    <div className="p-3 bg-gray-50 rounded-lg text-xs font-mono overflow-x-auto border border-gray-200">
+                                      {schemaInfo.allFieldPaths.join(", ")}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Schema Info Warning for prompts without schema */}
+                          {schemaInfo && !schemaInfo.hasSchema && (
+                            <div className="border-t border-border pt-6">
+                              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                                <p className="text-sm text-gray-600">
+                                  <strong>Note:</strong> No output schema is defined for this prompt type.
+                                  The application will not validate the output format.
+                                </p>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Version History Section */}
                           <div className="border-t border-border pt-6">
@@ -989,7 +1264,7 @@ export default function SettingsPage() {
                         {editingField === "model" ? (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleSaveField("model")}
+                              onClick={() => handleValidatedSave("mobile-model")}
                               disabled={saving || !hasModelChanges}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -1055,11 +1330,11 @@ export default function SettingsPage() {
                         {editingField === "content" ? (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleSaveField("content")}
-                              disabled={saving || !hasContentChanges}
+                              onClick={() => handleValidatedSave("mobile-content")}
+                              disabled={saving || isValidating || !hasContentChanges}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              {saving ? (
+                              {saving || isValidating ? (
                                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -1069,7 +1344,7 @@ export default function SettingsPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                 </svg>
                               )}
-                              Save
+                              {isValidating ? "Validating..." : "Save"}
                             </button>
                             <button
                               onClick={() => {
@@ -1619,6 +1894,105 @@ export default function SettingsPage() {
                     className="flex-1 px-4 py-3 min-h-[44px] bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {addCacheRepoMutation.isPending ? "Adding..." : "Add Repository"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Schema Compatibility Warning Modal */}
+          {showSchemaWarningModal && validationResult && (
+            <>
+              {/* Backdrop */}
+              <div
+                className="fixed inset-0 bg-black/50 z-50"
+                onClick={handleCancelSave}
+              />
+
+              {/* Modal */}
+              <div className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-lg md:w-full bg-white rounded-xl z-50 flex flex-col overflow-hidden shadow-2xl max-h-[90vh]">
+                {/* Modal Header */}
+                <div className="px-6 py-4 border-b border-border bg-yellow-50">
+                  <h2 className="text-lg font-semibold text-yellow-700 flex items-center gap-2">
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    Schema Compatibility Warning
+                  </h2>
+                </div>
+
+                {/* Modal Content */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <p className="text-gray-600">
+                    This prompt change may break the application. The code expects specific
+                    fields that appear to be missing or changed.
+                  </p>
+
+                  {/* Missing Fields */}
+                  {validationResult.missing_fields && validationResult.missing_fields.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-red-600 mb-1">Missing Required Fields:</h4>
+                      <ul className="list-disc list-inside text-sm">
+                        {validationResult.missing_fields.map((field) => (
+                          <li key={field} className="text-red-600 font-mono">{field}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Type Mismatches */}
+                  {validationResult.type_mismatches && validationResult.type_mismatches.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-orange-600 mb-1">Type Mismatches:</h4>
+                      <ul className="list-disc list-inside text-sm">
+                        {validationResult.type_mismatches.map((m) => (
+                          <li key={m.field} className="text-orange-600">
+                            <span className="font-mono">{m.field}</span>: expected {m.expected}, found {m.found}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Renamed Fields */}
+                  {validationResult.renamed_fields && validationResult.renamed_fields.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-yellow-600 mb-1">Possibly Renamed Fields:</h4>
+                      <ul className="list-disc list-inside text-sm">
+                        {validationResult.renamed_fields.map((r) => (
+                          <li key={r.expected} className="text-yellow-600">
+                            &quot;<span className="font-mono">{r.expected}</span>&quot; -&gt; &quot;<span className="font-mono">{r.found}</span>&quot; ({r.confidence} confidence)
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Summary */}
+                  {validationResult.summary && (
+                    <p className="text-sm text-gray-700 italic">{validationResult.summary}</p>
+                  )}
+
+                  {/* Help Text */}
+                  <div className="p-3 bg-gray-50 rounded text-sm text-gray-600">
+                    <strong>To fix this:</strong> Either update your prompt to include the
+                    required fields, or update the application code to handle the new schema.
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="px-6 py-4 border-t border-border bg-bg-subtle flex flex-col sm:flex-row gap-3 sm:justify-end">
+                  <button
+                    onClick={handleCancelSave}
+                    className="px-4 py-2 min-h-[44px] border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+                  >
+                    Go Back & Edit
+                  </button>
+                  <button
+                    onClick={handleForceSave}
+                    className="px-4 py-2 min-h-[44px] bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
+                  >
+                    Save Anyway (Dangerous)
                   </button>
                 </div>
               </div>
