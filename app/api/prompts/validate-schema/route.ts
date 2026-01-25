@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const { promptType, promptContent } = body as ValidateSchemaRequest;
 
-    if (!promptType || !promptContent) {
+    if (!promptType || !promptContent || typeof promptType !== "string" || typeof promptContent !== "string") {
       return NextResponse.json<SchemaValidationResult>(
         {
           compatible: true,
