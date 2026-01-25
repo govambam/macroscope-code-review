@@ -173,7 +173,7 @@ ${comment.macroscope_comment_text}
         ORIGINAL_PR_URL: pr.original_pr_url || "https://github.com/example/repo/pull/1",
         MACROSCOPE_COMMENTS: macroscopeCommentsText || "[No comments available in stored analysis]",
         TOTAL_COMMENTS: isV2AnalysisResult(analysisResult)
-          ? analysisResult.total_comments_processed.toString()
+          ? (analysisResult.total_comments_processed ?? analysisResult.all_comments.length).toString()
           : "1",
       };
     } else if (promptType === "email-generation") {
@@ -190,9 +190,9 @@ ${comment.macroscope_comment_text}
         if (best) {
           bugTitle = best.title;
           bugExplanation = best.explanation_short || best.explanation;
-          bugSeverity = best.category.replace("bug_", "");
+          bugSeverity = best.category.replace("bug_", "") || "high";
         }
-        totalBugs = analysisResult.meaningful_bugs_count;
+        totalBugs = analysisResult.meaningful_bugs_count ?? 1;
       } else if ("meaningful_bugs_found" in analysisResult && analysisResult.meaningful_bugs_found) {
         const v1Result = analysisResult as MeaningfulBugsResult;
         const best = getMostImpactfulBug(v1Result);
