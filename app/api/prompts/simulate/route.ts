@@ -118,10 +118,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const body: SimulateRequest = await request.json();
     const { promptType, promptContent, model: requestedModel } = body;
 
-    if (!promptType || !promptContent) {
+    // Runtime type guards to prevent TypeErrors on string methods
+    if (!promptType || typeof promptType !== "string") {
       return NextResponse.json<SimulateResponse>({
         success: false,
-        error: "promptType and promptContent are required",
+        error: "promptType must be a non-empty string",
+      }, { status: 400 });
+    }
+
+    if (!promptContent || typeof promptContent !== "string") {
+      return NextResponse.json<SimulateResponse>({
+        success: false,
+        error: "promptContent must be a non-empty string",
       }, { status: 400 });
     }
 
