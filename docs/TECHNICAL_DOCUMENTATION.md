@@ -182,6 +182,7 @@ We use `git cherry-pick` to replay commits instead of merging or rebasing. Here'
 │   • Easy to skip merge commits (which can't be cherry-picked directly)  │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
+
 ```
 
 ### Q&A: PR Simulation
