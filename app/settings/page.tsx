@@ -132,6 +132,27 @@ export default function SettingsPage() {
   const [schemaInfo, setSchemaInfo] = useState<PromptSchemaInfo | null>(null);
   const [pendingSaveAction, setPendingSaveAction] = useState<"desktop" | "mobile-model" | "mobile-content" | null>(null);
 
+  // Simulation state
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationResult, setSimulationResult] = useState<{
+    rawOutput: string;
+    parsedOutput?: unknown;
+    parseError?: string;
+    executionTimeMs: number;
+    model: string;
+    inputTokensEstimate: number;
+    testDataUsed: {
+      prId: number;
+      forkedPrUrl: string;
+      originalPrUrl: string | null;
+    };
+    schemaValidation?: SchemaValidationResult; // Added: schema validation result
+  } | null>(null);
+  const [simulationError, setSimulationError] = useState<string | null>(null);
+  const [showSimulationModal, setShowSimulationModal] = useState(false);
+  // Track the exact content that was last tested (to know if user needs to retest after changes)
+  const [testedContent, setTestedContent] = useState<string | null>(null);
+
   // Fetch forks for autocomplete
   const { data: forksData = [] } = useQuery<ForkRecord[]>({
     queryKey: ["forks-for-autocomplete"],
@@ -221,6 +242,7 @@ export default function SettingsPage() {
     }
   };
 
+
   // Handle save with schema validation
   const handleValidatedSave = async (saveAction: "desktop" | "mobile-model" | "mobile-content") => {
     if (!selectedPrompt) return;
@@ -244,7 +266,24 @@ export default function SettingsPage() {
       return;
     }
 
-    // Validate the schema
+    // Check if user has already tested this exact content
+    if (testedContent === editedContent && validationResult) {
+      // User has tested this content, use cached validation result
+      if (!validationResult.compatible) {
+        setPendingSaveAction(saveAction);
+        setShowSchemaWarningModal(true);
+        return;
+      }
+      // Validation passed during testing, save directly
+      if (saveAction === "desktop") {
+        handleSave();
+      } else {
+        handleSaveField("content");
+      }
+      return;
+    }
+
+    // User hasn't tested this content - run validation first
     const result = await validatePromptSchema(selectedPrompt.name, contentToValidate);
 
     if (!result.compatible) {
@@ -279,6 +318,67 @@ export default function SettingsPage() {
   const handleCancelSave = () => {
     setShowSchemaWarningModal(false);
     setPendingSaveAction(null);
+  };
+
+  // Simulate prompt with test data (also runs schema validation)
+  const handleSimulate = async () => {
+    if (!selectedPrompt) return;
+
+    setIsSimulating(true);
+    setSimulationResult(null);
+    setSimulationError(null);
+    setValidationResult(null);
+
+    try {
+      // Run both simulation and schema validation in parallel
+      const [simulateResponse, validationResponse] = await Promise.all([
+        fetch("/api/prompts/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            promptType: selectedPrompt.name,
+            promptContent: editedContent,
+            model: editedModel || undefined,
+          }),
+        }),
+        fetch("/api/prompts/validate-schema", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            promptType: selectedPrompt.name,
+            promptContent: editedContent,
+          }),
+        }),
+      ]);
+
+      const [simulateData, validationData] = await Promise.all([
+        simulateResponse.json(),
+        validationResponse.json(),
+      ]);
+
+      if (!simulateData.success) {
+        setSimulationError(simulateData.error || "Simulation failed");
+        return;
+      }
+
+      // Store validation result
+      setValidationResult(validationData);
+
+      // Include validation in simulation result
+      setSimulationResult({
+        ...simulateData.result,
+        schemaValidation: validationData,
+      });
+
+      // Mark this content as tested
+      setTestedContent(editedContent);
+
+      setShowSimulationModal(true);
+    } catch (error) {
+      setSimulationError(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsSimulating(false);
+    }
   };
 
   // Fetch cache info
@@ -838,26 +938,27 @@ export default function SettingsPage() {
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              {/* Validate Button */}
+                              {/* Test Prompt Button */}
                               <button
-                                onClick={() => selectedPrompt && validatePromptSchema(selectedPrompt.name, editedContent)}
-                                disabled={isValidating || !hasChanges}
-                                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={handleSimulate}
+                                disabled={isSimulating}
+                                className="inline-flex items-center gap-2 px-4 py-2 border border-blue-300 hover:bg-blue-50 text-blue-700 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                {isValidating ? (
+                                {isSimulating ? (
                                   <>
                                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                                     </svg>
-                                    Validating...
+                                    Testing...
                                   </>
                                 ) : (
                                   <>
                                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    Validate Schema
+                                    Test Prompt
                                   </>
                                 )}
                               </button>
@@ -865,7 +966,7 @@ export default function SettingsPage() {
                               {/* Save Button */}
                               <button
                                 onClick={() => handleValidatedSave("desktop")}
-                                disabled={saving || isValidating || !hasChanges}
+                                disabled={saving || isSimulating || isValidating || !hasChanges}
                                 className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {saving ? (
@@ -888,42 +989,6 @@ export default function SettingsPage() {
                             </div>
                           </div>
 
-                          {/* Validation Result */}
-                          {validationResult && (
-                            <div
-                              className={`rounded-lg border p-3 text-sm ${
-                                validationResult.compatible
-                                  ? "bg-green-50 border-green-200 text-green-700"
-                                  : "bg-yellow-50 border-yellow-200 text-yellow-700"
-                              }`}
-                            >
-                              <div className="flex items-center gap-2">
-                                {validationResult.compatible ? (
-                                  <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                ) : (
-                                  <svg className="h-4 w-4 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                  </svg>
-                                )}
-                                <span className="font-medium">
-                                  {validationResult.compatible ? "Schema compatible" : "Schema changes detected"}
-                                </span>
-                              </div>
-                              {validationResult.summary && (
-                                <p className="mt-1 text-sm">{validationResult.summary}</p>
-                              )}
-                              {validationResult.warnings && validationResult.warnings.length > 0 && (
-                                <ul className="mt-1 text-xs list-disc list-inside">
-                                  {validationResult.warnings.map((w, i) => (
-                                    <li key={i}>{w}</li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          )}
-
                           {/* Save Result */}
                           {saveResult && (
                             <div
@@ -934,6 +999,19 @@ export default function SettingsPage() {
                               }`}
                             >
                               {saveResult.message}
+                            </div>
+                          )}
+
+                          {/* Simulation Error */}
+                          {simulationError && (
+                            <div className="rounded-lg border border-error/20 bg-error-light p-3 text-sm text-error">
+                              <div className="flex items-center gap-2">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span className="font-medium">Simulation Error</span>
+                              </div>
+                              <p className="mt-1">{simulationError}</p>
                             </div>
                           )}
 
@@ -1993,6 +2071,164 @@ export default function SettingsPage() {
                     className="px-4 py-2 min-h-[44px] bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
                   >
                     Save Anyway (Dangerous)
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Simulation Results Modal */}
+          {showSimulationModal && simulationResult && (
+            <>
+              {/* Backdrop */}
+              <div
+                className="fixed inset-0 bg-black/50 z-50"
+                onClick={() => setShowSimulationModal(false)}
+              />
+
+              {/* Modal */}
+              <div className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-4xl md:w-full bg-white rounded-xl z-50 flex flex-col overflow-hidden shadow-2xl max-h-[90vh]">
+                {/* Modal Header */}
+                <div className="px-6 py-4 border-b border-border bg-blue-50">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold text-blue-700 flex items-center gap-2">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Simulation Results
+                    </h2>
+                    <button
+                      onClick={() => setShowSimulationModal(false)}
+                      className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                    >
+                      <svg className="h-5 w-5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Modal Content */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {/* Execution Info */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-500 mb-1">Model</div>
+                      <div className="font-medium text-sm truncate" title={simulationResult.model}>
+                        {simulationResult.model}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-500 mb-1">Execution Time</div>
+                      <div className="font-medium text-sm">
+                        {(simulationResult.executionTimeMs / 1000).toFixed(2)}s
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-500 mb-1">Est. Input Tokens</div>
+                      <div className="font-medium text-sm">
+                        ~{simulationResult.inputTokensEstimate.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="text-xs text-gray-500 mb-1">Test PR ID</div>
+                      <div className="font-medium text-sm">
+                        #{simulationResult.testDataUsed.prId}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Test Data Info */}
+                  <div className="text-sm text-gray-600">
+                    <span className="font-medium">Test data from:</span>{" "}
+                    <a
+                      href={simulationResult.testDataUsed.forkedPrUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline"
+                    >
+                      {simulationResult.testDataUsed.forkedPrUrl}
+                    </a>
+                  </div>
+
+                  {/* Schema Validation Result */}
+                  {simulationResult.schemaValidation && (
+                    <div
+                      className={`rounded-lg border p-4 ${
+                        simulationResult.schemaValidation.compatible
+                          ? "bg-green-50 border-green-200"
+                          : "bg-yellow-50 border-yellow-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {simulationResult.schemaValidation.compatible ? (
+                          <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="h-5 w-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        )}
+                        <span className={`font-medium ${simulationResult.schemaValidation.compatible ? "text-green-700" : "text-yellow-700"}`}>
+                          {simulationResult.schemaValidation.compatible ? "Schema Compatible" : "Schema Changes Detected"}
+                        </span>
+                      </div>
+                      {simulationResult.schemaValidation.summary && (
+                        <p className={`mt-2 text-sm ${simulationResult.schemaValidation.compatible ? "text-green-600" : "text-yellow-600"}`}>
+                          {simulationResult.schemaValidation.summary}
+                        </p>
+                      )}
+                      {simulationResult.schemaValidation.missing_fields && simulationResult.schemaValidation.missing_fields.length > 0 && (
+                        <div className="mt-2">
+                          <span className="text-sm font-medium text-red-600">Missing fields: </span>
+                          <span className="text-sm text-red-600 font-mono">
+                            {simulationResult.schemaValidation.missing_fields.join(", ")}
+                          </span>
+                        </div>
+                      )}
+                      {simulationResult.schemaValidation.warnings && simulationResult.schemaValidation.warnings.length > 0 && (
+                        <ul className="mt-2 text-xs list-disc list-inside text-yellow-600">
+                          {simulationResult.schemaValidation.warnings.map((w: string, i: number) => (
+                            <li key={i}>{w}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Parse Error Warning */}
+                  {simulationResult.parseError && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 text-yellow-700">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span className="font-medium">JSON Parse Error</span>
+                      </div>
+                      <p className="mt-2 text-sm text-yellow-600">{simulationResult.parseError}</p>
+                    </div>
+                  )}
+
+                  {/* Output */}
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      {simulationResult.parsedOutput ? "Parsed JSON Output" : "Raw Output"}
+                    </h3>
+                    <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto text-xs font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+                      {simulationResult.rawOutput}
+                    </pre>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="px-6 py-4 border-t border-border bg-bg-subtle flex justify-end">
+                  <button
+                    onClick={() => setShowSimulationModal(false)}
+                    className="px-4 py-2 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                  >
+                    Close
                   </button>
                 </div>
               </div>
