@@ -1076,6 +1076,47 @@ export function clearCachedRepos(): number {
 }
 
 /**
+ * Get the most recent PR that has both an analysis with meaningful bugs and a generated email.
+ * This is useful for testing prompts with real data.
+ */
+export function getRecentPRWithAnalysisAndEmail(): {
+  pr: PRRecord;
+  analysis: PRAnalysisRecord;
+  email: GeneratedEmailRecord;
+} | null {
+  const db = getDatabase();
+
+  // Find most recent PR that has:
+  // 1. An analysis with meaningful bugs
+  // 2. A generated email
+  const result = db.prepare(`
+    SELECT
+      p.id as pr_id,
+      a.id as analysis_id,
+      e.id as email_id
+    FROM prs p
+    JOIN pr_analyses a ON a.pr_id = p.id AND (
+      a.meaningful_bugs_found = 1
+      OR a.meaningful_bugs_count > 0
+    )
+    JOIN generated_emails e ON e.pr_analysis_id = a.id
+    ORDER BY a.analyzed_at DESC
+    LIMIT 1
+  `).get() as { pr_id: number; analysis_id: number; email_id: number } | undefined;
+
+  if (!result) {
+    return null;
+  }
+
+  // Fetch full records
+  const pr = db.prepare("SELECT * FROM prs WHERE id = ?").get(result.pr_id) as PRRecord;
+  const analysis = db.prepare("SELECT * FROM pr_analyses WHERE id = ?").get(result.analysis_id) as PRAnalysisRecord;
+  const email = db.prepare("SELECT * FROM generated_emails WHERE id = ?").get(result.email_id) as GeneratedEmailRecord;
+
+  return { pr, analysis, email };
+}
+
+/**
  * Close the database connection.
  * Call this when shutting down the application.
  */
