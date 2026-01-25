@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import {
   getPromptSchema,
   schemaToDescription,
@@ -55,8 +56,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Check if this is a plain text output schema (like email generation)
+    const isPlainTextSchema = expectedSchema instanceof z.ZodString;
+
     const expectedSchemaDescription = schemaToDescription(expectedSchema);
-    const expectedFieldPaths = getAllFieldPaths(expectedSchema);
+    const expectedFieldPaths = isPlainTextSchema ? [] : getAllFieldPaths(expectedSchema);
 
     // Check for Anthropic API key
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -70,15 +74,41 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const anthropic = new Anthropic({ apiKey });
 
-    // Use Claude to extract and compare schemas
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
-      temperature: 0,
-      messages: [
-        {
-          role: "user",
-          content: `You are a JSON schema analyzer. I need you to compare two schemas and identify breaking changes.
+    // Use different validation prompts for JSON vs plain text output
+    const validationPrompt = isPlainTextSchema
+      ? `You are a prompt output format analyzer. I need you to verify that a prompt produces plain text output (not JSON).
+
+## Expected Output Format
+The application code expects this prompt to produce **plain text output**, not JSON.
+${(expectedSchema as z.ZodString).description ? `Expected format: ${(expectedSchema as z.ZodString).description}` : ""}
+
+## Prompt Being Saved
+\`\`\`
+${promptContent.slice(0, 10000)}${promptContent.length > 10000 ? "\n... (truncated)" : ""}
+\`\`\`
+
+## Your Task
+1. Check if the prompt instructs the LLM to produce plain text output (not JSON)
+2. Verify the output format matches expectations (e.g., email format, specific structure)
+3. Identify any issues
+
+## Compatible If:
+- Prompt asks for plain text output (email, message, etc.)
+- Output format matches the expected description
+- No JSON wrapper is requested
+
+## NOT Compatible If:
+- Prompt asks for JSON output when plain text is expected
+- Output format doesn't match expectations
+
+## Response Format
+Respond with ONLY valid JSON, no markdown fences:
+{
+  "compatible": true | false,
+  "warnings": ["Any concerns about the output format"],
+  "summary": "One sentence summary of compatibility status"
+}`
+      : `You are a JSON schema analyzer. I need you to compare two schemas and identify breaking changes.
 
 ## Expected Schema (what the code requires)
 The application code expects the prompt to produce JSON output matching this schema:
@@ -131,7 +161,17 @@ Respond with ONLY valid JSON, no markdown fences:
   ],
   "warnings": ["Any other concerns about the schema"],
   "summary": "One sentence summary of compatibility status"
-}`,
+}`;
+
+    // Use Claude to extract and compare schemas
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2048,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: validationPrompt,
         },
       ],
     });
