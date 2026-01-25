@@ -118,7 +118,7 @@ export default function SettingsPage() {
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (cacheInputRef.current && !cacheInputRef.current.contains(event.target as Node) &&
-          modalCacheInputRef.current && !modalCacheInputRef.current.contains(event.target as Node)) {
+          (!modalCacheInputRef.current || !modalCacheInputRef.current.contains(event.target as Node))) {
         setShowCacheAutocomplete(false);
       }
     }

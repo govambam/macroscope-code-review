@@ -32,8 +32,19 @@ export function MobileMenu({ className = '' }: MobileMenuProps) {
     }
   }, [isOpen])
 
+  // Close menu and reset body scroll when viewport exceeds mobile breakpoint
+  useEffect(() => {
+    function handleResize() {
+      if (window.innerWidth >= 768 && isOpen) {
+        setIsOpen(false)
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isOpen])
+
   const displayName = session?.user?.name || session?.user?.login || 'User'
-  const username = session?.user?.login || session?.user?.email?.split('@')[0] || ''
+  const username = session?.user?.login || session?.user?.email?.split('@')?.[0] || ''
 
   return (
     <>
