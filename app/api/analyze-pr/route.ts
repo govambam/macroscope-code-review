@@ -34,6 +34,8 @@ interface AnalyzeResponse {
   forkedPrUrl?: string;
   originalPrUrl?: string;
   originalPrTitle?: string; // Title of the original PR
+  originalPrState?: "open" | "merged" | "closed"; // State of the original PR
+  originalPrMergedAt?: string | null; // ISO timestamp if merged
   cached?: boolean; // Whether the result was loaded from cache
   analysisId?: number; // Database ID of the analysis
   cachedEmail?: string; // Previously generated email content
@@ -112,11 +114,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (cachedAnalysis) {
           const result = JSON.parse(cachedAnalysis.analysis_json) as PRAnalysisResult;
 
-          // Get the stored PR record to retrieve originalPrUrl and originalPrTitle
+          // Get the stored PR record to retrieve originalPrUrl, originalPrTitle, and state
           const prRecord = getPRByUrl(forkedPrUrl);
           const storedOriginalUrl = prRecord?.original_pr_url || originalPrUrl;
-          // Use stored title - no GitHub API call needed!
+          // Use stored values - no GitHub API call needed!
           const originalPrTitle = prRecord?.original_pr_title || undefined;
+          const originalPrState = (prRecord?.original_pr_state as "open" | "merged" | "closed") || undefined;
+          const originalPrMergedAt = prRecord?.original_pr_merged_at || undefined;
 
           // Get any previously generated email for this analysis
           let cachedEmail: string | undefined;
@@ -136,6 +140,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             forkedPrUrl,
             originalPrUrl: storedOriginalUrl,
             originalPrTitle,
+            originalPrState,
+            originalPrMergedAt,
             cached: true,
             analysisId: cachedAnalysis.id,
             cachedEmail,
@@ -233,8 +239,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Fetch the original PR title from GitHub
+    // Fetch the original PR details from GitHub (title, state, merged_at)
     let originalPrTitle: string | undefined;
+    let originalPrState: "open" | "merged" | "closed" = "open";
+    let originalPrMergedAt: string | null = null;
     try {
       const { data: originalPr } = await octokit.pulls.get({
         owner: parsedOriginalPr.owner,
@@ -242,9 +250,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         pull_number: parsedOriginalPr.prNumber,
       });
       originalPrTitle = originalPr.title;
+      // Determine PR state: merged takes precedence over closed
+      if (originalPr.merged) {
+        originalPrState = "merged";
+        originalPrMergedAt = originalPr.merged_at;
+      } else if (originalPr.state === "closed") {
+        originalPrState = "closed";
+      } else {
+        originalPrState = "open";
+      }
     } catch (error) {
-      console.error("Failed to fetch original PR title:", error);
-      // Continue without the title - email generation will use a default
+      console.error("Failed to fetch original PR details:", error);
+      // Continue without the details - email generation will use defaults
     }
 
     // Perform the analysis
@@ -263,7 +280,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         prId = existingPR.id;
         // Update original PR info if we have it
         if (originalPrUrl) {
-          updatePROriginalInfo(prId, originalPrUrl, originalPrTitle || null);
+          updatePROriginalInfo(prId, originalPrUrl, originalPrTitle || null, originalPrState, originalPrMergedAt);
         }
       } else {
         // Create fork and PR records
@@ -291,6 +308,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           bugCount,
           {
             originalPrTitle: originalPrTitle || null,
+            originalPrState,
+            originalPrMergedAt,
             createdBy,
           }
         );
@@ -334,6 +353,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       forkedPrUrl,
       originalPrUrl,
       originalPrTitle,
+      originalPrState,
+      originalPrMergedAt,
       cached: false,
       analysisId,
     });

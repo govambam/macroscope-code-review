@@ -162,6 +162,8 @@ interface AnalysisApiResponse {
   forkedPrUrl?: string;
   originalPrUrl?: string;
   originalPrTitle?: string;
+  originalPrState?: "open" | "merged" | "closed";
+  originalPrMergedAt?: string | null;
   cached?: boolean;
   analysisId?: number;
   cachedEmail?: string;
@@ -1481,6 +1483,8 @@ export default function Home() {
         body: JSON.stringify({
           originalPrUrl,
           prTitle: analysisResult.originalPrTitle, // Use the actual PR title from GitHub
+          prStatus: analysisResult.originalPrState, // Pass PR status for email personalization
+          prMergedAt: analysisResult.originalPrMergedAt, // Pass merge date for context
           forkedPrUrl: analysisForkedUrl,
           bug: bestBug,
           totalBugs,
@@ -2481,9 +2485,41 @@ export default function Home() {
             {/* Modal Header */}
             <div className="flex items-center justify-between px-4 md:px-10 py-3 md:py-4 border-b border-border shrink-0">
               <div className="flex-1 min-w-0">
-                <h2 className="text-base md:text-lg font-semibold text-accent truncate">
-                  {selectedPrTitle || "PR Analysis"}
-                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base md:text-lg font-semibold text-accent truncate">
+                    {selectedPrTitle || "PR Analysis"}
+                  </h2>
+                  {/* PR Status Badge */}
+                  {analysisResult?.originalPrState && (
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full shrink-0 ${
+                      analysisResult.originalPrState === "merged"
+                        ? "bg-green-100 text-green-700"
+                        : analysisResult.originalPrState === "open"
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-gray-100 text-gray-600"
+                    }`}>
+                      {analysisResult.originalPrState === "merged" ? (
+                        <>
+                          Merged
+                          {analysisResult.originalPrMergedAt && (() => {
+                            const mergedDate = new Date(analysisResult.originalPrMergedAt);
+                            const now = new Date();
+                            const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
+                            if (diffDays === 0) return " today";
+                            if (diffDays === 1) return " yesterday";
+                            if (diffDays < 7) return ` ${diffDays}d ago`;
+                            if (diffDays < 30) return ` ${Math.floor(diffDays / 7)}w ago`;
+                            return "";
+                          })()}
+                        </>
+                      ) : analysisResult.originalPrState === "open" ? (
+                        "Open"
+                      ) : (
+                        "Closed"
+                      )}
+                    </span>
+                  )}
+                </div>
                 {analysisForkedUrl && (
                   <a
                     href={analysisForkedUrl}
@@ -2914,6 +2950,20 @@ export default function Home() {
                             {!generatedEmail && (
                               <div className="border-t border-border pt-6">
                                 <h3 className="text-sm font-medium text-accent mb-3">Generate Outreach Email</h3>
+                                {/* Warning for closed PRs */}
+                                {analysisResult?.originalPrState === "closed" && (
+                                  <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                    <div className="flex items-start gap-2">
+                                      <svg className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                      </svg>
+                                      <div className="text-sm text-amber-800">
+                                        <p className="font-medium">This PR was closed without being merged</p>
+                                        <p className="text-amber-700 mt-1">Outreach for abandoned PRs may not be relevant. Consider whether this is still a good outreach opportunity.</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                                 <button
                                   onClick={handleGenerateEmail}
                                   disabled={emailLoading}

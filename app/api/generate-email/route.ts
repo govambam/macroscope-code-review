@@ -6,6 +6,8 @@ import { saveGeneratedEmail } from "@/lib/services/database";
 interface GenerateEmailRequest {
   originalPrUrl: string; // URL to their original PR in their repo
   prTitle?: string;
+  prStatus?: "open" | "merged" | "closed"; // Status of the original PR
+  prMergedAt?: string | null; // ISO timestamp if merged
   forkedPrUrl: string; // URL to our fork with Macroscope review
   bug: BugSnippet;
   totalBugs: number;
@@ -63,10 +65,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Check if PR was closed without merging - warn but still allow email generation
+    if (body.prStatus === "closed") {
+      console.warn("Generating email for a closed (not merged) PR - outreach may not be relevant");
+    }
+
     // Generate the email (with Attio merge fields for personalization)
     const input: EmailGenerationInput = {
       originalPrUrl: body.originalPrUrl,
       prTitle: body.prTitle,
+      prStatus: body.prStatus,
+      prMergedAt: body.prMergedAt,
       forkedPrUrl: body.forkedPrUrl,
       bug: body.bug,
       totalBugs: body.totalBugs || 1,
