@@ -150,8 +150,8 @@ export default function SettingsPage() {
   } | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
   const [showSimulationModal, setShowSimulationModal] = useState(false);
-  // Track the content hash that was last tested (to know if user needs to retest after changes)
-  const [testedContentHash, setTestedContentHash] = useState<string | null>(null);
+  // Track the exact content that was last tested (to know if user needs to retest after changes)
+  const [testedContent, setTestedContent] = useState<string | null>(null);
 
   // Fetch forks for autocomplete
   const { data: forksData = [] } = useQuery<ForkRecord[]>({
@@ -242,15 +242,6 @@ export default function SettingsPage() {
     }
   };
 
-  // Simple hash function for tracking content changes
-  // Uses length + samples from start, middle, and end to detect any changes
-  const hashContent = (content: string, model: string) => {
-    const len = content.length;
-    const start = content.slice(0, 100);
-    const middle = len > 200 ? content.slice(Math.floor(len / 2) - 50, Math.floor(len / 2) + 50) : "";
-    const end = content.slice(-100);
-    return `${len}-${start}-${middle}-${end}-${model}`;
-  };
 
   // Handle save with schema validation
   const handleValidatedSave = async (saveAction: "desktop" | "mobile-model" | "mobile-content") => {
@@ -275,9 +266,8 @@ export default function SettingsPage() {
       return;
     }
 
-    // Check if user has already tested this content
-    const currentHash = hashContent(editedContent, editedModel);
-    if (testedContentHash === currentHash && validationResult) {
+    // Check if user has already tested this exact content
+    if (testedContent === editedContent && validationResult) {
       // User has tested this content, use cached validation result
       if (!validationResult.compatible) {
         setPendingSaveAction(saveAction);
@@ -381,7 +371,7 @@ export default function SettingsPage() {
       });
 
       // Mark this content as tested
-      setTestedContentHash(hashContent(editedContent, editedModel));
+      setTestedContent(editedContent);
 
       setShowSimulationModal(true);
     } catch (error) {
