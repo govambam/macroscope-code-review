@@ -353,7 +353,36 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "success", message: `Found PR: "${prTitle}" by @${prAuthor}` });
           sendStatus({ type: "info", message: `Status: ${prState}${prMerged ? " (merged)" : " (open)"}` });
 
-          // Step 3: Fetch PR commits first (we need them to find the true base)
+          // For merged PRs, we use a different strategy that's more reliable
+          // Instead of cherry-picking, we use the merge commit's parents directly
+          let useMergeCommitStrategy = false;
+          let mergeBaseCommit: string | null = null;
+          let mergeHeadCommit: string | null = null;
+
+          if (prMerged && mergeCommitSha) {
+            sendStatus({ type: "info", step: 3, totalSteps: 10, message: "PR is merged, using direct branch strategy..." });
+
+            try {
+              const { data: mergeCommitData } = await octokit.repos.getCommit({
+                owner: upstreamOwner,
+                repo: repoName,
+                ref: mergeCommitSha,
+              });
+
+              if (mergeCommitData.parents && mergeCommitData.parents.length >= 2) {
+                // Parent 0 = base branch state at merge time
+                // Parent 1 = PR's final commit (head of PR branch)
+                mergeBaseCommit = mergeCommitData.parents[0].sha;
+                mergeHeadCommit = mergeCommitData.parents[1].sha;
+                useMergeCommitStrategy = true;
+                sendStatus({ type: "success", message: `Found merge commit parents: base=${getShortHash(mergeBaseCommit)}, head=${getShortHash(mergeHeadCommit)}` });
+              }
+            } catch (mergeErr) {
+              sendStatus({ type: "info", message: "Could not fetch merge commit, falling back to cherry-pick strategy" });
+            }
+          }
+
+          // Step 3: Fetch PR commits (needed for cherry-pick strategy or for commit count info)
           sendStatus({ type: "info", step: 3, totalSteps: 10, message: "Fetching commits from PR..." });
 
           const { data: prCommitsList } = await octokit.pulls.listCommits({
@@ -371,50 +400,53 @@ export async function POST(request: NextRequest): Promise<Response> {
 
           sendStatus({ type: "success", message: `Found ${prCommits.length} commit(s) in PR` });
 
-          // Step 4: Determine the true base commit
-          // The correct base is the parent of the first commit in the PR
-          // This ensures we're recreating the PR on the exact same base it was originally created from
-          sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Finding original base commit..." });
-
-          let baseCommit: string;
-
-          if (prCommitsList.length > 0) {
-            const firstPrCommitSha = prCommitsList[0].sha;
-            try {
-              const { data: firstCommitData } = await octokit.repos.getCommit({
-                owner: upstreamOwner,
-                repo: repoName,
-                ref: firstPrCommitSha,
-              });
-
-              if (firstCommitData.parents && firstCommitData.parents.length > 0) {
-                baseCommit = firstCommitData.parents[0].sha;
-                sendStatus({ type: "success", message: `Using true PR base commit (${getShortHash(baseCommit)})` });
-              } else {
-                baseCommit = prData.base.sha;
-                sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
-              }
-            } catch {
-              baseCommit = prData.base.sha;
-              sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
-            }
-          } else {
-            baseCommit = prData.base.sha;
-            sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
-          }
-
           // Filter out merge commits from the list
           const mergeCommitCount = prCommits.filter(c => c.isMergeCommit).length;
           const commitsToApply = prCommits.filter(c => !c.isMergeCommit);
           const regularCommitCount = commitsToApply.length;
 
-          if (mergeCommitCount > 0) {
-            sendStatus({ type: "info", message: `${mergeCommitCount} merge commit(s) will be skipped, ${regularCommitCount} commit(s) to apply` });
-          }
+          // Variables for cherry-pick strategy (only used if not using merge commit strategy)
+          let baseCommit: string = "";
 
-          if (regularCommitCount === 0) {
-            sendError("No commits to apply", "All commits in this PR are merge commits. Nothing to recreate.");
-            return;
+          if (!useMergeCommitStrategy) {
+            // Step 4: Determine the true base commit for cherry-pick strategy
+            sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Finding original base commit..." });
+
+            if (prCommitsList.length > 0) {
+              const firstPrCommitSha = prCommitsList[0].sha;
+              try {
+                const { data: firstCommitData } = await octokit.repos.getCommit({
+                  owner: upstreamOwner,
+                  repo: repoName,
+                  ref: firstPrCommitSha,
+                });
+
+                if (firstCommitData.parents && firstCommitData.parents.length > 0) {
+                  baseCommit = firstCommitData.parents[0].sha;
+                  sendStatus({ type: "success", message: `Using true PR base commit (${getShortHash(baseCommit)})` });
+                } else {
+                  baseCommit = prData.base.sha;
+                  sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+                }
+              } catch {
+                baseCommit = prData.base.sha;
+                sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+              }
+            } else {
+              baseCommit = prData.base.sha;
+              sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+            }
+
+            if (mergeCommitCount > 0) {
+              sendStatus({ type: "info", message: `${mergeCommitCount} merge commit(s) will be skipped, ${regularCommitCount} commit(s) to apply` });
+            }
+
+            if (regularCommitCount === 0) {
+              sendError("No commits to apply", "All commits in this PR are merge commits. Nothing to recreate.");
+              return;
+            }
+          } else {
+            sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Using merge commit strategy (no cherry-pick needed)" });
           }
 
           // Step 5: Check/create fork
@@ -566,77 +598,118 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "success", message: "All commits fetched" });
 
           // Step 8: Create base branch and review branch
-          // We need a base branch at the original base commit to create a clean PR
-          // (the fork's main branch contains the merged PR, which would cause conflicts)
           const baseBranchName = `base-for-pr-${prNumber}`;
-          sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from base commit ${getShortHash(baseCommit)}...` });
 
-          // First create the base branch at the base commit
-          try {
-            await repoGit.checkout(["-b", baseBranchName, baseCommit]);
-            sendStatus({ type: "success", message: `Base branch created at ${getShortHash(baseCommit)}` });
-          } catch {
+          if (useMergeCommitStrategy && mergeBaseCommit && mergeHeadCommit) {
+            // MERGED PR STRATEGY: Use merge commit parents directly (no cherry-pick needed)
+            sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from merge commit parents...` });
+
+            // Create base branch at merge base (parent 0 of merge commit)
             try {
-              // Branch might exist, try to reset it
-              await repoGit.checkout([baseBranchName]);
-              await repoGit.reset(["--hard", baseCommit]);
-              sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(baseCommit)}` });
+              await repoGit.checkout(["-b", baseBranchName, mergeBaseCommit]);
+              sendStatus({ type: "success", message: `Base branch created at ${getShortHash(mergeBaseCommit)}` });
             } catch {
-              await cleanup(tmpDir);
-              sendError("Failed to create base branch", `Could not create branch at base commit ${getShortHash(baseCommit)}`);
-              return;
-            }
-          }
-
-          // Now create the review branch from the same base
-          try {
-            await repoGit.checkout(["-b", branchName, baseCommit]);
-            sendStatus({ type: "success", message: `Review branch created from commit ${getShortHash(baseCommit)}` });
-          } catch {
-            try {
-              await repoGit.checkout([branchName]);
-              await repoGit.reset(["--hard", baseCommit]);
-              sendStatus({ type: "success", message: `Review branch reset to commit ${getShortHash(baseCommit)}` });
-            } catch {
-              await cleanup(tmpDir);
-              sendError("Failed to create review branch", `Could not create branch from base commit ${getShortHash(baseCommit)}`);
-              return;
-            }
-          }
-
-          // Step 9: Cherry-pick commits
-          sendStatus({ type: "info", step: 9, totalSteps: 10, message: `Cherry-picking ${commitsToApply.length} commit(s)...` });
-
-          for (let i = 0; i < commitsToApply.length; i++) {
-            const commit = commitsToApply[i];
-            const shortMessage = commit.message.length > 50 ? commit.message.substring(0, 47) + "..." : commit.message;
-
-            sendStatus({
-              type: "progress",
-              message: `Cherry-picking commit ${i + 1}/${commitsToApply.length}: ${getShortHash(commit.sha)} - "${shortMessage}"`,
-            });
-
-            try {
-              await repoGit.raw(["cherry-pick", commit.sha]);
-            } catch {
-              sendStatus({ type: "info", message: `Fetching commit ${getShortHash(commit.sha)} from upstream...` });
               try {
-                await repoGit.raw(["fetch", "upstream", commit.sha]);
-                await repoGit.raw(["cherry-pick", commit.sha]);
+                await repoGit.checkout([baseBranchName]);
+                await repoGit.reset(["--hard", mergeBaseCommit]);
+                sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(mergeBaseCommit)}` });
               } catch {
-                try {
-                  await repoGit.raw(["cherry-pick", "--abort"]);
-                } catch {
-                  // Ignore
-                }
                 await cleanup(tmpDir);
-                sendError("Cherry-pick failed", `Failed to apply commit ${getShortHash(commit.sha)}: "${shortMessage}". This may be due to merge conflicts.`);
+                sendError("Failed to create base branch", `Could not create branch at merge base ${getShortHash(mergeBaseCommit)}`);
                 return;
               }
             }
-          }
 
-          sendStatus({ type: "success", message: `All ${commitsToApply.length} commit(s) applied successfully` });
+            // Create review branch at merge head (parent 1 of merge commit = PR's final state)
+            try {
+              await repoGit.checkout(["-b", branchName, mergeHeadCommit]);
+              sendStatus({ type: "success", message: `Review branch created at ${getShortHash(mergeHeadCommit)} (PR's final state)` });
+            } catch {
+              try {
+                await repoGit.checkout([branchName]);
+                await repoGit.reset(["--hard", mergeHeadCommit]);
+                sendStatus({ type: "success", message: `Review branch reset to ${getShortHash(mergeHeadCommit)}` });
+              } catch {
+                await cleanup(tmpDir);
+                sendError("Failed to create review branch", `Could not create branch at PR head ${getShortHash(mergeHeadCommit)}`);
+                return;
+              }
+            }
+
+            // Step 9: No cherry-pick needed for merged PRs using this strategy
+            sendStatus({ type: "info", step: 9, totalSteps: 10, message: "Branches created from merge commit (no cherry-pick needed)" });
+            sendStatus({ type: "success", message: `PR state preserved exactly as merged` });
+
+          } else {
+            // CHERRY-PICK STRATEGY: For open PRs or when merge commit strategy fails
+            sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from base commit ${getShortHash(baseCommit)}...` });
+
+            // First create the base branch at the base commit
+            try {
+              await repoGit.checkout(["-b", baseBranchName, baseCommit]);
+              sendStatus({ type: "success", message: `Base branch created at ${getShortHash(baseCommit)}` });
+            } catch {
+              try {
+                await repoGit.checkout([baseBranchName]);
+                await repoGit.reset(["--hard", baseCommit]);
+                sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(baseCommit)}` });
+              } catch {
+                await cleanup(tmpDir);
+                sendError("Failed to create base branch", `Could not create branch at base commit ${getShortHash(baseCommit)}`);
+                return;
+              }
+            }
+
+            // Now create the review branch from the same base
+            try {
+              await repoGit.checkout(["-b", branchName, baseCommit]);
+              sendStatus({ type: "success", message: `Review branch created from commit ${getShortHash(baseCommit)}` });
+            } catch {
+              try {
+                await repoGit.checkout([branchName]);
+                await repoGit.reset(["--hard", baseCommit]);
+                sendStatus({ type: "success", message: `Review branch reset to commit ${getShortHash(baseCommit)}` });
+              } catch {
+                await cleanup(tmpDir);
+                sendError("Failed to create review branch", `Could not create branch from base commit ${getShortHash(baseCommit)}`);
+                return;
+              }
+            }
+
+            // Step 9: Cherry-pick commits
+            sendStatus({ type: "info", step: 9, totalSteps: 10, message: `Cherry-picking ${commitsToApply.length} commit(s)...` });
+
+            for (let i = 0; i < commitsToApply.length; i++) {
+              const commit = commitsToApply[i];
+              const shortMessage = commit.message.length > 50 ? commit.message.substring(0, 47) + "..." : commit.message;
+
+              sendStatus({
+                type: "progress",
+                message: `Cherry-picking commit ${i + 1}/${commitsToApply.length}: ${getShortHash(commit.sha)} - "${shortMessage}"`,
+              });
+
+              try {
+                await repoGit.raw(["cherry-pick", commit.sha]);
+              } catch {
+                sendStatus({ type: "info", message: `Fetching commit ${getShortHash(commit.sha)} from upstream...` });
+                try {
+                  await repoGit.raw(["fetch", "upstream", commit.sha]);
+                  await repoGit.raw(["cherry-pick", commit.sha]);
+                } catch {
+                  try {
+                    await repoGit.raw(["cherry-pick", "--abort"]);
+                  } catch {
+                    // Ignore
+                  }
+                  await cleanup(tmpDir);
+                  sendError("Cherry-pick failed", `Failed to apply commit ${getShortHash(commit.sha)}: "${shortMessage}". This may be due to merge conflicts.`);
+                  return;
+                }
+              }
+            }
+
+            sendStatus({ type: "success", message: `All ${commitsToApply.length} commit(s) applied successfully` });
+          }
 
           // Step 10: Push and create PR
           sendStatus({ type: "info", step: 10, totalSteps: 10, message: "Pushing branches to GitHub..." });
@@ -656,8 +729,22 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "info", step: 10, totalSteps: 10, message: "Creating pull request..." });
 
           const newPrTitle = `[Review] ${prTitle}`;
-          const skippedNote = mergeCommitCount > 0 ? `\n\n*Note: ${mergeCommitCount} merge commit(s) were skipped during recreation.*` : "";
-          const newPrBody = `Recreated from ${inputPrUrl} for Macroscope review.
+          let newPrBody: string;
+
+          if (useMergeCommitStrategy && mergeBaseCommit && mergeHeadCommit) {
+            // PR body for merge commit strategy
+            newPrBody = `Recreated from ${inputPrUrl} for Macroscope review.
+
+**Original PR:** #${prNumber} by @${prAuthor}
+**Status:** ${prState} (merged)
+
+*Recreated using merge commit strategy - exact PR state preserved.*
+
+**Original PR:** ${inputPrUrl}`;
+          } else {
+            // PR body for cherry-pick strategy
+            const skippedNote = mergeCommitCount > 0 ? `\n\n*Note: ${mergeCommitCount} merge commit(s) were skipped during recreation.*` : "";
+            newPrBody = `Recreated from ${inputPrUrl} for Macroscope review.
 
 **Original PR:** #${prNumber} by @${prAuthor}
 **Status:** ${prState}${prMerged ? " (merged)" : ""}
@@ -666,6 +753,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("\n")}${skippedNote}
 
 **Original PR:** ${inputPrUrl}`;
+          }
 
           let newPrUrl: string;
           try {
@@ -738,6 +826,9 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           await cleanup(tmpDir);
 
           // Save to database so it's immediately available
+          // For merge commit strategy, use prCommits.length (all PR commits) since they're all included
+          // For cherry-pick strategy, use commitsToApply.length (non-merge commits)
+          const effectiveCommitCount = useMergeCommitStrategy ? prCommits.length : commitsToApply.length;
           try {
             const newPrNumber = parseInt(newPrUrl.split("/").pop() || "0", 10);
             const forkId = saveFork(forkOwner, repoName, forkUrl);
@@ -752,7 +843,7 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
               {
                 originalPrTitle: prTitle,
                 state: "open",
-                commitCount: commitsToApply.length,
+                commitCount: effectiveCommitCount,
                 createdBy: session?.user?.login || session?.user?.name || null,
               }
             );
@@ -762,12 +853,21 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           }
 
           sendStatus({ type: "success", message: "Pull request created successfully!" });
+
+          // Build appropriate success message based on strategy used
+          let successMessage: string;
+          if (useMergeCommitStrategy) {
+            successMessage = `PR recreated using merge commit strategy - exact state from original PR #${prNumber} preserved`;
+          } else {
+            successMessage = `PR recreated with ${commitsToApply.length} commits from original PR #${prNumber}${mergeCommitCount > 0 ? ` (${mergeCommitCount} merge commits skipped)` : ""}`;
+          }
+
           sendResult({
             success: true,
-            message: `PR recreated with ${commitsToApply.length} commits from original PR #${prNumber}${mergeCommitCount > 0 ? ` (${mergeCommitCount} merge commits skipped)` : ""}`,
+            message: successMessage,
             prUrl: newPrUrl,
             forkUrl,
-            commitCount: commitsToApply.length,
+            commitCount: effectiveCommitCount,
             originalPrNumber: prNumber,
             prTitle: `[Review] ${prTitle}`,
           });
