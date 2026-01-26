@@ -623,7 +623,7 @@ export function getPRsNeedingMacroscopeSync(limit: number = 50): Array<PRRecord 
     AND p.created_at > datetime('now', '-48 hours')
     AND (
       p.macroscope_last_synced_at IS NULL
-      OR p.macroscope_last_synced_at < datetime('now', '-5 minutes')
+      OR p.macroscope_last_synced_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-5 minutes')
     )
     ORDER BY p.created_at DESC
     LIMIT ?
