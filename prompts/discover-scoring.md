@@ -1,23 +1,55 @@
 # Discover Scoring Prompt
 Model: claude-sonnet-4-20250514
-Purpose: Assess bug risk of PRs in Advanced discovery mode
+Purpose: Score PRs by bug likelihood for Advanced search mode
 
 ---
 
-Assess the bug risk of this pull request based on the files changed.
+You are evaluating pull requests to identify which are most likely to contain bugs worth reporting to an engineering leader.
 
-PR Title: "{PR_TITLE}"
-Total lines changed: {TOTAL_LINES}
+Score each PR from 1-10 on BUG LIKELIHOOD:
 
-Files changed:
-{FILES_LIST}
+**HIGH RISK (7-10):**
+- Authentication, authorization, session handling
+- Payment processing, financial calculations
+- Concurrency, race conditions, async handling
+- Data persistence, database operations, migrations
+- Cryptography, security-sensitive code
+- Error handling in critical paths
+- Complex refactors of core logic
 
-Respond with JSON only:
+**MEDIUM RISK (4-6):**
+- New features with business logic
+- API changes, data serialization
+- State management, caching
+- Third-party integrations
+
+**LOW RISK (1-3):**
+- Documentation, comments
+- Test files only
+- CSS, styling, UI-only changes
+- Dependency updates (unless major version)
+- Config file changes
+- Renaming, code formatting
+
+**PRs to evaluate:**
+
+{PR_DESCRIPTIONS}
+
+**Response format (JSON only, no markdown):**
 {
-  "assessment": "2-3 sentence explanation of what this PR does and why it might contain bugs worth catching. Focus on specific risks like concurrency issues, error handling gaps, security concerns, data integrity, etc. If this looks low-risk (docs, config, tests only), say so.",
-  "categories": ["list", "of", "risk", "categories"]
+  "scores": [
+    {
+      "pr_number": <number>,
+      "score": <1-10>,
+      "reason": "<one sentence explaining the score>",
+      "categories": ["<risk_category>", ...]
+    }
+  ]
 }
 
-Risk categories to choose from: concurrency, auth, security, data-handling, error-handling, state-management, api-changes, database, caching, serialization, networking, core-logic, refactor, new-feature, config, tests, docs, low-risk
+Risk categories to use: auth, security, concurrency, data-handling, database, caching, api, payments, crypto, error-handling, core-logic, refactor, new-feature, integration, config, tests, docs, ui, dependencies
 
-Return 1-4 most relevant categories.
+---
+
+Variables:
+- `{PR_DESCRIPTIONS}` - List of PRs with titles and file changes (auto-generated)

@@ -31,9 +31,13 @@ export interface PRCandidate {
   activity_score: number;
   overall_score: number;
 
+  // Original heuristic score (before LLM reranking, advanced mode only)
+  fast_score?: number;
+
   // LLM enhancement (only populated in advanced search)
-  risk_assessment?: string;
-  risk_categories?: string[]; // e.g., ['concurrency', 'auth', 'data-handling']
+  bug_likelihood_score?: number;    // 1-10 scale from LLM
+  risk_assessment?: string;         // One sentence explanation
+  risk_categories?: string[];       // e.g., ['concurrency', 'auth', 'data-handling']
   files_changed?: string[];
 }
 
