@@ -241,7 +241,7 @@ export default function Home() {
   // Create PR modal state
   const [showCreatePRModal, setShowCreatePRModal] = useState(false);
   const [createPRModalExpanded, setCreatePRModalExpanded] = useState(false);
-  const [createMode, setCreateMode] = useState<CreateMode>("pr");
+  const [createMode, setCreateMode] = useState<CreateMode>("discover");
   const [repoUrl, setRepoUrl] = useState("");
   const [specifyCommit, setSpecifyCommit] = useState(false);
   const [commitHash, setCommitHash] = useState("");
@@ -3494,7 +3494,7 @@ export default function Home() {
             className={`bg-white rounded-xl shadow-lg flex flex-col transition-all duration-200 ${
               createPRModalExpanded
                 ? "w-full h-full md:w-[calc(100%-2rem)] md:h-[calc(100%-2rem)] max-w-none rounded-none md:rounded-xl"
-                : "w-full max-w-xl max-h-[95vh] md:max-h-[90vh]"
+                : "w-full max-w-4xl max-h-[95vh] md:max-h-[90vh]"
             }`}
           >
             {/* Modal Header */}
