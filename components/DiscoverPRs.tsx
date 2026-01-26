@@ -215,24 +215,26 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
             }),
           });
 
-          // Read SSE stream to completion
+          // Read SSE stream to completion, accumulating content
           if (response.body) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let streamContent = "";
             let done = false;
 
             while (!done) {
               const { value, done: readerDone } = await reader.read();
               done = readerDone;
               if (value) {
-                const text = decoder.decode(value);
-                // Check for errors in SSE stream
-                if (text.includes('"type":"error"')) {
-                  const errorMatch = text.match(/"message":"([^"]+)"/);
-                  if (errorMatch) {
-                    errors.push(`PR #${prNumber}: ${errorMatch[1]}`);
-                  }
-                }
+                streamContent += decoder.decode(value, { stream: !done });
+              }
+            }
+
+            // Check for errors in accumulated stream content
+            if (streamContent.includes('"type":"error"')) {
+              const errorMatch = streamContent.match(/"message":"([^"]+)"/);
+              if (errorMatch) {
+                errors.push(`PR #${prNumber}: ${errorMatch[1]}`);
               }
             }
           }
