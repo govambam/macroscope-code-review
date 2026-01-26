@@ -2,7 +2,7 @@ import { getToken } from "next-auth/jwt"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const token = await getToken({ req: request })
 
   // If no token and trying to access protected route, redirect to signin
@@ -21,10 +21,12 @@ export const config = {
      * Match all request paths except:
      * - /auth/* (auth pages - signin, error)
      * - /api/auth/* (NextAuth API routes)
+     * - /api/webhooks/* (GitHub webhooks - no auth required)
+     * - /api/health (health check endpoint)
      * - /_next/static (static files)
      * - /_next/image (image optimization)
      * - /favicon.ico, /robots.txt (public files)
      */
-    "/((?!auth|api/auth|_next/static|_next/image|favicon.ico|robots.txt).*)",
+    "/((?!auth|api/auth|api/webhooks|api/health|_next/static|_next/image|favicon.ico|robots.txt).*)",
   ],
 }
