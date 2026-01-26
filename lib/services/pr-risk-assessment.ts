@@ -24,18 +24,18 @@ export async function assessPRRisk(
     .map((f) => `- ${f.filename} (+${f.additions}/-${f.deletions})`)
     .join("\n");
 
-  // Load prompt from database/filesystem (editable in Settings)
-  const prompt = loadPrompt("discover-scoring", {
-    PR_TITLE: prTitle,
-    TOTAL_LINES: String(totalLinesChanged),
-    FILES_LIST: fileList,
-  });
-
-  // Get model from prompt metadata, fallback to default
-  const metadata = getPromptMetadata("discover-scoring");
-  const model = metadata.model || "claude-sonnet-4-20250514";
-
   try {
+    // Load prompt from database/filesystem (editable in Settings)
+    const prompt = loadPrompt("discover-scoring", {
+      PR_TITLE: prTitle,
+      TOTAL_LINES: String(totalLinesChanged),
+      FILES_LIST: fileList,
+    });
+
+    // Get model from prompt metadata, fallback to default
+    const metadata = getPromptMetadata("discover-scoring");
+    const model = metadata.model || "claude-sonnet-4-20250514";
+
     const result = await sendMessageAndParseJSON<RiskAssessmentResult>(prompt, {
       model,
       maxTokens: 500,
