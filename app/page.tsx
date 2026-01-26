@@ -204,11 +204,6 @@ interface PRRecord {
   originalPrUrl?: string | null;
   isInternal?: boolean;
   createdBy?: string | null;
-  // Macroscope review status tracking
-  macroscopeReviewStatus?: "pending" | "in_progress" | "completed" | "failed" | null;
-  macroscopeBugsCount?: number | null;
-  macroscopeCheckStartedAt?: string | null;
-  macroscopeCheckCompletedAt?: string | null;
 }
 
 interface ForkRecord {
@@ -501,36 +496,6 @@ export default function Home() {
       }
     }
   }, [forks, queryClient]);
-
-  // Poll for Macroscope review status updates
-  // This is a backup mechanism for webhooks - checks every 30 seconds
-  useEffect(() => {
-    const pollMacroscopeReviews = async () => {
-      try {
-        const response = await fetch("/api/poll-macroscope-reviews", {
-          method: "POST",
-        });
-        const data = await response.json();
-
-        if (data.success && data.updated > 0) {
-          console.log(`Macroscope review status updated for ${data.updated} PRs`);
-          // Refresh the forks list to show updated status
-          queryClient.invalidateQueries({ queryKey: ["forks"] });
-        }
-      } catch (error) {
-        // Silently ignore polling errors - this is a background task
-        console.debug("Macroscope polling error:", error);
-      }
-    };
-
-    // Initial poll on mount
-    pollMacroscopeReviews();
-
-    // Poll every 30 seconds
-    const pollInterval = setInterval(pollMacroscopeReviews, 30000);
-
-    return () => clearInterval(pollInterval);
-  }, [queryClient]);
 
   const addStatus = (
     text: string,
@@ -2405,7 +2370,7 @@ export default function Home() {
                                 <div className="w-10 flex-shrink-0"></div>
                                 <div className="flex-1 ml-2"></div>
                                 <div className="w-[120px] text-center">Analysis</div>
-                                <div className="w-[100px] text-center">Status</div>
+                                <div className="w-[100px] text-center">Bugs</div>
                                 <div className="w-[140px] text-center">Created</div>
                                 <div className="w-[140px] text-center">Updated</div>
                                 <div className="w-[100px] text-center">Owner</div>
@@ -2474,137 +2439,39 @@ export default function Home() {
 
                                       {/* Action Button */}
                                       <div className="w-[120px] flex-shrink-0 flex justify-center">
-                                        {(() => {
-                                          const reviewStatus = pr.macroscopeReviewStatus;
-                                          const isReviewInProgress = reviewStatus === 'pending' || reviewStatus === 'in_progress';
-                                          const reviewCompleteNoBugs = reviewStatus === 'completed' && (pr.macroscopeBugsCount === 0 || pr.macroscopeBugsCount === null);
-
-                                          // If review is pending/in_progress, show disabled Wait state
-                                          if (isReviewInProgress) {
-                                            return (
-                                              <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium bg-gray-100 text-gray-400 cursor-not-allowed">
-                                                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                                </svg>
-                                                Wait
-                                              </span>
-                                            );
-                                          }
-
-                                          // If review completed with no bugs and no analysis, show Done
-                                          if (reviewCompleteNoBugs && !pr.hasAnalysis) {
-                                            return (
-                                              <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium bg-green-50 text-green-600">
-                                                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
-                                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                                </svg>
-                                                Done
-                                              </span>
-                                            );
-                                          }
-
-                                          // Normal Run/View button
-                                          return (
-                                            <button
-                                              onClick={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis, pr.prTitle)}
-                                              className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
-                                                pr.hasAnalysis
-                                                  ? "bg-green-50 text-green-700 hover:bg-green-100"
-                                                  : "bg-primary-light text-primary hover:bg-primary/10"
-                                              }`}
-                                            >
-                                              {pr.hasAnalysis ? (
-                                                <>
-                                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                  </svg>
-                                                  View
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                  </svg>
-                                                  Run
-                                                </>
-                                              )}
-                                            </button>
-                                          );
-                                        })()}
+                                        <button
+                                          onClick={() => startAnalysisFromForks(pr.prUrl, pr.hasAnalysis, pr.prTitle)}
+                                          className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
+                                            pr.hasAnalysis
+                                              ? "bg-green-50 text-green-700 hover:bg-green-100"
+                                              : "bg-primary-light text-primary hover:bg-primary/10"
+                                          }`}
+                                        >
+                                          {pr.hasAnalysis ? (
+                                            <>
+                                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                              </svg>
+                                              View
+                                            </>
+                                          ) : (
+                                            <>
+                                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                              </svg>
+                                              Run
+                                            </>
+                                          )}
+                                        </button>
                                       </div>
 
-                                      {/* Bug Count / Review Status Badge */}
+                                      {/* Bug Count Badge */}
                                       <div className="w-[100px] flex-shrink-0 flex justify-center">
-                                        {(() => {
-                                          const reviewStatus = pr.macroscopeReviewStatus;
-
-                                          // Show review status badges for pending/in_progress
-                                          if (reviewStatus === 'pending') {
-                                            return (
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">
-                                                <svg className="w-3 h-3 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-                                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                                                </svg>
-                                                Queued
-                                              </span>
-                                            );
-                                          }
-
-                                          if (reviewStatus === 'in_progress') {
-                                            return (
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-600">
-                                                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                                </svg>
-                                                Reviewing
-                                              </span>
-                                            );
-                                          }
-
-                                          if (reviewStatus === 'completed' && pr.macroscopeBugsCount !== null && pr.macroscopeBugsCount !== undefined) {
-                                            const bugs = pr.macroscopeBugsCount;
-                                            if (bugs === 0) {
-                                              return (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-600">
-                                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                                  </svg>
-                                                  No bugs
-                                                </span>
-                                              );
-                                            }
-                                            return (
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-600">
-                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                                </svg>
-                                                {bugs} bug{bugs > 1 ? 's' : ''}
-                                              </span>
-                                            );
-                                          }
-
-                                          if (reviewStatus === 'failed') {
-                                            return (
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-600">
-                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                                                </svg>
-                                                Failed
-                                              </span>
-                                            );
-                                          }
-
-                                          // Fallback to analysis-based bug count
-                                          return (
-                                            <span className={`inline-flex items-center justify-center min-w-[28px] px-2 py-0.5 text-xs font-semibold rounded-full ${getBugBadgeStyle()}`}>
-                                              {pr.hasAnalysis ? (pr.macroscopeBugs ?? 0) : "-"}
-                                            </span>
-                                          );
-                                        })()}
+                                        <span className={`inline-flex items-center justify-center min-w-[28px] px-2 py-0.5 text-xs font-semibold rounded-full ${getBugBadgeStyle()}`}>
+                                          {pr.hasAnalysis ? (pr.macroscopeBugs ?? 0) : "-"}
+                                        </span>
                                       </div>
 
                                       {/* Created Date */}
@@ -3782,13 +3649,9 @@ export default function Home() {
                     setPrUrl(prUrl);
                     handleCreateModeChange("pr");
                   }}
-                  onSimulationComplete={async () => {
+                  onSimulationComplete={() => {
                     closeCreatePRModal();
-                    // Small delay to ensure database writes complete before refreshing
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    // Invalidate and refetch to ensure fresh data
-                    await queryClient.invalidateQueries({ queryKey: ["forks"] });
-                    await refreshFromGitHub();
+                    refreshFromGitHub();
                   }}
                 />
               ) : (
