@@ -66,7 +66,7 @@ export function parseRepoUrl(input: string): { owner: string; repo: string } | n
   // - owner/repo
   // - https://github.com/owner/repo/pull/123 (extract repo)
 
-  const patterns = [/github\.com\/([^\/]+)\/([^\/]+)/, /^([^\/]+)\/([^\/]+)$/];
+  const patterns = [/github\.com\/([^\/]+)\/([^\/\?]+)/, /^([^\/]+)\/([^\/]+)$/];
 
   for (const pattern of patterns) {
     const match = input.match(pattern);
