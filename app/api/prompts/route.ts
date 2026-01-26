@@ -138,15 +138,12 @@ function syncPromptsFromFiles(): void {
 /**
  * GET /api/prompts
  * Returns all prompts from the database.
- * On first load, syncs prompts from files if database is empty.
+ * Always syncs any missing prompts from files to database.
  */
 export async function GET(): Promise<NextResponse> {
   try {
-    // Sync from files if database has no prompts
-    const existingPrompts = getAllPrompts();
-    if (existingPrompts.length === 0) {
-      syncPromptsFromFiles();
-    }
+    // Always sync from files to ensure new prompts are added
+    syncPromptsFromFiles();
 
     const prompts = getAllPrompts();
 

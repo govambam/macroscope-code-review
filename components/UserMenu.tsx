@@ -41,8 +41,8 @@ export function UserMenu() {
             className="rounded-full ring-2 ring-gray-100"
           />
         ) : (
-          <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center">
-            <span className="text-indigo-600 font-semibold text-sm">
+          <div className="w-9 h-9 rounded-full bg-primary-light flex items-center justify-center">
+            <span className="text-primary font-semibold text-sm">
               {displayName.charAt(0).toUpperCase()}
             </span>
           </div>
