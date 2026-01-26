@@ -26,11 +26,6 @@ interface PRRecord {
   originalPrUrl?: string | null;
   isInternal?: boolean;
   createdBy?: string | null;
-  // Macroscope review status tracking
-  macroscopeReviewStatus?: "pending" | "in_progress" | "completed" | "failed" | null;
-  macroscopeBugsCount?: number | null;
-  macroscopeCheckStartedAt?: string | null;
-  macroscopeCheckCompletedAt?: string | null;
 }
 
 interface ForkRecord {
@@ -124,11 +119,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           originalPrUrl: dbPR.original_pr_url ?? null,
           isInternal: Boolean(dbPR.is_internal),
           createdBy: dbPR.created_by ?? null,
-          // Macroscope review status
-          macroscopeReviewStatus: (dbPR as any).macroscope_review_status ?? null,
-          macroscopeBugsCount: (dbPR as any).macroscope_bugs_count ?? null,
-          macroscopeCheckStartedAt: (dbPR as any).macroscope_check_started_at ?? null,
-          macroscopeCheckCompletedAt: (dbPR as any).macroscope_check_completed_at ?? null,
         })),
       }));
 
@@ -298,12 +288,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
           originalPrUrl: dbPR.original_pr_url ?? null,
           isInternal: true,
-          createdBy: dbPR.created_by ?? null,
-          // Macroscope review status
-          macroscopeReviewStatus: (dbPR as any).macroscope_review_status ?? null,
-          macroscopeBugsCount: (dbPR as any).macroscope_bugs_count ?? null,
-          macroscopeCheckStartedAt: (dbPR as any).macroscope_check_started_at ?? null,
-          macroscopeCheckCompletedAt: (dbPR as any).macroscope_check_completed_at ?? null,
         })),
       }));
 
