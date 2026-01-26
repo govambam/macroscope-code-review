@@ -72,6 +72,14 @@ export async function checkMacroscopeReviewStatus(
     });
 
     // 3. Find the Macroscope check (could be named differently)
+    // Log all check names for debugging
+    const checkNames = checkRuns.check_runs.map((c) => ({
+      name: c.name,
+      status: c.status,
+      conclusion: c.conclusion,
+    }));
+    console.log(`[Macroscope Status] ${owner}/${repo}#${prNumber} - Found ${checkRuns.check_runs.length} check runs:`, JSON.stringify(checkNames));
+
     const macroscopeCheck = checkRuns.check_runs.find(
       (check) =>
         check.name.toLowerCase().includes("macroscope") ||
@@ -80,12 +88,15 @@ export async function checkMacroscopeReviewStatus(
 
     if (!macroscopeCheck) {
       // Check hasn't started yet
+      console.log(`[Macroscope Status] ${owner}/${repo}#${prNumber} - No Macroscope check found`);
       return {
         status: "pending",
         bugsFound: 0,
         comments: [],
       };
     }
+
+    console.log(`[Macroscope Status] ${owner}/${repo}#${prNumber} - Found check "${macroscopeCheck.name}" with status=${macroscopeCheck.status}, conclusion=${macroscopeCheck.conclusion}`);
 
     // 4. Determine status from check
     let status: "pending" | "in_progress" | "completed" | "failed";
