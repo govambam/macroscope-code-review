@@ -158,29 +158,24 @@ async function fetchMacroscopeBugCount(
   repo: string,
   prNumber: number
 ): Promise<number> {
-  try {
-    const { data: reviewComments } = await octokit.pulls.listReviewComments({
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: 100,
-    });
+  const { data: reviewComments } = await octokit.pulls.listReviewComments({
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
 
-    // Count comments from Macroscope bot that indicate bugs
-    const macroscopeComments = reviewComments.filter(
-      (comment) =>
-        (comment.user?.login?.toLowerCase() ?? "").includes("macroscope") &&
-        // Bug indicators - Macroscope uses specific patterns
-        (comment.body.includes("🎯") ||
-          comment.body.toLowerCase().includes("suggestion") ||
-          comment.body.toLowerCase().includes("want me to fix"))
-    );
+  // Count comments from Macroscope bot that indicate bugs
+  const macroscopeComments = reviewComments.filter(
+    (comment) =>
+      (comment.user?.login?.toLowerCase() ?? "").includes("macroscope") &&
+      // Bug indicators - Macroscope uses specific patterns
+      (comment.body.includes("🎯") ||
+        comment.body.toLowerCase().includes("suggestion") ||
+        comment.body.toLowerCase().includes("want me to fix"))
+  );
 
-    return macroscopeComments.length;
-  } catch (error) {
-    console.error(`[Webhook] Failed to fetch comments for ${owner}/${repo}#${prNumber}:`, error);
-    return 0;
-  }
+  return macroscopeComments.length;
 }
 
 // Type definitions for GitHub webhook events
