@@ -169,7 +169,7 @@ async function fetchMacroscopeBugCount(
     // Count comments from Macroscope bot that indicate bugs
     const macroscopeComments = reviewComments.filter(
       (comment) =>
-        comment.user?.login?.toLowerCase().includes("macroscope") &&
+        (comment.user?.login?.toLowerCase() ?? "").includes("macroscope") &&
         // Bug indicators - Macroscope uses specific patterns
         (comment.body.includes("🎯") ||
           comment.body.toLowerCase().includes("suggestion") ||
