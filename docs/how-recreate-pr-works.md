@@ -7,18 +7,101 @@ This document explains the internal workings of the Recreate PR feature, which t
 When you paste a PR URL like `https://github.com/owner/repo/pull/123`, the app performs these high-level steps:
 
 1. **Fetch PR metadata** from GitHub's API
-2. **Determine the correct base commit** (where to start the branch)
+2. **Determine the recreation strategy** (merge commit strategy vs cherry-pick)
 3. **Fork the repository** (if you don't already have one)
 4. **Clone your fork** to a temporary directory
-5. **Create a new branch** from the base commit
-6. **Cherry-pick each commit** from the original PR
-7. **Push the branch** and create a new PR in your fork
+5. **Create base and review branches** using the appropriate strategy
+6. **Push branches** and create a new PR in your fork
 
-Let's dive into each step.
+The key innovation is using **two different strategies** depending on whether the PR is merged or open.
 
 ---
 
-## Step 1: Parse and Fetch PR Details
+## Two Recreation Strategies
+
+### Strategy 1: Merge Commit Parents (for Merged PRs)
+
+For PRs that have been merged, we use the **merge commit parent strategy**. This is more reliable because it uses the exact commits that GitHub already knows work together.
+
+**How it works:**
+
+When GitHub merges a PR, it creates a merge commit with exactly two parents:
+- **Parent 0**: The state of the base branch (e.g., `main`) at the moment of merge
+- **Parent 1**: The final commit of the PR branch (the PR's head)
+
+We use these parents directly to create our branches:
+
+```typescript
+if (prMerged && mergeCommitSha) {
+  const { data: mergeCommitData } = await octokit.repos.getCommit({
+    owner: upstreamOwner,
+    repo: repoName,
+    ref: mergeCommitSha,
+  });
+
+  if (mergeCommitData.parents && mergeCommitData.parents.length >= 2) {
+    // Parent 0 = base branch state at merge time
+    // Parent 1 = PR's final commit (head of PR branch)
+    mergeBaseCommit = mergeCommitData.parents[0].sha;
+    mergeHeadCommit = mergeCommitData.parents[1].sha;
+    useMergeCommitStrategy = true;
+  }
+}
+```
+
+**Visual explanation:**
+
+```
+main:     A --- B --- C --- M (merge commit)
+                \         /
+PR branch:       X --- Y --- Z
+
+Merge commit M has two parents:
+  - Parent 0 = C (base branch state at merge time)
+  - Parent 1 = Z (PR's final state)
+
+We create:
+  - base-for-pr-123 branch at commit C
+  - review-pr-123 branch at commit Z
+```
+
+**Why this works better:**
+
+- **No cherry-picking** means no potential for conflicts
+- The diff between the two branches is **exactly** what was reviewed in the original PR
+- We're using commits that GitHub already validated work together
+
+### Strategy 2: Cherry-Pick (for Open PRs)
+
+For PRs that haven't been merged yet, we fall back to the **cherry-pick strategy** since there's no merge commit to reference.
+
+**How it works:**
+
+1. Find the base commit (parent of the first PR commit)
+2. Create a branch at that base commit
+3. Cherry-pick each commit from the PR onto that branch
+
+```typescript
+// Find the true base commit
+const firstPrCommitSha = prCommitsList[0].sha;
+const { data: firstCommitData } = await octokit.repos.getCommit({
+  owner: upstreamOwner,
+  repo: repoName,
+  ref: firstPrCommitSha,
+});
+baseCommit = firstCommitData.parents[0].sha;
+
+// Cherry-pick each commit
+for (const commit of commitsToApply) {
+  await repoGit.raw(["cherry-pick", commit.sha]);
+}
+```
+
+---
+
+## Step-by-Step Process
+
+### Step 1: Parse and Fetch PR Details
 
 The process starts by parsing the PR URL to extract the owner, repository name, and PR number:
 
@@ -48,59 +131,48 @@ const mergeCommitSha = prData.merge_commit_sha;  // SHA of the merge commit (if 
 
 ---
 
-## Step 2: Determine the Base Commit
+### Step 2: Determine the Strategy
 
-This is one of the trickiest parts. The "base commit" is the point in history where we'll create our new branch. We need to choose it carefully to ensure all cherry-picks apply cleanly.
-
-### For Merged PRs
-
-When a PR has been merged, using the original base commit can cause problems. Why? Because other commits may have been merged to `main` between when the PR was opened and when it was merged. Those commits could conflict with the PR's changes.
-
-**Solution:** Use the parent of the merge commit as the base. This represents the exact state of `main` right before the PR was merged.
+Based on whether the PR is merged and has a valid merge commit, we choose our strategy:
 
 ```typescript
-if (prMerged && mergeCommitSha) {
-  // Get the merge commit details
-  const { data: mergeCommit } = await octokit.repos.getCommit({
-    owner: upstreamOwner,
-    repo: repoName,
-    ref: mergeCommitSha,
-  });
+let useMergeCommitStrategy = false;
+let mergeBaseCommit: string | null = null;
+let mergeHeadCommit: string | null = null;
 
-  // The first parent of a merge commit is the branch that was merged INTO (main)
-  // The second parent is the branch that was merged FROM (the PR branch)
-  if (mergeCommit.parents && mergeCommit.parents.length > 0) {
-    baseCommit = mergeCommit.parents[0].sha;
+if (prMerged && mergeCommitSha) {
+  try {
+    const { data: mergeCommitData } = await octokit.repos.getCommit({
+      owner: upstreamOwner,
+      repo: repoName,
+      ref: mergeCommitSha,
+    });
+
+    if (mergeCommitData.parents && mergeCommitData.parents.length >= 2) {
+      mergeBaseCommit = mergeCommitData.parents[0].sha;
+      mergeHeadCommit = mergeCommitData.parents[1].sha;
+      useMergeCommitStrategy = true;
+    }
+  } catch {
+    // Fall back to cherry-pick strategy
   }
 }
 ```
 
-**Visual explanation:**
+**When each strategy is used:**
 
-```
-main:    A---B---C---D---M  (M is the merge commit)
-                    \   /
-PR branch:           E-F   (commits from the PR)
-
-If we use the original base (A), commits E and F might conflict with B, C, D.
-If we use M's first parent (D), we're starting from right before the merge.
-```
-
-### For Open PRs
-
-For PRs that haven't been merged yet, we use the original base commit since there's no merge commit to reference:
-
-```typescript
-} else {
-  baseCommit = prData.base.sha;
-}
-```
+| Condition | Strategy Used |
+|-----------|---------------|
+| Merged PR with 2-parent merge commit | Merge Commit Parents |
+| Merged PR (squash/rebase merge) | Cherry-Pick |
+| Open PR | Cherry-Pick |
+| Merge commit fetch fails | Cherry-Pick |
 
 ---
 
-## Step 3: Fetch PR Commits
+### Step 3: Fetch PR Commits
 
-Next, we get all commits from the PR:
+We get all commits from the PR (needed for cherry-pick strategy and for commit count info):
 
 ```typescript
 const { data: prCommitsList } = await octokit.pulls.listCommits({
@@ -117,36 +189,25 @@ const prCommits: PrCommitInfo[] = prCommitsList.map(c => ({
 }));
 ```
 
-### Handling Merge Commits
+#### Handling Merge Commits Within PRs
 
-Some PRs contain merge commits (e.g., when the author merged `main` into their branch to resolve conflicts). These are problematic for cherry-picking because:
-
-1. Cherry-pick doesn't know which parent to use
-2. They often contain changes that are already in the base
-
-**Solution:** Filter out merge commits:
+Some PRs contain merge commits (e.g., when the author merged `main` into their branch to resolve conflicts). These are filtered out for the cherry-pick strategy:
 
 ```typescript
 const commitsToApply = prCommits.filter(c => !c.isMergeCommit);
 ```
 
-We detect merge commits by checking if they have more than one parent:
-
-```typescript
-isMergeCommit: (c.parents?.length || 0) > 1
-```
-
 ---
 
-## Step 4: Fork the Repository
+### Step 4: Fork the Repository
 
-Before we can create a PR, we need a fork of the repository under your GitHub account:
+Before we can create a PR, we need a fork of the repository:
 
 ```typescript
 // Check if fork already exists
 try {
   await octokit.repos.get({
-    owner: forkOwner,  // Your GitHub username
+    owner: forkOwner,
     repo: repoName,
   });
   // Fork exists, we can reuse it
@@ -155,6 +216,7 @@ try {
   await octokit.repos.createFork({
     owner: upstreamOwner,
     repo: repoName,
+    organization: GITHUB_ORG,  // Fork to organization
   });
 
   // Wait for GitHub to finish creating the fork
@@ -174,7 +236,7 @@ await octokit.actions.setGithubActionsPermissionsRepository({
 
 ---
 
-## Step 5: Clone the Repository
+### Step 5: Clone the Repository
 
 We clone your fork to a temporary directory on the server:
 
@@ -189,16 +251,16 @@ await git.clone(cloneUrl, tmpDir, ["--no-single-branch"]);
 
 The `--no-single-branch` flag ensures we get all branches, not just the default one.
 
-### Setting Up Remotes
+#### Setting Up Remotes
 
-After cloning, we need to add the upstream (original) repository as a remote so we can fetch commits from it:
+After cloning, we add the upstream (original) repository as a remote:
 
 ```typescript
 const repoGit = simpleGit(tmpDir);
 
 // Configure git user for commits
-await repoGit.addConfig("user.email", "macroscope-pr-creator@example.com");
-await repoGit.addConfig("user.name", "Macroscope PR Creator");
+await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);
+await repoGit.addConfig("user.name", GITHUB_BOT_NAME);
 
 // Add upstream remote
 const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
@@ -210,39 +272,48 @@ await repoGit.fetch(["upstream", "--no-tags"]);
 
 ---
 
-## Step 6: Create the Review Branch
+### Step 6: Create Branches
 
-We create a new branch starting from the base commit:
+This step differs significantly based on the strategy.
+
+#### Merge Commit Strategy (Merged PRs)
+
+We create branches directly from the merge commit parents - no cherry-picking needed:
 
 ```typescript
+const baseBranchName = `base-for-pr-${prNumber}`;
 const branchName = `review-pr-${prNumber}`;
 
-await repoGit.checkout(["-b", branchName, baseCommit]);
+// Create base branch at merge base (parent 0 of merge commit)
+await repoGit.checkout(["-b", baseBranchName, mergeBaseCommit]);
+
+// Create review branch at merge head (parent 1 of merge commit = PR's final state)
+await repoGit.checkout(["-b", branchName, mergeHeadCommit]);
 ```
 
-This creates a new branch called `review-pr-123` (for PR #123) starting at the base commit we determined earlier.
+**Result:** Two branches that, when compared, show the exact diff of the original PR.
 
----
+#### Cherry-Pick Strategy (Open PRs)
 
-## Step 7: Cherry-Pick Commits
-
-This is the core of the recreation process. **Cherry-picking** takes a commit from one branch and applies its changes to another branch, creating a new commit with the same changes but a different parent.
+We create a base branch and a review branch, then cherry-pick commits onto the review branch:
 
 ```typescript
-for (let i = 0; i < commitsToApply.length; i++) {
-  const commit = commitsToApply[i];
+const baseBranchName = `base-for-pr-${prNumber}`;
+const branchName = `review-pr-${prNumber}`;
 
-  try {
-    await repoGit.raw(["cherry-pick", commit.sha]);
-  } catch {
-    // If cherry-pick fails, try fetching the commit first
-    await repoGit.raw(["fetch", "upstream", commit.sha]);
-    await repoGit.raw(["cherry-pick", commit.sha]);
-  }
+// Create base branch at the base commit
+await repoGit.checkout(["-b", baseBranchName, baseCommit]);
+
+// Create review branch from the same base
+await repoGit.checkout(["-b", branchName, baseCommit]);
+
+// Cherry-pick each commit
+for (const commit of commitsToApply) {
+  await repoGit.raw(["cherry-pick", commit.sha]);
 }
 ```
 
-### What Cherry-Pick Does
+##### What Cherry-Pick Does
 
 When you run `git cherry-pick abc1234`, Git:
 
@@ -255,33 +326,26 @@ When you run `git cherry-pick abc1234`, Git:
 
 ```
 Before cherry-pick:
-main:        A---B---C  (your branch is at C)
+base:        A---B---C  (your branch is at C)
 PR branch:   A---D---E  (you want to apply E)
 
 After cherry-picking E:
-main:        A---B---C---E'  (E' has same changes as E, different parent)
+base:        A---B---C---E'  (E' has same changes as E, different parent)
 ```
 
-### Handling Cherry-Pick Failures
+##### Handling Cherry-Pick Failures
 
-Cherry-picks can fail for several reasons:
-- **Merge conflicts**: The changes can't be applied cleanly
-- **Missing commits**: The commit isn't available locally
-
-If a cherry-pick fails, we abort it and report the error:
+Cherry-picks can fail due to merge conflicts. If this happens, we abort and report the error:
 
 ```typescript
 try {
   await repoGit.raw(["cherry-pick", commit.sha]);
 } catch {
-  // Try to abort the failed cherry-pick
   try {
     await repoGit.raw(["cherry-pick", "--abort"]);
   } catch {
     // Ignore abort errors
   }
-
-  // Clean up and report error
   await cleanup(tmpDir);
   sendError("Cherry-pick failed", `Failed to apply commit ${commit.sha}`);
   return;
@@ -290,34 +354,32 @@ try {
 
 ---
 
-## Step 8: Push and Create PR
+### Step 7: Push and Create PR
 
-After all commits are cherry-picked, we push the branch to your fork:
+After branches are created, we push them to your fork:
 
 ```typescript
+// Push both branches
+await repoGit.push(["origin", baseBranchName, "--force"]);
 await repoGit.push(["origin", branchName, "--force"]);
 ```
 
-We use `--force` because if you're re-running this for the same PR, the branch might already exist with different commits.
+We use `--force` because if you're re-running this for the same PR, the branches might already exist with different commits.
 
-Finally, we create the pull request using GitHub's API:
+Finally, we create the pull request from the review branch to the base branch:
 
 ```typescript
 const { data: pr } = await octokit.pulls.create({
   owner: forkOwner,
   repo: repoName,
   title: `[Review] ${prTitle}`,
-  body: `Recreated from ${inputPrUrl} for Macroscope review.
-
-**Original PR:** #${prNumber} by @${prAuthor}
-**Status:** ${prState}${prMerged ? " (merged)" : ""}
-
-**Includes ${commitsToApply.length} commit(s):**
-${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("\n")}`,
-  head: branchName,
-  base: "main",
+  body: newPrBody,
+  head: branchName,      // review-pr-123
+  base: baseBranchName,  // base-for-pr-123
 });
 ```
+
+**Important:** The PR is created from the review branch to our custom base branch (not `main`). This ensures the diff shows only the PR's changes, not conflicts with other merged content.
 
 ---
 
@@ -374,15 +436,46 @@ This allows the UI to show progress like "Step 7/10: Cherry-picking commit 3/5..
 
 ---
 
+## Strategy Comparison
+
+| Aspect | Merge Commit Strategy | Cherry-Pick Strategy |
+|--------|----------------------|---------------------|
+| **Used for** | Merged PRs | Open PRs |
+| **Reliability** | Always succeeds | Can fail with conflicts |
+| **How it works** | Uses merge commit parents directly | Reconstructs by applying commits |
+| **Commit history** | Single state snapshot | Recreates individual commits |
+| **Diff accuracy** | Exact match to original PR | Exact match (if successful) |
+
+---
+
+## Edge Cases
+
+### Squash and Rebase Merges
+
+When a PR is squash-merged or rebase-merged, the merge commit has only 1 parent (not 2). In this case, we fall back to the cherry-pick strategy because there's no second parent representing the PR head.
+
+### Force-Pushed Branches
+
+If the PR branch was force-pushed after merge, the merge commit's Parent 1 still points to the correct commit that was actually merged, not the current state of the (possibly deleted) branch.
+
+### PRs with Merge Commits
+
+If a PR contains merge commits (e.g., the author merged `main` into their branch), these commits are filtered out during cherry-picking because:
+1. Cherry-pick doesn't know which parent to use
+2. They often contain changes that are already in the base
+
+---
+
 ## Summary
 
 The Recreate PR feature works by:
 
-1. **Fetching PR metadata** to understand what commits to include
-2. **Smart base commit detection** using merge commit parents for merged PRs
-3. **Filtering out merge commits** that can't be cherry-picked
-4. **Creating/reusing a fork** in your GitHub account
-5. **Cherry-picking each commit** to recreate the PR's changes
-6. **Creating a new PR** in your fork for Macroscope to review
+1. **Fetching PR metadata** to understand the PR state and commits
+2. **Choosing the optimal strategy**:
+   - **Merged PRs**: Use merge commit parents directly (guaranteed success)
+   - **Open PRs**: Use cherry-pick to reconstruct the PR
+3. **Creating/reusing a fork** in your organization
+4. **Creating two branches**: a base branch and a review branch
+5. **Creating a PR** from review branch to base branch for clean diff
 
-The key insight is that we're not just copying the PR - we're reconstructing it by applying the same changes in a clean environment, which is why cherry-picking is essential.
+The key insight is that for merged PRs, we don't need to reconstruct the commits - we can simply reference the exact commits that GitHub already has. The merge commit serves as a permanent record of both the base state and the PR state at the moment of merge, making it a reliable source for our simulation.
