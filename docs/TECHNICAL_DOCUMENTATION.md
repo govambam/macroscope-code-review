@@ -1,12 +1,19 @@
-# Technical Documentation: PR Simulation, Repository Caching & AI Analysis
+# Technical Documentation: Discover Mode, PR Simulation, Repository Caching & AI Analysis
 
-This document provides in-depth technical documentation for three core features of the Macroscope Code Review tool: **PR Simulation**, **Repository Caching**, and **AI Analysis with Schema Validation**. It's intended for engineers who want to understand the architecture, implementation details, and design decisions.
+This document provides in-depth technical documentation for four core features of the Macroscope Code Review tool: **Discover Mode**, **PR Simulation**, **Repository Caching**, and **AI Analysis with Schema Validation**. It's intended for engineers who want to understand the architecture, implementation details, and design decisions.
 
 ---
 
 ## Table of Contents
 
-1. [PR Simulation](#pr-simulation)
+1. [Discover Mode](#discover-mode)
+   - [Overview](#discover-overview)
+   - [Why Discover Mode?](#why-discover-mode)
+   - [PR Scoring Algorithm](#pr-scoring-algorithm)
+   - [Bulk Simulation Flow](#bulk-simulation-flow)
+   - [Q&A: Discover Mode](#qa-discover-mode)
+
+2. [PR Simulation](#pr-simulation)
    - [Overview](#overview)
    - [Why Simulate PRs?](#why-simulate-prs)
    - [The Fork Strategy](#the-fork-strategy)
@@ -15,16 +22,17 @@ This document provides in-depth technical documentation for three core features 
    - [Cherry-Pick Strategy](#cherry-pick-strategy)
    - [Q&A: PR Simulation](#qa-pr-simulation)
 
-2. [Repository Caching](#repository-caching)
+3. [Repository Caching](#repository-caching)
    - [Overview](#caching-overview)
    - [Why Caching?](#why-caching)
    - [Git Reference Clones](#git-reference-clones)
    - [Selective Caching](#selective-caching)
+   - [Auto-Caching in Bulk Simulations](#auto-caching-in-bulk-simulations)
    - [Concurrency Control](#concurrency-control)
    - [Cache Architecture](#cache-architecture)
    - [Q&A: Caching](#qa-caching)
 
-3. [AI Analysis & Schema Validation](#ai-analysis--schema-validation)
+4. [AI Analysis & Schema Validation](#ai-analysis--schema-validation)
    - [Overview](#analysis-overview)
    - [Analysis Pipeline](#analysis-pipeline)
    - [Schema Versions (V1 vs V2)](#schema-versions-v1-vs-v2)
@@ -32,6 +40,231 @@ This document provides in-depth technical documentation for three core features 
    - [Schema Registry with Zod](#schema-registry-with-zod)
    - [Schema Validation Flow](#schema-validation-flow)
    - [Q&A: AI Analysis](#qa-ai-analysis)
+
+---
+
+## Discover Mode
+
+### Discover Overview
+
+Discover Mode enables users to find high-value pull requests from any GitHub repository without knowing specific PR URLs. It analyzes recent PRs, scores them based on complexity and recency, and allows batch simulation of multiple PRs at once.
+
+### Why Discover Mode?
+
+**The Problem:** Finding good PRs to demonstrate Macroscope's value is time-consuming:
+1. Manually browsing GitHub repositories for interesting PRs
+2. Evaluating each PR's complexity and relevance
+3. Simulating PRs one at a time
+
+**The Solution:** Automated PR discovery and batch processing:
+1. Enter any repository name
+2. Get a scored list of high-value PR candidates
+3. Select and simulate multiple PRs in one operation
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       DISCOVER MODE FLOW                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  INPUT                        ANALYSIS                    OUTPUT         │
+│  ─────                        ────────                    ──────         │
+│                                                                          │
+│  ┌─────────────┐              ┌─────────────┐            ┌────────────┐ │
+│  │ Repository  │              │ Fetch up to │            │ Scored     │ │
+│  │ URL/Name    │ ──────────►  │ 50 recent   │ ────────►  │ candidates │ │
+│  │             │              │ PRs         │            │ (top 10)   │ │
+│  └─────────────┘              └─────────────┘            └────────────┘ │
+│                                      │                          │        │
+│                                      ▼                          ▼        │
+│                               ┌─────────────┐            ┌────────────┐ │
+│                               │ Score each  │            │ User       │ │
+│                               │ PR by:      │            │ selects    │ │
+│                               │ • Complexity│            │ PRs to     │ │
+│                               │ • Recency   │            │ simulate   │ │
+│                               └─────────────┘            └────────────┘ │
+│                                                                 │        │
+│                                                                 ▼        │
+│                                                          ┌────────────┐ │
+│                                                          │ Batch      │ │
+│                                                          │ simulation │ │
+│                                                          │ with SSE   │ │
+│                                                          │ status     │ │
+│                                                          └────────────┘ │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### PR Scoring Algorithm
+
+Each PR is scored on two dimensions: **complexity** (50%) and **recency** (50%).
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       PR SCORING ALGORITHM                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  COMPLEXITY SCORE (0-100)                                               │
+│  ────────────────────────                                               │
+│                                                                          │
+│  Based on lines changed:                                                │
+│  • < 50 lines:     Very low (0-20)                                      │
+│  • 50-200 lines:   Low (20-40)                                          │
+│  • 200-500 lines:  Medium (40-60)                                       │
+│  • 500-1000 lines: High (60-80)                                         │
+│  • > 1000 lines:   Very high (80-100)                                   │
+│                                                                          │
+│  Formula: min(100, (total_lines_changed / 10))                          │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  RECENCY SCORE (0-100)                                                  │
+│  ─────────────────────                                                  │
+│                                                                          │
+│  Based on PR age (merged PRs use merge date, open PRs use created date):│
+│  • < 1 day old:    100                                                  │
+│  • 7 days old:     ~75                                                  │
+│  • 14 days old:    ~50                                                  │
+│  • 30 days old:    ~25                                                  │
+│  • > 60 days old:  0                                                    │
+│                                                                          │
+│  Formula: max(0, 100 - (days_old * 100 / 60))                           │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  OVERALL SCORE                                                          │
+│  ─────────────                                                          │
+│                                                                          │
+│  overall_score = (complexity_score + recency_score) / 2                 │
+│                                                                          │
+│  Why weight equally?                                                     │
+│  • Complexity matters: More code = more potential bugs                  │
+│  • Recency matters: Recent PRs = active development = better outreach   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Filtering options:**
+
+```typescript
+interface DiscoverFilters {
+  include_open?: boolean;      // Include open PRs (default: true)
+  include_merged?: boolean;    // Include merged PRs (default: true)
+  merged_within_days?: number; // Only merged PRs within N days (default: 30)
+  min_lines_changed?: number;  // Minimum lines changed (default: 50)
+  max_results?: number;        // Maximum candidates to return (default: 10)
+}
+```
+
+### Bulk Simulation Flow
+
+When users select multiple PRs for simulation, we process them sequentially with real-time status updates via Server-Sent Events (SSE):
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BULK SIMULATION ARCHITECTURE                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  CLIENT                              SERVER                              │
+│  ──────                              ──────                              │
+│                                                                          │
+│  ┌────────────┐                                                         │
+│  │ User       │                                                         │
+│  │ selects    │                                                         │
+│  │ 5 PRs      │                                                         │
+│  └─────┬──────┘                                                         │
+│        │                                                                 │
+│        ▼                                                                 │
+│  ┌────────────┐      POST /api/create-pr       ┌────────────┐          │
+│  │ For each   │─────────────────────────────► │ Simulate   │          │
+│  │ PR URL:    │      (with cacheRepo: true)    │ PR #1      │          │
+│  │            │ ◄───────────────────────────── │            │          │
+│  │ • Start    │      SSE: status updates       └────────────┘          │
+│  │ • Listen   │                                      │                  │
+│  │ • Display  │                                      ▼                  │
+│  │            │                                ┌────────────┐          │
+│  │            │ ◄───────────────────────────── │ Simulate   │          │
+│  │            │      SSE: status updates       │ PR #2      │          │
+│  │            │                                └────────────┘          │
+│  │            │                                      │                  │
+│  │   ...      │                                     ...                 │
+│  │            │                                      │                  │
+│  │            │                                      ▼                  │
+│  │            │                                ┌────────────┐          │
+│  │            │ ◄───────────────────────────── │ Simulate   │          │
+│  │            │      SSE: result event         │ PR #5      │          │
+│  └────────────┘                                └────────────┘          │
+│        │                                                                 │
+│        ▼                                                                 │
+│  ┌────────────┐                                                         │
+│  │ Show       │                                                         │
+│  │ completion │                                                         │
+│  │ summary    │                                                         │
+│  └────────────┘                                                         │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key implementation details:**
+
+1. **Sequential Processing**: PRs are simulated one at a time to avoid overwhelming the server and to provide clear status feedback.
+
+2. **Auto-Caching**: Each simulation request includes `cacheRepo: true`, ensuring the repository is cached after the first PR simulation.
+
+3. **SSE Event Parsing**: The client properly parses SSE events with `data:` prefix and double-newline separation:
+
+```typescript
+// Process complete SSE events
+const events = buffer.split("\n\n");
+buffer = events.pop() || "";
+
+for (const event of events) {
+  const dataMatch = event.match(/^data: (.+)$/m);
+  if (!dataMatch) continue;
+
+  const data = JSON.parse(dataMatch[1]);
+  if (data.eventType === "status") {
+    // Display status message
+  } else if (data.eventType === "result") {
+    // Handle completion
+  }
+}
+```
+
+4. **Error Handling**: Non-SSE responses (e.g., 500 errors) are detected and handled gracefully:
+
+```typescript
+if (!response.ok) {
+  const errorText = await response.text();
+  // Try to parse JSON error, fallback to status code
+}
+```
+
+5. **Selection Limits**: Maximum 10 PRs can be selected at once to prevent excessive load.
+
+### Q&A: Discover Mode
+
+**Q: Why limit to 50 PRs analyzed?**
+
+A: Fetching detailed PR information (additions, deletions, files) requires individual API calls. Analyzing 50 PRs strikes a balance between coverage and API rate limits. Most repositories have their best candidates in the most recent PRs anyway.
+
+**Q: Why score by complexity AND recency?**
+
+A:
+- **Complexity alone** would favor massive refactoring PRs that are often less interesting for bug discovery
+- **Recency alone** would include trivial one-line fixes
+- **Combined** gives us recent, substantial PRs that are most likely to have interesting bugs
+
+**Q: Why sequential simulation instead of parallel?**
+
+A: Several reasons:
+1. **Resource management**: Git clone operations are resource-intensive
+2. **Clear status feedback**: Users can see exactly which PR is being processed
+3. **Error isolation**: If one PR fails, others still succeed
+4. **Caching benefits**: First PR caches the repo, making subsequent PRs faster
+
+**Q: What happens if simulation fails for one PR?**
+
+A: The bulk simulation continues with remaining PRs. Failures are logged in the status display and summarized at completion. Users can retry failed PRs individually.
 
 ---
 
@@ -464,6 +697,56 @@ async function ensureReferenceRepo(owner, repo, githubToken) {
   return true;
 }
 ```
+
+### Auto-Caching in Bulk Simulations
+
+When using Discover Mode to simulate multiple PRs, caching happens automatically. This is a key optimization for the bulk simulation workflow:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    AUTO-CACHING IN BULK SIMULATIONS                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  User selects 5 PRs from supabase/supabase                              │
+│                                                                          │
+│  PR #1: First simulation                                                 │
+│  ───────────────────────                                                 │
+│  • cacheRepo: true sent with request                                    │
+│  • Repo not in cache → full clone (~3 min for large repos)              │
+│  • Repo added to cache list automatically                               │
+│  • Reference repo stored on disk                                        │
+│                                                                          │
+│  PR #2-5: Subsequent simulations                                        │
+│  ───────────────────────────────                                        │
+│  • cacheRepo: true sent with request                                    │
+│  • Repo found in cache → fast reference clone (~10 sec)                 │
+│  • Only new objects downloaded                                          │
+│                                                                          │
+│  RESULT: 5 PRs simulated much faster than 5 individual simulations      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation in bulk simulation:**
+
+```typescript
+// Each PR in the batch is simulated with cacheRepo: true
+const response = await fetch("/api/create-pr", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    prUrl,
+    cacheRepo: true,  // Always cache during bulk operations
+  }),
+});
+```
+
+**Benefits of auto-caching:**
+
+1. **Progressive speedup**: First PR is slow, subsequent PRs are fast
+2. **No manual setup**: Users don't need to pre-configure the cache list
+3. **Persistent benefit**: Cached repos remain for future sessions
+4. **Automatic for strategic accounts**: If you're bulk-simulating, the repo is probably important
 
 ### Concurrency Control
 
@@ -1079,12 +1362,13 @@ The frontend shows "Response was truncated" and suggests retrying with fewer com
 
 | Feature | Purpose | Key Technology |
 |---------|---------|----------------|
+| Discover Mode | Find and batch-simulate high-value PRs | PR scoring algorithm, SSE streaming |
 | PR Simulation | Recreate external PRs for analysis | Git cherry-pick, dual-branch architecture |
-| Repository Caching | Speed up cloning | Git `--reference` flag, selective caching |
+| Repository Caching | Speed up cloning | Git `--reference` flag, auto-caching |
 | AI Analysis | Categorize and filter bugs | Claude API, dynamic token limits |
 | Schema Validation | Prevent breaking prompt changes | Zod schemas, Claude schema extraction |
 
-All features work together: caching makes simulation fast, simulation creates the isolated environment for Macroscope review, and AI analysis extracts actionable bugs from the review comments with schema validation ensuring prompt changes don't break the pipeline.
+All features work together: Discover Mode helps find the best PRs to review, caching makes simulation fast (especially for bulk operations), simulation creates the isolated environment for Macroscope review, and AI analysis extracts actionable bugs from the review comments with schema validation ensuring prompt changes don't break the pipeline.
 
 ---
 
