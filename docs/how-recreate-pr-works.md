@@ -149,8 +149,14 @@ if (prMerged && mergeCommitSha) {
     });
 
     if (mergeCommitData.parents && mergeCommitData.parents.length >= 2) {
+      // Standard merge: Parent 0 = base branch, Parent 1 = PR head
       mergeBaseCommit = mergeCommitData.parents[0].sha;
       mergeHeadCommit = mergeCommitData.parents[1].sha;
+      useMergeCommitStrategy = true;
+    } else if (mergeCommitData.parents && mergeCommitData.parents.length === 1) {
+      // Squash/rebase merge: use parent as base, merge commit as head
+      mergeBaseCommit = mergeCommitData.parents[0].sha;
+      mergeHeadCommit = mergeCommitSha;
       useMergeCommitStrategy = true;
     }
   } catch {
@@ -163,8 +169,8 @@ if (prMerged && mergeCommitSha) {
 
 | Condition | Strategy Used |
 |-----------|---------------|
-| Merged PR with 2-parent merge commit | Merge Commit Parents |
-| Merged PR (squash/rebase merge) | Cherry-Pick |
+| Merged PR (standard merge - 2 parents) | Merge Commit Parents |
+| Merged PR (squash/rebase merge - 1 parent) | Merge Commit Parents |
 | Open PR | Cherry-Pick |
 | Merge commit fetch fails | Cherry-Pick |
 
@@ -452,7 +458,11 @@ This allows the UI to show progress like "Step 7/10: Cherry-picking commit 3/5..
 
 ### Squash and Rebase Merges
 
-When a PR is squash-merged or rebase-merged, the merge commit has only 1 parent (not 2). In this case, we fall back to the cherry-pick strategy because there's no second parent representing the PR head.
+When a PR is squash-merged or rebase-merged, the merge commit has only 1 parent (not 2). We handle this by using:
+- **Parent 0** as the base (the state of main before the merge)
+- **The merge commit itself** as the head (it contains all the PR changes)
+
+This works because squash commits contain the entire PR diff in a single commit.
 
 ### Force-Pushed Branches
 
