@@ -3553,6 +3553,7 @@ export default function Home() {
               >
                 Simulate PR
               </button>
+              {/* Latest Commit tab hidden - functionality preserved for future use
               <button
                 onClick={() => handleCreateModeChange("commit")}
                 disabled={loading}
@@ -3564,6 +3565,7 @@ export default function Home() {
               >
                 Latest Commit
               </button>
+              */}
             </div>
 
             {/* Modal Content */}

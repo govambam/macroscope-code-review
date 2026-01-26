@@ -9,21 +9,47 @@ A web application for reviewing code with [Macroscope](https://macroscope.dev). 
 ### Getting Started
 
 1. **Sign in** with your GitHub account (must be a member of the macroscope-gtm organization)
-2. Choose your workflow based on where the PR is:
-   - **External PR**: Use "Simulate PR" to simulate a PR from any public repository
-   - **Internal PR**: Use "Import PR" to analyze a PR where Macroscope is already installed
+2. Choose your workflow based on what you want to do:
+   - **Discover PRs**: Find and simulate multiple high-value PRs from any repository
+   - **Simulate PR**: Simulate a specific PR from any public repository
+   - **Import PR**: Analyze a PR where Macroscope is already installed
 
-### Importing a PR for Review
+### Importing PRs for Review
 
-#### External Repositories (PR Simulation)
+#### Discover PRs (Recommended for Prospecting)
 
-Use this when you want Macroscope to review a PR from a repository where Macroscope isn't installed.
+Use this when you want to find high-value PRs to review from any GitHub repository. This is the recommended workflow for prospecting new accounts.
 
-1. Click **Simulate PR** in the top-right corner
+1. Click **Simulate PR** in the top-right corner (opens with Discover tab by default)
+2. Enter a repository name (e.g., `supabase/supabase` or paste the full GitHub URL)
+3. Click **Search** to analyze recent PRs
+4. Review the scored candidates:
+   - **Score**: Overall priority score based on complexity and recency
+   - Hover over the score to see the breakdown (complexity + recency)
+5. Select PRs to simulate (up to 10 at a time):
+   - Click individual checkboxes, or
+   - Use **Select All** to select the top candidates
+6. Click **Simulate Selected** to begin bulk simulation
+7. Watch the verbose status log as each PR is processed
+8. Once complete, click **View PRs in Dashboard** to see your new reviews
+
+**Filters available:**
+- **Include Open PRs**: Include PRs that are still open
+- **Include Merged PRs**: Include PRs that have been merged
+- **Merged within days**: Only show PRs merged within the specified timeframe
+- **Min lines changed**: Filter out small PRs below this threshold
+
+**What happens behind the scenes:** The tool analyzes up to 50 recent PRs, scores them based on complexity (lines changed, files modified) and recency, then lets you batch-simulate the most promising candidates. Repositories are automatically cached during simulation for faster future operations.
+
+#### Simulate PR (Single PR)
+
+Use this when you have a specific PR URL you want to simulate.
+
+1. Click **Simulate PR** and select the **Simulate PR** tab
 2. Paste the GitHub PR URL (e.g., `https://github.com/owner/repo/pull/123`)
-4. Click **Create Pull Request**
-5. Wait for the simulation to complete (you'll see real-time progress)
-6. Once done, Macroscope will automatically review the PR in your fork
+3. Click **Create Pull Request**
+4. Wait for the simulation to complete (you'll see real-time progress)
+5. Once done, Macroscope will automatically review the PR in your fork
 
 **What happens behind the scenes:** The tool forks the repository to your GitHub account and recreates the PR commits, allowing Macroscope to review it.
 
@@ -106,7 +132,16 @@ For faster PR simulations, you can cache repositories on the server. This is use
 - **Large repositories** that take a long time to clone (e.g., supabase, kubernetes)
 - **Strategic accounts** where you expect to simulate multiple PRs over time
 
-**How to cache a repository:**
+**Automatic Caching with Discover PRs:**
+
+When you use the **Discover PRs** feature to simulate multiple PRs, repositories are automatically cached during the simulation process. This means:
+- The first PR takes longer (full clone)
+- Subsequent PRs from the same repo are much faster
+- No manual cache setup needed for bulk simulations
+
+**Manual Caching:**
+
+You can also manually add repositories to the cache list:
 
 1. Go to **Settings** (click your avatar > Settings, or use the sidebar)
 2. Scroll to the **Repository Cache** section
@@ -218,6 +253,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 | Route | Method | Description |
 |-------|--------|-------------|
+| `/api/discover-prs` | POST | Discover and score PRs from a repository |
 | `/api/create-pr` | POST | PR simulation with SSE streaming |
 | `/api/analyze-pr` | POST | Analyze simulated PR findings |
 | `/api/analyze-internal-pr` | POST | Analyze internal PR findings |
