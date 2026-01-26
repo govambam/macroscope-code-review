@@ -9,9 +9,11 @@ interface PRScoreDisplayProps {
   overall: number;
   complexity: number;
   recency: number;
+  bugLikelihood?: number;  // 1-10 scale from LLM (advanced mode only)
+  fastScore?: number;      // Original fast score before reranking
 }
 
-function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
+function PRScoreDisplay({ overall, complexity, recency, bugLikelihood, fastScore }: PRScoreDisplayProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -37,22 +39,52 @@ function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
     setShowTooltip(false);
   };
 
+  const isReranked = bugLikelihood !== undefined && fastScore !== undefined;
+
   return (
     <div
       className="relative inline-block"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <span className="text-sm font-semibold text-gray-900">
-        Score: {overall}
-      </span>
+      <div className="flex flex-col items-end gap-1">
+        <span className="text-sm font-semibold text-gray-900">
+          Score: {overall}
+        </span>
+        {bugLikelihood !== undefined && (
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+            bugLikelihood >= 7
+              ? 'bg-red-100 text-red-700'
+              : bugLikelihood >= 4
+                ? 'bg-yellow-100 text-yellow-700'
+                : 'bg-gray-100 text-gray-600'
+          }`}>
+            Bug Risk: {bugLikelihood}/10
+          </span>
+        )}
+      </div>
 
       {showTooltip && (
-        <div className="absolute z-50 right-0 top-full mt-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3 min-w-[180px]">
+        <div className="absolute z-50 right-0 top-full mt-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3 min-w-[200px]">
           <div className="font-semibold mb-2 border-b border-gray-700 pb-2">
-            Overall Score: {overall}
+            {isReranked ? 'Combined Score' : 'Overall Score'}: {overall}
           </div>
           <div className="space-y-1.5">
+            {isReranked && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-gray-300">Bug Likelihood:</span>
+                  <span className="font-medium text-red-400">{bugLikelihood}/10</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-300">Fast Score:</span>
+                  <span className="font-medium">{fastScore}/100</span>
+                </div>
+                <div className="border-t border-gray-700 my-2 pt-2 text-gray-400 text-[10px]">
+                  Combined: 40% fast + 60% bug risk
+                </div>
+              </>
+            )}
             <div className="flex justify-between">
               <span className="text-gray-300">Complexity:</span>
               <span className="font-medium">{complexity}/100</span>
@@ -542,7 +574,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                 </button>
               </div>
               <span className="text-xs text-gray-500">
-                {mode === "fast" ? "~5 seconds" : "~15 seconds, uses AI analysis"}
+                {mode === "fast" ? "~5 seconds" : "~30-45 seconds, uses AI to rerank by bug likelihood"}
               </span>
             </div>
 
@@ -821,6 +853,8 @@ function PRCandidateCard({
                   overall={pr.overall_score}
                   complexity={pr.complexity_score}
                   recency={pr.recency_score}
+                  bugLikelihood={pr.bug_likelihood_score}
+                  fastScore={pr.fast_score}
                 />
 
                 {/* Individual simulate button (when not selected) */}
