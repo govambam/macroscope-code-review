@@ -353,13 +353,24 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "success", message: `Found PR: "${prTitle}" by @${prAuthor}` });
           sendStatus({ type: "info", message: `Status: ${prState}${prMerged ? " (merged)" : " (open)"}` });
 
-          // For merged PRs, we use a different strategy that's more reliable
-          // Instead of cherry-picking, we use the merge commit's parents directly
-          let useMergeCommitStrategy = false;
-          let mergeBaseCommit: string | null = null;
-          let mergeHeadCommit: string | null = null;
+          // STRATEGY SELECTION:
+          // We prefer "direct head" strategies over cherry-picking because they:
+          // 1. Preserve the exact state of the PR (including any rebases/fixups)
+          // 2. Don't fail due to merge conflicts
+          // 3. Work regardless of the PR's commit history complexity
+          //
+          // Strategy priority:
+          // 1. MERGED PRs: Use merge commit parents (exact state at merge time)
+          // 2. OPEN PRs: Fetch PR head ref directly (exact current state)
+          // 3. FALLBACK: Cherry-pick commits (only if direct fetch fails)
+
+          let useDirectStrategy = false;
+          let directBaseCommit: string | null = null;
+          let directHeadCommit: string | null = null;
+          let strategyName: string = "cherry-pick";
 
           if (prMerged && mergeCommitSha) {
+            // MERGED PR: Use merge commit parent strategy
             sendStatus({ type: "info", step: 3, totalSteps: 10, message: "PR is merged, checking merge type..." });
 
             try {
@@ -371,22 +382,44 @@ export async function POST(request: NextRequest): Promise<Response> {
 
               if (mergeCommitData.parents && mergeCommitData.parents.length >= 2) {
                 // Standard merge commit - Parent 0 = base branch, Parent 1 = PR head
-                mergeBaseCommit = mergeCommitData.parents[0].sha;
-                mergeHeadCommit = mergeCommitData.parents[1].sha;
-                useMergeCommitStrategy = true;
-                sendStatus({ type: "success", message: `Standard merge: base=${getShortHash(mergeBaseCommit)}, head=${getShortHash(mergeHeadCommit)}` });
+                directBaseCommit = mergeCommitData.parents[0].sha;
+                directHeadCommit = mergeCommitData.parents[1].sha;
+                useDirectStrategy = true;
+                strategyName = "merge-commit";
+                sendStatus({ type: "success", message: `Standard merge: base=${getShortHash(directBaseCommit)}, head=${getShortHash(directHeadCommit)}` });
               } else if (mergeCommitData.parents && mergeCommitData.parents.length === 1) {
                 // Squash or rebase merge - single parent, the commit itself contains all changes
-                // Use parent as base, and the merge commit SHA as head
-                mergeBaseCommit = mergeCommitData.parents[0].sha;
-                mergeHeadCommit = mergeCommitSha;
-                useMergeCommitStrategy = true;
-                sendStatus({ type: "success", message: `Squash/rebase merge: base=${getShortHash(mergeBaseCommit)}, head=${getShortHash(mergeHeadCommit)}` });
+                directBaseCommit = mergeCommitData.parents[0].sha;
+                directHeadCommit = mergeCommitSha;
+                useDirectStrategy = true;
+                strategyName = "squash-merge";
+                sendStatus({ type: "success", message: `Squash/rebase merge: base=${getShortHash(directBaseCommit)}, head=${getShortHash(directHeadCommit)}` });
               } else {
-                sendStatus({ type: "info", message: "Merge commit has no parents, falling back to cherry-pick strategy" });
+                sendStatus({ type: "info", message: "Merge commit has no parents, will try PR head fetch" });
               }
             } catch (mergeErr) {
-              sendStatus({ type: "info", message: "Could not fetch merge commit, falling back to cherry-pick strategy" });
+              sendStatus({ type: "info", message: "Could not fetch merge commit, will try PR head fetch" });
+            }
+          }
+
+          // For OPEN PRs (or if merged strategy failed), try fetching PR head directly
+          // This uses GitHub's special refs: pull/{number}/head
+          if (!useDirectStrategy) {
+            sendStatus({ type: "info", step: 3, totalSteps: 10, message: "Preparing to fetch PR head directly..." });
+
+            // We'll use the PR's head SHA and base SHA from the API
+            // The head SHA is the current tip of the PR branch
+            const prHeadSha = prData.head.sha;
+            const prBaseSha = prData.base.sha;
+
+            if (prHeadSha && prBaseSha) {
+              directBaseCommit = prBaseSha;
+              directHeadCommit = prHeadSha;
+              useDirectStrategy = true;
+              strategyName = "pr-head-fetch";
+              sendStatus({ type: "success", message: `Will fetch PR head directly: base=${getShortHash(directBaseCommit)}, head=${getShortHash(directHeadCommit)}` });
+            } else {
+              sendStatus({ type: "info", message: "Could not determine PR head/base, falling back to cherry-pick" });
             }
           }
 
@@ -413,12 +446,12 @@ export async function POST(request: NextRequest): Promise<Response> {
           const commitsToApply = prCommits.filter(c => !c.isMergeCommit);
           const regularCommitCount = commitsToApply.length;
 
-          // Variables for cherry-pick strategy (only used if not using merge commit strategy)
-          let baseCommit: string = "";
+          // Variables for cherry-pick fallback (only used if direct strategies fail)
+          let cherryPickBaseCommit: string = "";
 
-          if (!useMergeCommitStrategy) {
-            // Step 4: Determine the true base commit for cherry-pick strategy
-            sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Finding original base commit..." });
+          if (!useDirectStrategy) {
+            // FALLBACK: Determine the true base commit for cherry-pick strategy
+            sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Finding original base commit for cherry-pick fallback..." });
 
             if (prCommitsList.length > 0) {
               const firstPrCommitSha = prCommitsList[0].sha;
@@ -430,19 +463,19 @@ export async function POST(request: NextRequest): Promise<Response> {
                 });
 
                 if (firstCommitData.parents && firstCommitData.parents.length > 0) {
-                  baseCommit = firstCommitData.parents[0].sha;
-                  sendStatus({ type: "success", message: `Using true PR base commit (${getShortHash(baseCommit)})` });
+                  cherryPickBaseCommit = firstCommitData.parents[0].sha;
+                  sendStatus({ type: "success", message: `Using true PR base commit (${getShortHash(cherryPickBaseCommit)})` });
                 } else {
-                  baseCommit = prData.base.sha;
-                  sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+                  cherryPickBaseCommit = prData.base.sha;
+                  sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(cherryPickBaseCommit)})` });
                 }
               } catch {
-                baseCommit = prData.base.sha;
-                sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+                cherryPickBaseCommit = prData.base.sha;
+                sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(cherryPickBaseCommit)})` });
               }
             } else {
-              baseCommit = prData.base.sha;
-              sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(baseCommit)})` });
+              cherryPickBaseCommit = prData.base.sha;
+              sendStatus({ type: "info", message: `Using PR base ref (${getShortHash(cherryPickBaseCommit)})` });
             }
 
             if (mergeCommitCount > 0) {
@@ -454,7 +487,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               return;
             }
           } else {
-            sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Using merge commit strategy (no cherry-pick needed)" });
+            sendStatus({ type: "info", step: 4, totalSteps: 10, message: `Using ${strategyName} strategy (no cherry-pick needed)` });
           }
 
           // Step 5: Check/create fork
@@ -592,94 +625,120 @@ export async function POST(request: NextRequest): Promise<Response> {
           await repoGit.addRemote("upstream", upstreamCloneUrl);
           await repoGit.fetch(["upstream", "--no-tags"]);
 
-          // Fetch specific commits
-          sendStatus({ type: "info", message: "Fetching specific commits needed for cherry-pick..." });
-          const commitsToFetch = [baseCommit, ...commitsToApply.map(c => c.sha)];
-          for (const sha of commitsToFetch) {
-            try {
-              await repoGit.fetch(["upstream", sha]);
-            } catch {
-              // Ignore
-            }
-          }
+          // Fetch commits needed for the selected strategy
+          if (useDirectStrategy && directBaseCommit && directHeadCommit) {
+            // For direct strategy, fetch the base and head commits
+            sendStatus({ type: "info", message: `Fetching commits for ${strategyName} strategy...` });
 
-          sendStatus({ type: "success", message: "All commits fetched" });
+            // For PR head fetch strategy, also fetch the PR ref
+            if (strategyName === "pr-head-fetch") {
+              try {
+                // Fetch the PR's head ref directly from upstream
+                await repoGit.fetch(["upstream", `pull/${prNumber}/head:temp-pr-head`]);
+                sendStatus({ type: "success", message: `Fetched PR #${prNumber} head ref` });
+              } catch (prFetchErr) {
+                sendStatus({ type: "info", message: `Could not fetch PR ref, trying commit SHA directly...` });
+              }
+            }
+
+            // Fetch the specific commits
+            for (const sha of [directBaseCommit, directHeadCommit]) {
+              try {
+                await repoGit.fetch(["upstream", sha]);
+              } catch {
+                // Ignore - commit might already be available
+              }
+            }
+            sendStatus({ type: "success", message: "Commits fetched" });
+          } else {
+            // For cherry-pick fallback, fetch all needed commits
+            sendStatus({ type: "info", message: "Fetching specific commits needed for cherry-pick..." });
+            const commitsToFetch = [cherryPickBaseCommit, ...commitsToApply.map(c => c.sha)];
+            for (const sha of commitsToFetch) {
+              try {
+                await repoGit.fetch(["upstream", sha]);
+              } catch {
+                // Ignore
+              }
+            }
+            sendStatus({ type: "success", message: "All commits fetched" });
+          }
 
           // Step 8: Create base branch and review branch
           const baseBranchName = `base-for-pr-${prNumber}`;
 
-          if (useMergeCommitStrategy && mergeBaseCommit && mergeHeadCommit) {
-            // MERGED PR STRATEGY: Use merge commit parents directly (no cherry-pick needed)
-            sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from merge commit parents...` });
+          if (useDirectStrategy && directBaseCommit && directHeadCommit) {
+            // DIRECT STRATEGY: Use base and head commits directly (no cherry-pick needed)
+            sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches using ${strategyName} strategy...` });
 
-            // Create base branch at merge base (parent 0 of merge commit)
+            // Create base branch at the base commit
             try {
-              await repoGit.checkout(["-b", baseBranchName, mergeBaseCommit]);
-              sendStatus({ type: "success", message: `Base branch created at ${getShortHash(mergeBaseCommit)}` });
+              await repoGit.checkout(["-b", baseBranchName, directBaseCommit]);
+              sendStatus({ type: "success", message: `Base branch created at ${getShortHash(directBaseCommit)}` });
             } catch {
               try {
                 await repoGit.checkout([baseBranchName]);
-                await repoGit.reset(["--hard", mergeBaseCommit]);
-                sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(mergeBaseCommit)}` });
+                await repoGit.reset(["--hard", directBaseCommit]);
+                sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(directBaseCommit)}` });
               } catch {
                 await cleanup(tmpDir);
-                sendError("Failed to create base branch", `Could not create branch at merge base ${getShortHash(mergeBaseCommit)}`);
+                sendError("Failed to create base branch", `Could not create branch at base ${getShortHash(directBaseCommit)}`);
                 return;
               }
             }
 
-            // Create review branch at merge head (parent 1 of merge commit = PR's final state)
+            // Create review branch at the head commit (PR's final state)
             try {
-              await repoGit.checkout(["-b", branchName, mergeHeadCommit]);
-              sendStatus({ type: "success", message: `Review branch created at ${getShortHash(mergeHeadCommit)} (PR's final state)` });
+              await repoGit.checkout(["-b", branchName, directHeadCommit]);
+              sendStatus({ type: "success", message: `Review branch created at ${getShortHash(directHeadCommit)} (PR's current state)` });
             } catch {
               try {
                 await repoGit.checkout([branchName]);
-                await repoGit.reset(["--hard", mergeHeadCommit]);
-                sendStatus({ type: "success", message: `Review branch reset to ${getShortHash(mergeHeadCommit)}` });
+                await repoGit.reset(["--hard", directHeadCommit]);
+                sendStatus({ type: "success", message: `Review branch reset to ${getShortHash(directHeadCommit)}` });
               } catch {
                 await cleanup(tmpDir);
-                sendError("Failed to create review branch", `Could not create branch at PR head ${getShortHash(mergeHeadCommit)}`);
+                sendError("Failed to create review branch", `Could not create branch at PR head ${getShortHash(directHeadCommit)}`);
                 return;
               }
             }
 
-            // Step 9: No cherry-pick needed for merged PRs using this strategy
-            sendStatus({ type: "info", step: 9, totalSteps: 10, message: "Branches created from merge commit (no cherry-pick needed)" });
-            sendStatus({ type: "success", message: `PR state preserved exactly as merged` });
+            // Step 9: No cherry-pick needed for direct strategies
+            sendStatus({ type: "info", step: 9, totalSteps: 10, message: `Branches created from ${strategyName} (no cherry-pick needed)` });
+            sendStatus({ type: "success", message: `PR state preserved exactly` });
 
           } else {
-            // CHERRY-PICK STRATEGY: For open PRs or when merge commit strategy fails
-            sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from base commit ${getShortHash(baseCommit)}...` });
+            // CHERRY-PICK FALLBACK: For when direct strategies fail
+            sendStatus({ type: "info", step: 8, totalSteps: 10, message: `Creating branches from base commit ${getShortHash(cherryPickBaseCommit)}...` });
 
             // First create the base branch at the base commit
             try {
-              await repoGit.checkout(["-b", baseBranchName, baseCommit]);
-              sendStatus({ type: "success", message: `Base branch created at ${getShortHash(baseCommit)}` });
+              await repoGit.checkout(["-b", baseBranchName, cherryPickBaseCommit]);
+              sendStatus({ type: "success", message: `Base branch created at ${getShortHash(cherryPickBaseCommit)}` });
             } catch {
               try {
                 await repoGit.checkout([baseBranchName]);
-                await repoGit.reset(["--hard", baseCommit]);
-                sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(baseCommit)}` });
+                await repoGit.reset(["--hard", cherryPickBaseCommit]);
+                sendStatus({ type: "success", message: `Base branch reset to ${getShortHash(cherryPickBaseCommit)}` });
               } catch {
                 await cleanup(tmpDir);
-                sendError("Failed to create base branch", `Could not create branch at base commit ${getShortHash(baseCommit)}`);
+                sendError("Failed to create base branch", `Could not create branch at base commit ${getShortHash(cherryPickBaseCommit)}`);
                 return;
               }
             }
 
             // Now create the review branch from the same base
             try {
-              await repoGit.checkout(["-b", branchName, baseCommit]);
-              sendStatus({ type: "success", message: `Review branch created from commit ${getShortHash(baseCommit)}` });
+              await repoGit.checkout(["-b", branchName, cherryPickBaseCommit]);
+              sendStatus({ type: "success", message: `Review branch created from commit ${getShortHash(cherryPickBaseCommit)}` });
             } catch {
               try {
                 await repoGit.checkout([branchName]);
-                await repoGit.reset(["--hard", baseCommit]);
-                sendStatus({ type: "success", message: `Review branch reset to commit ${getShortHash(baseCommit)}` });
+                await repoGit.reset(["--hard", cherryPickBaseCommit]);
+                sendStatus({ type: "success", message: `Review branch reset to commit ${getShortHash(cherryPickBaseCommit)}` });
               } catch {
                 await cleanup(tmpDir);
-                sendError("Failed to create review branch", `Could not create branch from base commit ${getShortHash(baseCommit)}`);
+                sendError("Failed to create review branch", `Could not create branch from base commit ${getShortHash(cherryPickBaseCommit)}`);
                 return;
               }
             }
@@ -739,18 +798,24 @@ export async function POST(request: NextRequest): Promise<Response> {
           const newPrTitle = `[Review] ${prTitle}`;
           let newPrBody: string;
 
-          if (useMergeCommitStrategy && mergeBaseCommit && mergeHeadCommit) {
-            // PR body for merge commit strategy
+          if (useDirectStrategy && directBaseCommit && directHeadCommit) {
+            // PR body for direct strategy (merge-commit, squash-merge, or pr-head-fetch)
+            const strategyDescription = strategyName === "pr-head-fetch"
+              ? "direct PR head fetch - exact current state preserved"
+              : strategyName === "squash-merge"
+              ? "squash merge commit - exact merged state preserved"
+              : "merge commit parents - exact merged state preserved";
+
             newPrBody = `Recreated from ${inputPrUrl} for Macroscope review.
 
 **Original PR:** #${prNumber} by @${prAuthor}
-**Status:** ${prState} (merged)
+**Status:** ${prState}${prMerged ? " (merged)" : " (open)"}
 
-*Recreated using merge commit strategy - exact PR state preserved.*
+*Recreated using ${strategyDescription}.*
 
 **Original PR:** ${inputPrUrl}`;
           } else {
-            // PR body for cherry-pick strategy
+            // PR body for cherry-pick fallback
             const skippedNote = mergeCommitCount > 0 ? `\n\n*Note: ${mergeCommitCount} merge commit(s) were skipped during recreation.*` : "";
             newPrBody = `Recreated from ${inputPrUrl} for Macroscope review.
 
@@ -834,9 +899,9 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           await cleanup(tmpDir);
 
           // Save to database so it's immediately available
-          // For merge commit strategy, use prCommits.length (all PR commits) since they're all included
-          // For cherry-pick strategy, use commitsToApply.length (non-merge commits)
-          const effectiveCommitCount = useMergeCommitStrategy ? prCommits.length : commitsToApply.length;
+          // For direct strategy, use prCommits.length (all PR commits) since they're all included
+          // For cherry-pick fallback, use commitsToApply.length (non-merge commits)
+          const effectiveCommitCount = useDirectStrategy ? prCommits.length : commitsToApply.length;
           try {
             const newPrNumber = parseInt(newPrUrl.split("/").pop() || "0", 10);
             const forkId = saveFork(forkOwner, repoName, forkUrl);
@@ -864,8 +929,10 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
 
           // Build appropriate success message based on strategy used
           let successMessage: string;
-          if (useMergeCommitStrategy) {
-            successMessage = `PR recreated using merge commit strategy - exact state from original PR #${prNumber} preserved`;
+          if (useDirectStrategy) {
+            const strategyLabel = strategyName === "pr-head-fetch" ? "direct head fetch" :
+                                  strategyName === "squash-merge" ? "squash merge" : "merge commit";
+            successMessage = `PR recreated using ${strategyLabel} strategy - exact state from original PR #${prNumber} preserved`;
           } else {
             successMessage = `PR recreated with ${commitsToApply.length} commits from original PR #${prNumber}${mergeCommitCount > 0 ? ` (${mergeCommitCount} merge commits skipped)` : ""}`;
           }
