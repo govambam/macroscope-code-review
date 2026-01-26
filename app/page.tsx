@@ -3572,7 +3572,7 @@ export default function Home() {
                 <DiscoverPRs
                   onSelectPR={(prUrl) => {
                     setPrUrl(prUrl);
-                    setCreateMode("pr");
+                    handleCreateModeChange("pr");
                   }}
                 />
               ) : (

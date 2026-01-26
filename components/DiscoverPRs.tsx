@@ -161,7 +161,10 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
                 <input
                   type="number"
                   value={minLinesChanged}
-                  onChange={(e) => setMinLinesChanged(parseInt(e.target.value) || 50)}
+                  onChange={(e) => {
+                    const parsed = parseInt(e.target.value);
+                    setMinLinesChanged(Number.isNaN(parsed) ? 50 : parsed);
+                  }}
                   min={0}
                   className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500"
                 />

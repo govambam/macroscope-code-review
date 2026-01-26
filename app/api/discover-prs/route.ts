@@ -14,7 +14,23 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: DiscoverRequest = await request.json();
-    const { repo_url, mode, filters = {} } = body;
+    const { repo_url, mode = "fast", filters = {} } = body;
+
+    // Validate required fields
+    if (!repo_url || typeof repo_url !== "string") {
+      return NextResponse.json(
+        { error: "repo_url is required and must be a string" },
+        { status: 400 }
+      );
+    }
+
+    // Validate mode if provided
+    if (mode !== "fast" && mode !== "advanced") {
+      return NextResponse.json(
+        { error: "mode must be 'fast' or 'advanced'" },
+        { status: 400 }
+      );
+    }
 
     // Parse repo URL
     const parsed = parseRepoUrl(repo_url);

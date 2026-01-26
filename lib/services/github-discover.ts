@@ -42,7 +42,8 @@ export async function fetchPRFiles(owner: string, repo: string, pullNumber: numb
   const octokit = getOctokit();
 
   // Get list of files changed (for LLM analysis)
-  const { data: files } = await octokit.pulls.listFiles({
+  // Use paginate to handle PRs with more than 100 files
+  const files = await octokit.paginate(octokit.pulls.listFiles, {
     owner,
     repo,
     pull_number: pullNumber,
