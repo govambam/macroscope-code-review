@@ -55,7 +55,7 @@ export async function batchScorePRsForBugLikelihood(
   }).join('\n\n');
 
   // Interpolate the prompt template
-  const prompt = promptTemplate.replace('{PR_DESCRIPTIONS}', prDescriptions);
+  const prompt = promptTemplate.replace('{PR_DESCRIPTIONS}', () => prDescriptions);
 
   try {
     const result = await sendMessageAndParseJSON<BatchScoreResponse>(prompt, {
