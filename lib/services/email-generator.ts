@@ -13,6 +13,8 @@ export interface EmailBugInput {
   file_path: string;
   severity: "critical" | "high" | "medium";
   code_suggestion?: string; // V2: Suggested fix
+  impact_scenario?: string; // V2: Real-world impact scenario
+  macroscope_comment_text?: string; // Original Macroscope comment (may contain code snippet)
 }
 
 /**
@@ -126,8 +128,11 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
     BUG_EXPLANATION: bugExplanation,
     BUG_SEVERITY: bug.severity,
     TOTAL_BUGS: totalBugs.toString(),
-    // Optional: code suggestion for V2 format
+    // Optional V2 fields
     ...(bugInput.code_suggestion && { BUG_FIX_SUGGESTION: bugInput.code_suggestion }),
+    ...(bugInput.code_suggestion && { CODE_SNIPPET: bugInput.code_suggestion }),
+    ...(bugInput.impact_scenario && { IMPACT_SCENARIO: bugInput.impact_scenario }),
+    ...(bugInput.macroscope_comment_text && { MACROSCOPE_COMMENT: bugInput.macroscope_comment_text }),
   });
 
   // Get model from prompt metadata, fallback to Sonnet

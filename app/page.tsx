@@ -1554,21 +1554,46 @@ export default function Home() {
   };
 
   // Helper to get the most impactful/best bug for outreach from either format
-  const getBestBugForEmail = (result: PRAnalysisResult): BugSnippet | null => {
+  // Returns an extended bug object that includes V2 fields like impact_scenario and code_suggestion
+  const getBestBugForEmail = (result: PRAnalysisResult): (BugSnippet & {
+    impact_scenario?: string;
+    code_suggestion?: string;
+    explanation_short?: string;
+  }) | null => {
     if (isV2Result(result)) {
-      // V2 format - get the best bug for outreach
+      // V2 format - get the best bug for outreach with all V2 fields preserved
+      let bestComment = null;
       if (result.best_bug_for_outreach_index !== null) {
-        const bestComment = result.all_comments.find(
+        bestComment = result.all_comments.find(
           c => c.index === result.best_bug_for_outreach_index
         );
-        if (bestComment) {
-          return commentToBugSnippet(bestComment, true);
-        }
       }
       // Fallback to first meaningful bug
-      const meaningfulBug = result.all_comments.find(c => c.is_meaningful_bug);
-      if (meaningfulBug) {
-        return commentToBugSnippet(meaningfulBug, true);
+      if (!bestComment) {
+        bestComment = result.all_comments.find(c => c.is_meaningful_bug);
+      }
+
+      if (bestComment) {
+        // Map V2 categories to V1 severity
+        const severityMap: Record<string, "critical" | "high" | "medium"> = {
+          bug_critical: "critical",
+          bug_high: "high",
+          bug_medium: "medium",
+          bug_low: "medium",
+        };
+
+        return {
+          title: bestComment.title,
+          explanation: bestComment.explanation,
+          explanation_short: bestComment.explanation_short || undefined,
+          file_path: bestComment.file_path,
+          severity: severityMap[bestComment.category] || "medium",
+          is_most_impactful: true,
+          macroscope_comment_text: bestComment.macroscope_comment_text,
+          // V2-specific fields for richer emails
+          impact_scenario: bestComment.impact_scenario || undefined,
+          code_suggestion: bestComment.code_suggestion || undefined,
+        };
       }
       return null;
     }
