@@ -360,7 +360,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           let mergeHeadCommit: string | null = null;
 
           if (prMerged && mergeCommitSha) {
-            sendStatus({ type: "info", step: 3, totalSteps: 10, message: "PR is merged, using direct branch strategy..." });
+            sendStatus({ type: "info", step: 3, totalSteps: 10, message: "PR is merged, checking merge type..." });
 
             try {
               const { data: mergeCommitData } = await octokit.repos.getCommit({
@@ -370,12 +370,20 @@ export async function POST(request: NextRequest): Promise<Response> {
               });
 
               if (mergeCommitData.parents && mergeCommitData.parents.length >= 2) {
-                // Parent 0 = base branch state at merge time
-                // Parent 1 = PR's final commit (head of PR branch)
+                // Standard merge commit - Parent 0 = base branch, Parent 1 = PR head
                 mergeBaseCommit = mergeCommitData.parents[0].sha;
                 mergeHeadCommit = mergeCommitData.parents[1].sha;
                 useMergeCommitStrategy = true;
-                sendStatus({ type: "success", message: `Found merge commit parents: base=${getShortHash(mergeBaseCommit)}, head=${getShortHash(mergeHeadCommit)}` });
+                sendStatus({ type: "success", message: `Standard merge: base=${getShortHash(mergeBaseCommit)}, head=${getShortHash(mergeHeadCommit)}` });
+              } else if (mergeCommitData.parents && mergeCommitData.parents.length === 1) {
+                // Squash or rebase merge - single parent, the commit itself contains all changes
+                // Use parent as base, and the merge commit SHA as head
+                mergeBaseCommit = mergeCommitData.parents[0].sha;
+                mergeHeadCommit = mergeCommitSha;
+                useMergeCommitStrategy = true;
+                sendStatus({ type: "success", message: `Squash/rebase merge: base=${getShortHash(mergeBaseCommit)}, head=${getShortHash(mergeHeadCommit)}` });
+              } else {
+                sendStatus({ type: "info", message: "Merge commit has no parents, falling back to cherry-pick strategy" });
               }
             } catch (mergeErr) {
               sendStatus({ type: "info", message: "Could not fetch merge commit, falling back to cherry-pick strategy" });
