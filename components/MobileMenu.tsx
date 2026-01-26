@@ -134,10 +134,22 @@ export function MobileMenu({ className = '' }: MobileMenuProps) {
             <nav className="flex-1 px-4 py-4">
               <div className="space-y-1">
                 <Link
-                  href="/"
+                  href="/prospector"
                   onClick={() => setIsOpen(false)}
                   className={`w-full flex items-center gap-3 px-3 py-3 text-base font-medium rounded-lg transition-colors min-h-[48px] ${
-                    pathname === '/'
+                    pathname === '/prospector'
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <span className="text-lg">🎯</span>
+                  Prospector
+                </Link>
+                <Link
+                  href="/pr-reviews"
+                  onClick={() => setIsOpen(false)}
+                  className={`w-full flex items-center gap-3 px-3 py-3 text-base font-medium rounded-lg transition-colors min-h-[48px] ${
+                    pathname === '/pr-reviews' || pathname === '/'
                       ? 'bg-primary/10 text-primary'
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
