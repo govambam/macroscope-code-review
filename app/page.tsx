@@ -241,7 +241,7 @@ export default function Home() {
   // Create PR modal state
   const [showCreatePRModal, setShowCreatePRModal] = useState(false);
   const [createPRModalExpanded, setCreatePRModalExpanded] = useState(false);
-  const [createMode, setCreateMode] = useState<CreateMode>("pr");
+  const [createMode, setCreateMode] = useState<CreateMode>("discover");
   const [repoUrl, setRepoUrl] = useState("");
   const [specifyCommit, setSpecifyCommit] = useState(false);
   const [commitHash, setCommitHash] = useState("");
