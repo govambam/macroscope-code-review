@@ -8,11 +8,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
 import { MobileMenu } from "@/components/MobileMenu";
 import { PRCard, RepoGroupHeader } from "@/components/PRCard";
+import { DiscoverPRs } from "@/components/DiscoverPRs";
 
 type InternalFilter = "all" | "internal" | "external";
 type SortMode = "alpha-asc" | "alpha-desc" | "created-desc" | "created-asc" | "prs-desc" | "prs-asc";
 
-type CreateMode = "commit" | "pr";
+type CreateMode = "commit" | "pr" | "discover";
 
 // PR Analysis types - V1 format (old)
 interface BugSnippet {
@@ -3552,10 +3553,29 @@ export default function Home() {
               >
                 Latest Commit
               </button>
+              <button
+                onClick={() => handleCreateModeChange("discover")}
+                disabled={loading}
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
+                  createMode === "discover"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Discover PRs
+              </button>
             </div>
 
             {/* Modal Content */}
             <div className="flex-1 overflow-y-auto p-6">
+              {createMode === "discover" ? (
+                <DiscoverPRs
+                  onSelectPR={(prUrl) => {
+                    setPrUrl(prUrl);
+                    handleCreateModeChange("pr");
+                  }}
+                />
+              ) : (
               <form onSubmit={handleSubmit} className="space-y-6">
                 {createMode === "pr" ? (
                   <>
@@ -3697,9 +3717,10 @@ export default function Home() {
                   )}
                 </button>
               </form>
+              )}
 
               {/* Status Messages */}
-              {status.length > 0 && (
+              {createMode !== "discover" && status.length > 0 && (
                 <div className="mt-6">
                   <h3 className="text-sm font-medium text-accent mb-3">Status</h3>
                   <div ref={statusContainerRef} className="bg-bg-subtle border border-border rounded-lg p-4 max-h-48 overflow-y-auto">
@@ -3725,7 +3746,7 @@ export default function Home() {
               )}
 
               {/* Result */}
-              {result && (
+              {createMode !== "discover" && result && (
                 <div className="mt-6">
                   {result.success ? (
                     <div className="rounded-xl border border-success/20 bg-success-light p-5">
