@@ -275,6 +275,17 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
             }),
           });
 
+          if (!response.ok) {
+            // Handle non-SSE error responses (e.g., 500 errors with JSON/HTML)
+            const errorText = await response.text();
+            try {
+              const errorJson = JSON.parse(errorText);
+              throw new Error(errorJson.error || errorJson.message || `Server error: ${response.status}`);
+            } catch {
+              throw new Error(`Server error: ${response.status}`);
+            }
+          }
+
           if (!response.body) {
             throw new Error("No response body");
           }
@@ -333,6 +344,11 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
           // Process any remaining buffer content after stream ends
           if (buffer.trim()) {
             processEvent(buffer);
+          }
+
+          // Handle case where no success/error was detected (non-SSE response)
+          if (!prSuccess && !prError) {
+            prError = "No valid response received";
           }
 
           if (prSuccess) {
