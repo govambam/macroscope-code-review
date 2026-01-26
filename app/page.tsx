@@ -204,6 +204,11 @@ interface PRRecord {
   originalPrUrl?: string | null;
   isInternal?: boolean;
   createdBy?: string | null;
+  // Macroscope review status tracking
+  macroscopeReviewStatus?: "pending" | "in_progress" | "completed" | "failed" | null;
+  macroscopeBugsCount?: number | null;
+  macroscopeCheckStartedAt?: string | null;
+  macroscopeCheckCompletedAt?: string | null;
 }
 
 interface ForkRecord {
@@ -496,6 +501,36 @@ export default function Home() {
       }
     }
   }, [forks, queryClient]);
+
+  // Poll for Macroscope review status updates
+  // This is a backup mechanism for webhooks - checks every 30 seconds
+  useEffect(() => {
+    const pollMacroscopeReviews = async () => {
+      try {
+        const response = await fetch("/api/poll-macroscope-reviews", {
+          method: "POST",
+        });
+        const data = await response.json();
+
+        if (data.success && data.updated > 0) {
+          console.log(`Macroscope review status updated for ${data.updated} PRs`);
+          // Refresh the forks list to show updated status
+          queryClient.invalidateQueries({ queryKey: ["forks"] });
+        }
+      } catch (error) {
+        // Silently ignore polling errors - this is a background task
+        console.debug("Macroscope polling error:", error);
+      }
+    };
+
+    // Initial poll on mount
+    pollMacroscopeReviews();
+
+    // Poll every 30 seconds
+    const pollInterval = setInterval(pollMacroscopeReviews, 30000);
+
+    return () => clearInterval(pollInterval);
+  }, [queryClient]);
 
   const addStatus = (
     text: string,

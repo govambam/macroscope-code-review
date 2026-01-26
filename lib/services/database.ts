@@ -32,6 +32,12 @@ export interface PRRecord {
   created_by: string | null;
   created_at: string;
   updated_at: string | null;
+  // Macroscope review status tracking
+  macroscope_review_status: 'pending' | 'in_progress' | 'completed' | 'failed' | null;
+  macroscope_bugs_count: number | null;
+  macroscope_check_started_at: string | null;
+  macroscope_check_completed_at: string | null;
+  macroscope_last_synced_at: string | null;
 }
 
 export interface PRAnalysisRecord {
@@ -222,6 +228,28 @@ function initializeSchema(db: Database.Database): void {
     console.log("Added original_pr_merged_at column to prs table");
   }
 
+  // Migration: Add Macroscope review status tracking columns
+  if (!columnNames.includes("macroscope_review_status")) {
+    db.exec("ALTER TABLE prs ADD COLUMN macroscope_review_status TEXT DEFAULT 'pending'");
+    console.log("Added macroscope_review_status column to prs table");
+  }
+  if (!columnNames.includes("macroscope_bugs_count")) {
+    db.exec("ALTER TABLE prs ADD COLUMN macroscope_bugs_count INTEGER");
+    console.log("Added macroscope_bugs_count column to prs table");
+  }
+  if (!columnNames.includes("macroscope_check_started_at")) {
+    db.exec("ALTER TABLE prs ADD COLUMN macroscope_check_started_at TEXT");
+    console.log("Added macroscope_check_started_at column to prs table");
+  }
+  if (!columnNames.includes("macroscope_check_completed_at")) {
+    db.exec("ALTER TABLE prs ADD COLUMN macroscope_check_completed_at TEXT");
+    console.log("Added macroscope_check_completed_at column to prs table");
+  }
+  if (!columnNames.includes("macroscope_last_synced_at")) {
+    db.exec("ALTER TABLE prs ADD COLUMN macroscope_last_synced_at TEXT");
+    console.log("Added macroscope_last_synced_at column to prs table");
+  }
+
   // Create PR analyses table
   db.exec(`
     CREATE TABLE IF NOT EXISTS pr_analyses (
@@ -388,14 +416,15 @@ export function savePR(
     updateBugCheckTime?: boolean;
     isInternal?: boolean;
     createdBy?: string | null;
+    macroscopeReviewStatus?: 'pending' | 'in_progress' | 'completed' | 'failed' | null;
   } = {}
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, original_pr_state, original_pr_merged_at, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, original_pr_state, original_pr_merged_at, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, macroscope_review_status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
@@ -410,7 +439,8 @@ export function savePR(
       commit_count = COALESCE(excluded.commit_count, prs.commit_count),
       last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at),
       is_internal = COALESCE(excluded.is_internal, prs.is_internal),
-      created_by = COALESCE(prs.created_by, excluded.created_by)
+      created_by = COALESCE(prs.created_by, excluded.created_by),
+      macroscope_review_status = COALESCE(excluded.macroscope_review_status, prs.macroscope_review_status)
     RETURNING id
   `);
 
@@ -432,6 +462,7 @@ export function savePR(
     lastBugCheckAt,
     options.isInternal ? 1 : 0,
     options.createdBy ?? null,
+    options.macroscopeReviewStatus ?? 'pending', // Default to 'pending' for new PRs
     now, // created_at for insert (ignored on update)
     now  // updated_at for insert (not updated on conflict)
   ) as { id: number };
@@ -530,6 +561,91 @@ export function updatePROwner(prId: number, owner: string): void {
   `);
 
   stmt.run(owner, now, prId);
+}
+
+/**
+ * Macroscope review status update data.
+ */
+export interface MacroscopeStatusUpdate {
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  bugsCount?: number | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+/**
+ * Update Macroscope review status for a PR.
+ */
+export function updatePRMacroscopeStatus(prId: number, statusUpdate: MacroscopeStatusUpdate): void {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE prs SET
+      macroscope_review_status = ?,
+      macroscope_bugs_count = COALESCE(?, macroscope_bugs_count),
+      macroscope_check_started_at = COALESCE(?, macroscope_check_started_at),
+      macroscope_check_completed_at = COALESCE(?, macroscope_check_completed_at),
+      macroscope_last_synced_at = ?,
+      updated_at = ?
+    WHERE id = ?
+  `);
+
+  stmt.run(
+    statusUpdate.status,
+    statusUpdate.bugsCount ?? null,
+    statusUpdate.startedAt ?? null,
+    statusUpdate.completedAt ?? null,
+    now,
+    now,
+    prId
+  );
+}
+
+/**
+ * Get PRs that need Macroscope status checking.
+ * Returns PRs that are:
+ * - Still pending or in_progress
+ * - Created in last 48 hours
+ * - Haven't been synced in last 5 minutes
+ */
+export function getPRsNeedingMacroscopeSync(limit: number = 50): Array<PRRecord & { repo_owner: string; repo_name: string }> {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT
+      p.*,
+      f.repo_owner,
+      f.repo_name
+    FROM prs p
+    JOIN forks f ON p.fork_id = f.id
+    WHERE p.macroscope_review_status IN ('pending', 'in_progress')
+    AND p.created_at > datetime('now', '-48 hours')
+    AND (
+      p.macroscope_last_synced_at IS NULL
+      OR p.macroscope_last_synced_at < datetime('now', '-5 minutes')
+    )
+    ORDER BY p.created_at DESC
+    LIMIT ?
+  `);
+
+  return stmt.all(limit) as Array<PRRecord & { repo_owner: string; repo_name: string }>;
+}
+
+/**
+ * Get a PR by fork owner, repo name, and PR number.
+ */
+export function getPRByRepoAndNumber(owner: string, repo: string, prNumber: number): (PRRecord & { fork_id: number }) | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT p.*
+    FROM prs p
+    JOIN forks f ON p.fork_id = f.id
+    WHERE f.repo_owner = ? AND f.repo_name = ? AND p.pr_number = ?
+  `);
+
+  return stmt.get(owner, repo, prNumber) as (PRRecord & { fork_id: number }) | null;
 }
 
 /**
