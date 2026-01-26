@@ -38,17 +38,34 @@ export async function fetchPRDetails(owner: string, repo: string, pullNumber: nu
   return pr;
 }
 
+const MAX_FILES_LIMIT = 500;
+
 export async function fetchPRFiles(owner: string, repo: string, pullNumber: number) {
   const octokit = getOctokit();
 
   // Get list of files changed (for LLM analysis)
-  // Use paginate to handle PRs with more than 100 files
-  const files = await octokit.paginate(octokit.pulls.listFiles, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-    per_page: 100,
-  });
+  // Use paginate to handle PRs with more than 100 files, with a limit to prevent OOM
+  const files: Awaited<ReturnType<typeof octokit.pulls.listFiles>>["data"] = [];
+
+  await octokit.paginate(
+    octokit.pulls.listFiles,
+    {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      per_page: 100,
+    },
+    (response, done) => {
+      for (const file of response.data) {
+        if (files.length >= MAX_FILES_LIMIT) {
+          done();
+          break;
+        }
+        files.push(file);
+      }
+      return [];
+    }
+  );
 
   return files.map((f) => ({
     filename: f.filename,

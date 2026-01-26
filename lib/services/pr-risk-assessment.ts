@@ -50,7 +50,7 @@ Return 1-4 most relevant categories.`;
 
     return {
       assessment: result.assessment || "Unable to assess",
-      categories: result.categories || [],
+      categories: Array.isArray(result.categories) ? result.categories : [],
     };
   } catch (error) {
     console.error("Risk assessment failed:", error);
