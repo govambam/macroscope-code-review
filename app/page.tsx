@@ -3532,6 +3532,17 @@ export default function Home() {
             {/* Modal Tabs */}
             <div className="flex border-b border-border px-4 md:px-6 shrink-0">
               <button
+                onClick={() => handleCreateModeChange("discover")}
+                disabled={loading}
+                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
+                  createMode === "discover"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-text-secondary hover:text-accent"
+                } disabled:opacity-50`}
+              >
+                Discover PRs
+              </button>
+              <button
                 onClick={() => handleCreateModeChange("pr")}
                 disabled={loading}
                 className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
@@ -3552,17 +3563,6 @@ export default function Home() {
                 } disabled:opacity-50`}
               >
                 Latest Commit
-              </button>
-              <button
-                onClick={() => handleCreateModeChange("discover")}
-                disabled={loading}
-                className={`px-3 md:px-4 py-3 md:py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
-                  createMode === "discover"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-text-secondary hover:text-accent"
-                } disabled:opacity-50`}
-              >
-                Discover PRs
               </button>
             </div>
 
