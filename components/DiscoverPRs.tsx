@@ -286,42 +286,53 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
           let prSuccess = false;
           let prError: string | null = null;
 
+          // Helper to process a single SSE event
+          const processEvent = (event: string) => {
+            if (!event.trim()) return;
+
+            const dataMatch = event.match(/^data: (.+)$/m);
+            if (!dataMatch) return;
+
+            try {
+              const data = JSON.parse(dataMatch[1]);
+
+              if (data.eventType === "status") {
+                // Show status message with PR context
+                const statusType = data.statusType === "error" ? "error" :
+                                  data.statusType === "success" ? "success" : "progress";
+                addStatus(`[PR #${prNumber}] ${data.message}`, statusType, prNumber);
+              } else if (data.eventType === "result") {
+                if (data.success) {
+                  prSuccess = true;
+                  addStatus(`[PR #${prNumber}] Simulation complete!`, "success", prNumber);
+                } else {
+                  prError = data.error || data.message || "Unknown error";
+                }
+              }
+            } catch {
+              // Ignore parse errors for individual events
+            }
+          };
+
           while (true) {
             const { done, value } = await reader.read();
+            if (value) {
+              buffer += decoder.decode(value, { stream: !done });
+            }
             if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
 
             // Process complete SSE events (separated by double newlines)
             const events = buffer.split("\n\n");
             buffer = events.pop() || "";
 
             for (const event of events) {
-              if (!event.trim()) continue;
-
-              const dataMatch = event.match(/^data: (.+)$/m);
-              if (!dataMatch) continue;
-
-              try {
-                const data = JSON.parse(dataMatch[1]);
-
-                if (data.eventType === "status") {
-                  // Show status message with PR context
-                  const statusType = data.statusType === "error" ? "error" :
-                                    data.statusType === "success" ? "success" : "progress";
-                  addStatus(`[PR #${prNumber}] ${data.message}`, statusType, prNumber);
-                } else if (data.eventType === "result") {
-                  if (data.success) {
-                    prSuccess = true;
-                    addStatus(`[PR #${prNumber}] Simulation complete!`, "success", prNumber);
-                  } else {
-                    prError = data.error || data.message || "Unknown error";
-                  }
-                }
-              } catch {
-                // Ignore parse errors for individual events
-              }
+              processEvent(event);
             }
+          }
+
+          // Process any remaining buffer content after stream ends
+          if (buffer.trim()) {
+            processEvent(buffer);
           }
 
           if (prSuccess) {
