@@ -11,6 +11,8 @@ import {
 } from "@/lib/services/pr-analyzer";
 import { sendMessage, sendMessageAndParseJSON, DEFAULT_MODEL } from "@/lib/services/anthropic";
 import { getPromptMetadata } from "@/lib/services/prompt-loader";
+import { fetchRecentPRs, fetchPRDetails, fetchPRFiles } from "@/lib/services/github-discover";
+import { scorePRCandidate, filterAndSortCandidates } from "@/lib/services/pr-scoring";
 
 interface SimulateRequest {
   promptType: string; // "pr-analysis" or "email-generation"
@@ -236,10 +238,125 @@ ${comment.macroscope_comment_text}
         BUG_SEVERITY: bugSeverity,
         TOTAL_BUGS: String(totalBugs),
       };
+    } else if (promptType === "discover-scoring") {
+      isJsonPrompt = true;
+
+      // Fetch recent PRs from vercel/vercel as test data
+      const owner = "vercel";
+      const repo = "vercel";
+
+      try {
+        // Fetch recent PRs
+        const prs = await fetchRecentPRs(owner, repo, 50);
+
+        // Fetch details for top PRs
+        const detailedPRs = [];
+        for (let i = 0; i < Math.min(prs.length, 20); i++) {
+          try {
+            const detail = await fetchPRDetails(owner, repo, prs[i].number);
+            const scored = scorePRCandidate(detail);
+            detailedPRs.push(scored);
+          } catch {
+            // Skip PRs that fail to fetch
+          }
+        }
+
+        // Filter and sort to get top candidates
+        const candidates = filterAndSortCandidates(detailedPRs, {
+          include_open: true,
+          include_merged: true,
+          merged_within_days: 30,
+          min_lines_changed: 50,
+          max_results: 10,
+        });
+
+        // Fetch files for top 5 candidates and build PR descriptions
+        const prsWithFiles = await Promise.all(
+          candidates.slice(0, 5).map(async (pr) => {
+            try {
+              const files = await fetchPRFiles(owner, repo, pr.number);
+              return { ...pr, files };
+            } catch {
+              return { ...pr, files: [] };
+            }
+          })
+        );
+
+        // Build PR descriptions in the same format as batchScorePRsForBugLikelihood
+        const prDescriptions = prsWithFiles.map((pr, index) => {
+          const fileList = pr.files
+            .slice(0, 15)
+            .map((f: { filename: string; additions: number; deletions: number }) =>
+              `   ${f.filename} (+${f.additions}, -${f.deletions})`)
+            .join('\n');
+
+          return `${index + 1}. PR #${pr.number}: "${pr.title}"\n   Files:\n${fileList}`;
+        }).join('\n\n');
+
+        variables = {
+          PR_DESCRIPTIONS: prDescriptions,
+        };
+
+        // Return special test data info for discover-scoring
+        const startTime = Date.now();
+        const interpolatedPrompt = interpolatePrompt(promptContent, variables);
+        const metadata = getPromptMetadata(promptType);
+        const model = requestedModel || metadata.model || DEFAULT_MODEL;
+        const inputTokensEstimate = estimateTokens(interpolatedPrompt);
+
+        try {
+          const parsedOutput = await sendMessageAndParseJSON<unknown>(interpolatedPrompt, {
+            model,
+            maxTokens: 2500,
+            temperature: 0,
+          });
+          const rawOutput = JSON.stringify(parsedOutput, null, 2);
+
+          return NextResponse.json<SimulateResponse>({
+            success: true,
+            result: {
+              rawOutput,
+              parsedOutput,
+              executionTimeMs: Date.now() - startTime,
+              model,
+              inputTokensEstimate,
+              testDataUsed: {
+                prId: 0,
+                forkedPrUrl: `https://github.com/${owner}/${repo}`,
+                originalPrUrl: `https://github.com/${owner}/${repo}`,
+              },
+            },
+          });
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("Failed to parse JSON")) {
+            return NextResponse.json<SimulateResponse>({
+              success: true,
+              result: {
+                rawOutput: error.message,
+                parseError: error.message,
+                executionTimeMs: Date.now() - startTime,
+                model,
+                inputTokensEstimate,
+                testDataUsed: {
+                  prId: 0,
+                  forkedPrUrl: `https://github.com/${owner}/${repo}`,
+                  originalPrUrl: `https://github.com/${owner}/${repo}`,
+                },
+              },
+            });
+          }
+          throw error;
+        }
+      } catch (error) {
+        return NextResponse.json<SimulateResponse>({
+          success: false,
+          error: `Failed to fetch test data from vercel/vercel: ${error instanceof Error ? error.message : String(error)}`,
+        }, { status: 500 });
+      }
     } else {
       return NextResponse.json<SimulateResponse>({
         success: false,
-        error: `Unknown prompt type: ${promptType}. Supported types: pr-analysis, email-generation`,
+        error: `Unknown prompt type: ${promptType}. Supported types: pr-analysis, email-generation, discover-scoring`,
       }, { status: 400 });
     }
 
