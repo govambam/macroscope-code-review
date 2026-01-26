@@ -3782,9 +3782,13 @@ export default function Home() {
                     setPrUrl(prUrl);
                     handleCreateModeChange("pr");
                   }}
-                  onSimulationComplete={() => {
+                  onSimulationComplete={async () => {
                     closeCreatePRModal();
-                    refreshFromGitHub();
+                    // Small delay to ensure database writes complete before refreshing
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    // Invalidate and refetch to ensure fresh data
+                    await queryClient.invalidateQueries({ queryKey: ["forks"] });
+                    await refreshFromGitHub();
                   }}
                 />
               ) : (
