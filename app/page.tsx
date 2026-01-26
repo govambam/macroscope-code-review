@@ -2858,32 +2858,59 @@ export default function Home() {
                     <input type="hidden" value={analysisForkedUrl} />
                   </form>
 
-                  {/* Loading State - Skeleton Screen */}
+                  {/* Loading State - Full Skeleton Screen */}
                   {(analysisLoading || (expectingCachedResult && !analysisResult)) && (
                     <div className="space-y-6">
-                      {/* Loading indicator - at top for visibility */}
-                      <div className="flex items-center justify-center gap-3 py-4 bg-primary/5 rounded-lg border border-primary/20">
-                        <svg className="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        <span className="text-primary font-medium">
-                          {expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR with AI..."}
-                        </span>
+                      {/* Summary section skeleton */}
+                      <div>
+                        <div className="h-6 bg-gray-200 rounded w-32 mb-3 animate-pulse" />
+                        <div className="space-y-2">
+                          <div className="h-4 bg-gray-200 rounded w-full animate-pulse" />
+                          <div className="h-4 bg-gray-200 rounded w-5/6 animate-pulse" />
+                          <div className="h-4 bg-gray-200 rounded w-4/5 animate-pulse" />
+                        </div>
                       </div>
 
-                      {/* Minimal skeleton preview */}
-                      <div className="animate-pulse space-y-4">
-                        {/* Single skeleton card */}
-                        <div className="border border-gray-200 rounded-lg p-4 space-y-3">
-                          <div className="flex items-center gap-2">
-                            <div className="h-5 w-16 bg-gray-200 rounded-full" />
-                            <div className="h-5 w-32 bg-gray-200 rounded" />
-                          </div>
-                          <div className="space-y-2">
-                            <div className="h-4 w-full bg-gray-200 rounded" />
-                            <div className="h-4 w-3/4 bg-gray-200 rounded" />
-                          </div>
+                      {/* Bugs section skeleton */}
+                      <div>
+                        <div className="h-6 bg-gray-200 rounded w-48 mb-3 animate-pulse" />
+                        <div className="space-y-4">
+                          {[1, 2, 3].map(i => (
+                            <div key={i} className="border border-gray-200 rounded-lg p-4">
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="h-5 w-16 bg-gray-200 rounded-full animate-pulse" />
+                                <div className="h-5 w-48 bg-gray-200 rounded animate-pulse" />
+                              </div>
+                              <div className="space-y-2">
+                                <div className="h-4 bg-gray-200 rounded w-full animate-pulse" />
+                                <div className="h-4 bg-gray-200 rounded w-full animate-pulse" />
+                                <div className="h-4 bg-gray-200 rounded w-2/3 animate-pulse" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Recommendations section skeleton */}
+                      <div>
+                        <div className="h-6 bg-gray-200 rounded w-40 mb-3 animate-pulse" />
+                        <div className="space-y-2">
+                          <div className="h-4 bg-gray-200 rounded w-full animate-pulse" />
+                          <div className="h-4 bg-gray-200 rounded w-full animate-pulse" />
+                          <div className="h-4 bg-gray-200 rounded w-3/4 animate-pulse" />
+                        </div>
+                      </div>
+
+                      {/* Subtle loading message at bottom */}
+                      <div className="pt-4 border-t border-gray-200">
+                        <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>
+                            {expectingCachedResult ? "Loading cached analysis..." : "Analyzing PR with Macroscope AI..."}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -3568,8 +3595,8 @@ export default function Home() {
               */}
             </div>
 
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Modal Content - Fixed height for consistent sizing across tabs */}
+            <div className="flex-1 overflow-y-auto p-6 min-h-[500px]">
               {createMode === "discover" ? (
                 <DiscoverPRs
                   onSelectPR={(prUrl) => {
