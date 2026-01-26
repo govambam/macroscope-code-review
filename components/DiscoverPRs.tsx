@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { PRCandidate, DiscoverResponse } from "@/lib/types/discover";
 
 const MAX_SELECTIONS = 10;
@@ -61,15 +60,27 @@ function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
   );
 }
 
+interface StatusMessage {
+  type: "info" | "success" | "error" | "progress";
+  text: string;
+  timestamp: string;
+  prNumber?: string;
+}
+
 interface SimulationProgress {
   total: number;
   completed: number;
-  current: string | null;
+  currentPR: string | null;
   errors: string[];
+  successCount: number;
 }
 
-export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => void }) {
-  const router = useRouter();
+interface DiscoverPRsProps {
+  onSelectPR?: (prUrl: string) => void;
+  onSimulationComplete?: () => void;
+}
+
+export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsProps) {
   const [repoUrl, setRepoUrl] = useState("");
   const [mode, setMode] = useState<"fast" | "advanced">("fast");
   const [isLoading, setIsLoading] = useState(false);
@@ -87,6 +98,28 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
   const [selectedPRs, setSelectedPRs] = useState<Set<string>>(new Set());
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationProgress, setSimulationProgress] = useState<SimulationProgress | null>(null);
+  const [statusMessages, setStatusMessages] = useState<StatusMessage[]>([]);
+  const [simulationComplete, setSimulationComplete] = useState(false);
+
+  // Auto-scroll ref
+  const statusContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (statusContainerRef.current) {
+      statusContainerRef.current.scrollTop = statusContainerRef.current.scrollHeight;
+    }
+  }, [statusMessages]);
+
+  const addStatus = useCallback((text: string, type: StatusMessage["type"] = "info", prNumber?: string) => {
+    const timestamp = new Date().toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    setStatusMessages((prev) => [...prev, { type, text, timestamp, prNumber }]);
+  }, []);
 
   async function handleDiscover() {
     if (!repoUrl.trim()) return;
@@ -157,12 +190,19 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
     if (selectedPRs.size === 0) return;
 
     setIsSimulating(true);
+    setSimulationComplete(false);
+    setStatusMessages([]);
     setSimulationProgress({
       total: selectedPRs.size,
       completed: 0,
-      current: null,
+      currentPR: null,
       errors: [],
+      successCount: 0,
     });
+
+    const prUrls = Array.from(selectedPRs);
+    const errors: string[] = [];
+    let successCount = 0;
 
     try {
       // Get unique repos from selected PRs for caching
@@ -175,35 +215,46 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
       });
 
       // Cache all repos first (parallel)
-      setSimulationProgress((prev) => prev ? { ...prev, current: "Caching repositories..." } : null);
+      if (repos.size > 0) {
+        addStatus(`Caching ${repos.size} repository${repos.size > 1 ? "ies" : ""}...`, "info");
 
-      const cachePromises = Array.from(repos).map((repo) =>
-        fetch("/api/cache/clone", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            repoUrl: `https://github.com/${repo}`,
-            shallow: true
-          }),
-        }).catch(() => null) // Ignore cache errors, simulation can still work
-      );
+        const cachePromises = Array.from(repos).map(async (repo) => {
+          try {
+            const response = await fetch("/api/cache/clone", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                repoUrl: `https://github.com/${repo}`,
+                shallow: true
+              }),
+            });
+            if (response.ok) {
+              addStatus(`Cached ${repo}`, "success");
+            }
+          } catch {
+            // Ignore cache errors, simulation can still work
+          }
+        });
 
-      await Promise.all(cachePromises);
+        await Promise.all(cachePromises);
+        addStatus("Repository caching complete", "success");
+      }
 
-      // Simulate PRs sequentially (to avoid overwhelming the system)
-      const prUrls = Array.from(selectedPRs);
-      const errors: string[] = [];
-
+      // Simulate PRs sequentially
       for (let i = 0; i < prUrls.length; i++) {
         const prUrl = prUrls[i];
         const prMatch = prUrl.match(/\/pull\/(\d+)/);
-        const prNumber = prMatch ? prMatch[1] : prUrl;
+        const prNumber = prMatch ? prMatch[1] : `${i + 1}`;
+        const repoMatch = prUrl.match(/github\.com\/([^\/]+\/[^\/]+)/);
+        const repoName = repoMatch ? repoMatch[1] : "unknown";
 
         setSimulationProgress((prev) => prev ? {
           ...prev,
-          current: `Simulating PR #${prNumber}...`,
+          currentPR: `PR #${prNumber}`,
           completed: i,
         } : null);
+
+        addStatus(`Starting simulation for ${repoName} PR #${prNumber}...`, "info", prNumber);
 
         try {
           const response = await fetch("/api/create-pr", {
@@ -215,363 +266,423 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
             }),
           });
 
-          // Read SSE stream to completion, accumulating content
-          if (response.body) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let streamContent = "";
-            let done = false;
+          if (!response.body) {
+            throw new Error("No response body");
+          }
 
-            while (!done) {
-              const { value, done: readerDone } = await reader.read();
-              done = readerDone;
-              if (value) {
-                streamContent += decoder.decode(value, { stream: !done });
-              }
-            }
+          // Read SSE stream and parse events
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let prSuccess = false;
+          let prError: string | null = null;
 
-            // Check for errors in accumulated stream content
-            if (streamContent.includes('"type":"error"')) {
-              const errorMatch = streamContent.match(/"message":"([^"]+)"/);
-              if (errorMatch) {
-                errors.push(`PR #${prNumber}: ${errorMatch[1]}`);
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete SSE events (separated by double newlines)
+            const events = buffer.split("\n\n");
+            buffer = events.pop() || "";
+
+            for (const event of events) {
+              if (!event.trim()) continue;
+
+              const dataMatch = event.match(/^data: (.+)$/m);
+              if (!dataMatch) continue;
+
+              try {
+                const data = JSON.parse(dataMatch[1]);
+
+                if (data.eventType === "status") {
+                  // Show status message with PR context
+                  const statusType = data.statusType === "error" ? "error" :
+                                    data.statusType === "success" ? "success" : "progress";
+                  addStatus(`[PR #${prNumber}] ${data.message}`, statusType, prNumber);
+                } else if (data.eventType === "result") {
+                  if (data.success) {
+                    prSuccess = true;
+                    addStatus(`[PR #${prNumber}] Simulation complete!`, "success", prNumber);
+                  } else {
+                    prError = data.error || data.message || "Unknown error";
+                  }
+                }
+              } catch {
+                // Ignore parse errors for individual events
               }
             }
           }
+
+          if (prSuccess) {
+            successCount++;
+          } else if (prError) {
+            errors.push(`PR #${prNumber}: ${prError}`);
+            addStatus(`[PR #${prNumber}] Failed: ${prError}`, "error", prNumber);
+          }
+
         } catch (err) {
-          errors.push(`PR #${prNumber}: ${err instanceof Error ? err.message : "Unknown error"}`);
+          const errorMsg = err instanceof Error ? err.message : "Unknown error";
+          errors.push(`PR #${prNumber}: ${errorMsg}`);
+          addStatus(`[PR #${prNumber}] Error: ${errorMsg}`, "error", prNumber);
         }
+
+        // Update progress
+        setSimulationProgress((prev) => prev ? {
+          ...prev,
+          completed: i + 1,
+          errors,
+          successCount,
+        } : null);
       }
 
+      // Final status
       setSimulationProgress((prev) => prev ? {
         ...prev,
         completed: prUrls.length,
-        current: null,
+        currentPR: null,
         errors,
+        successCount,
       } : null);
 
-      // Navigate to PR Reviews page after a short delay
-      setTimeout(() => {
-        router.push("/");
-        router.refresh();
-      }, 1500);
+      if (successCount > 0) {
+        addStatus(`Completed: ${successCount}/${prUrls.length} PRs simulated successfully`, "success");
+      }
+      if (errors.length > 0) {
+        addStatus(`${errors.length} PR${errors.length > 1 ? "s" : ""} failed`, "error");
+      }
+
+      setSimulationComplete(true);
 
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to simulate selected PRs");
+      addStatus(`Bulk simulation failed: ${err instanceof Error ? err.message : "Unknown error"}`, "error");
     } finally {
       setIsSimulating(false);
     }
   };
 
+  const handleFinishSimulation = () => {
+    // Reset state and notify parent
+    setSimulationProgress(null);
+    setStatusMessages([]);
+    setSelectedPRs(new Set());
+    setSimulationComplete(false);
+
+    // Call the callback to let parent handle modal close and refresh
+    if (onSimulationComplete) {
+      onSimulationComplete();
+    }
+  };
+
+  const getStatusColor = (type: StatusMessage["type"]) => {
+    switch (type) {
+      case "success":
+        return "text-green-600";
+      case "error":
+        return "text-red-600";
+      case "progress":
+        return "text-indigo-600";
+      default:
+        return "text-gray-700";
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Input Section */}
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            GitHub Repository
-          </label>
-          <input
-            type="text"
-            value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            placeholder="owner/repo or https://github.com/owner/repo"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            onKeyDown={(e) => e.key === "Enter" && handleDiscover()}
-            disabled={isSimulating}
-          />
-        </div>
+      {/* Simulation Progress Panel */}
+      {(isSimulating || simulationComplete) && simulationProgress && (
+        <div className="border border-indigo-200 rounded-lg overflow-hidden bg-white">
+          {/* Progress Header */}
+          <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {isSimulating && (
+                  <svg className="animate-spin h-5 w-5 text-indigo-600" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                )}
+                {simulationComplete && (
+                  <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+                <span className="font-semibold text-indigo-900">
+                  {simulationComplete
+                    ? `Simulation Complete (${simulationProgress.successCount}/${simulationProgress.total} successful)`
+                    : `Simulating PRs (${simulationProgress.completed}/${simulationProgress.total})`
+                  }
+                </span>
+              </div>
+              {simulationProgress.currentPR && !simulationComplete && (
+                <span className="text-sm text-indigo-700">
+                  Current: {simulationProgress.currentPR}
+                </span>
+              )}
+            </div>
 
-        {/* Search Mode Toggle */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <span className="text-sm font-medium text-gray-700">Search mode:</span>
-          <div className="flex rounded-lg border border-gray-300 overflow-hidden">
-            <button
-              onClick={() => setMode("fast")}
-              disabled={isSimulating}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                mode === "fast"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-white text-gray-700 hover:bg-gray-50"
-              } disabled:opacity-50`}
-            >
-              Fast
-            </button>
-            <button
-              onClick={() => setMode("advanced")}
-              disabled={isSimulating}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                mode === "advanced"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-white text-gray-700 hover:bg-gray-50"
-              } disabled:opacity-50`}
-            >
-              Advanced
-            </button>
+            {/* Progress Bar */}
+            <div className="mt-3 h-2 bg-indigo-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-600 transition-all duration-300"
+                style={{ width: `${(simulationProgress.completed / simulationProgress.total) * 100}%` }}
+              />
+            </div>
           </div>
-          <span className="text-xs text-gray-500">
-            {mode === "fast" ? "~5 seconds" : "~15 seconds, uses AI analysis"}
-          </span>
-        </div>
 
-        {/* Filters (collapsible) */}
-        <div>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            disabled={isSimulating}
-            className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center gap-1 disabled:opacity-50"
+          {/* Status Log */}
+          <div
+            ref={statusContainerRef}
+            className="max-h-64 overflow-y-auto p-4 bg-gray-50 font-mono text-xs space-y-1"
           >
-            <svg
-              className={`w-4 h-4 transition-transform ${showFilters ? "rotate-90" : ""}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-            {showFilters ? "Hide filters" : "Show filters"}
-          </button>
-
-          {showFilters && (
-            <div className="mt-3 p-4 bg-gray-50 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeOpen}
-                  onChange={(e) => setIncludeOpen(e.target.checked)}
-                  disabled={isSimulating}
-                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-sm">Include open PRs</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeMerged}
-                  onChange={(e) => setIncludeMerged(e.target.checked)}
-                  disabled={isSimulating}
-                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-sm">Include merged PRs</span>
-              </label>
-
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Merged within (days)</label>
-                <input
-                  type="number"
-                  value={mergedWithinDays}
-                  onChange={(e) => setMergedWithinDays(parseInt(e.target.value) || 30)}
-                  min={1}
-                  max={365}
-                  disabled={isSimulating}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
-                />
+            {statusMessages.map((msg, i) => (
+              <div key={i} className={`flex gap-2 ${getStatusColor(msg.type)}`}>
+                <span className="text-gray-400 shrink-0">{msg.timestamp}</span>
+                <span>{msg.text}</span>
               </div>
-
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Min lines changed</label>
-                <input
-                  type="number"
-                  value={minLinesChanged}
-                  onChange={(e) => {
-                    const parsed = parseInt(e.target.value);
-                    setMinLinesChanged(Number.isNaN(parsed) ? 50 : parsed);
-                  }}
-                  min={0}
-                  disabled={isSimulating}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Discover Button */}
-        <button
-          onClick={handleDiscover}
-          disabled={isLoading || !repoUrl.trim() || isSimulating}
-          className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-        >
-          {isLoading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              {mode === "fast" ? "Analyzing..." : "Analyzing with AI..."}
-            </span>
-          ) : (
-            "Discover High-Value PRs"
-          )}
-        </button>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Simulation Progress */}
-      {simulationProgress && (
-        <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-          <div className="flex items-center gap-3 mb-2">
-            <svg className="animate-spin h-5 w-5 text-indigo-600" viewBox="0 0 24 24">
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-            <span className="font-medium text-indigo-900">
-              Simulating PRs ({simulationProgress.completed}/{simulationProgress.total})
-            </span>
-          </div>
-          {simulationProgress.current && (
-            <p className="text-sm text-indigo-700 ml-8">{simulationProgress.current}</p>
-          )}
-          {simulationProgress.completed === simulationProgress.total && (
-            <p className="text-sm text-indigo-700 ml-8 mt-2">
-              Redirecting to PR Reviews...
-            </p>
-          )}
-          {simulationProgress.errors.length > 0 && (
-            <div className="mt-3 ml-8">
-              <p className="text-sm font-medium text-red-600">Some simulations failed:</p>
-              <ul className="text-xs text-red-600 mt-1 space-y-0.5">
-                {simulationProgress.errors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Results */}
-      {results && !simulationProgress && (
-        <div className="space-y-4">
-          {/* Results Header with Selection Controls */}
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">
-                Found {results.candidates.length} candidate{results.candidates.length !== 1 ? "s" : ""}{" "}
-                from {results.total_prs_analyzed} PRs analyzed
-              </span>
-              {results.candidates.length > 0 && (
-                <button
-                  onClick={handleSelectAll}
-                  disabled={isSimulating}
-                  className="text-sm text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50"
-                >
-                  {selectedPRs.size === Math.min(results.candidates.length, MAX_SELECTIONS) ? "Deselect All" : "Select All"}
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-500">
-                {(results.analysis_time_ms / 1000).toFixed(1)}s
-              </span>
-              {selectedPRs.size > 0 && (
-                <>
-                  <span className="text-sm text-gray-600">
-                    {selectedPRs.size} selected
-                  </span>
-                  <button
-                    onClick={handleSimulateSelected}
-                    disabled={isSimulating}
-                    className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                  >
-                    {isSimulating ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            fill="none"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          />
-                        </svg>
-                        Simulating...
-                      </>
-                    ) : (
-                      <>Simulate Selected ({selectedPRs.size})</>
-                    )}
-                  </button>
-                </>
-              )}
-            </div>
+            ))}
+            {statusMessages.length === 0 && (
+              <div className="text-gray-400">Waiting for status updates...</div>
+            )}
           </div>
 
-          {results.candidates.length === 0 ? (
-            <div className="p-8 text-center bg-gray-50 rounded-lg">
-              <svg
-                className="w-16 h-16 mx-auto mb-4 text-gray-300"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1}
+          {/* Actions */}
+          {simulationComplete && (
+            <div className="px-4 py-3 bg-white border-t border-indigo-200 flex justify-end">
+              <button
+                onClick={handleFinishSimulation}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <p className="text-lg font-medium text-gray-700">No high-value PRs found</p>
-              <p className="text-sm text-gray-500 mt-2">
-                Try a different repository or adjust the search filters
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {results.candidates.map((pr, index) => (
-                <PRCandidateCard
-                  key={pr.number}
-                  pr={pr}
-                  rank={index + 1}
-                  isSelected={selectedPRs.has(pr.html_url)}
-                  onToggleSelect={() => handleToggleSelect(pr.html_url)}
-                  onSimulate={onSelectPR ? () => onSelectPR(pr.html_url) : undefined}
-                  disabled={isSimulating}
-                />
-              ))}
+                View PRs in Dashboard
+              </button>
             </div>
           )}
         </div>
+      )}
+
+      {/* Input Section - hidden during simulation */}
+      {!isSimulating && !simulationComplete && (
+        <>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                GitHub Repository
+              </label>
+              <input
+                type="text"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                placeholder="owner/repo or https://github.com/owner/repo"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                onKeyDown={(e) => e.key === "Enter" && handleDiscover()}
+              />
+            </div>
+
+            {/* Search Mode Toggle */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-sm font-medium text-gray-700">Search mode:</span>
+              <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+                <button
+                  onClick={() => setMode("fast")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    mode === "fast"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  Fast
+                </button>
+                <button
+                  onClick={() => setMode("advanced")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    mode === "advanced"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  Advanced
+                </button>
+              </div>
+              <span className="text-xs text-gray-500">
+                {mode === "fast" ? "~5 seconds" : "~15 seconds, uses AI analysis"}
+              </span>
+            </div>
+
+            {/* Filters (collapsible) */}
+            <div>
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+              >
+                <svg
+                  className={`w-4 h-4 transition-transform ${showFilters ? "rotate-90" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                {showFilters ? "Hide filters" : "Show filters"}
+              </button>
+
+              {showFilters && (
+                <div className="mt-3 p-4 bg-gray-50 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeOpen}
+                      onChange={(e) => setIncludeOpen(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm">Include open PRs</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeMerged}
+                      onChange={(e) => setIncludeMerged(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm">Include merged PRs</span>
+                  </label>
+
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Merged within (days)</label>
+                    <input
+                      type="number"
+                      value={mergedWithinDays}
+                      onChange={(e) => setMergedWithinDays(parseInt(e.target.value) || 30)}
+                      min={1}
+                      max={365}
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Min lines changed</label>
+                    <input
+                      type="number"
+                      value={minLinesChanged}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value);
+                        setMinLinesChanged(Number.isNaN(parsed) ? 50 : parsed);
+                      }}
+                      min={0}
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Discover Button */}
+            <button
+              onClick={handleDiscover}
+              disabled={isLoading || !repoUrl.trim()}
+              className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  {mode === "fast" ? "Analyzing..." : "Analyzing with AI..."}
+                </span>
+              ) : (
+                "Discover High-Value PRs"
+              )}
+            </button>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* Results */}
+          {results && (
+            <div className="space-y-4">
+              {/* Results Header with Selection Controls */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-600">
+                    Found {results.candidates.length} candidate{results.candidates.length !== 1 ? "s" : ""}{" "}
+                    from {results.total_prs_analyzed} PRs analyzed
+                  </span>
+                  {results.candidates.length > 0 && (
+                    <button
+                      onClick={handleSelectAll}
+                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      {selectedPRs.size === Math.min(results.candidates.length, MAX_SELECTIONS) ? "Deselect All" : "Select All"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500">
+                    {(results.analysis_time_ms / 1000).toFixed(1)}s
+                  </span>
+                  {selectedPRs.size > 0 && (
+                    <>
+                      <span className="text-sm text-gray-600">
+                        {selectedPRs.size} selected
+                      </span>
+                      <button
+                        onClick={handleSimulateSelected}
+                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                      >
+                        Simulate Selected ({selectedPRs.size})
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {results.candidates.length === 0 ? (
+                <div className="p-8 text-center bg-gray-50 rounded-lg">
+                  <svg
+                    className="w-16 h-16 mx-auto mb-4 text-gray-300"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                  <p className="text-lg font-medium text-gray-700">No high-value PRs found</p>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Try a different repository or adjust the search filters
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {results.candidates.map((pr, index) => (
+                    <PRCandidateCard
+                      key={pr.number}
+                      pr={pr}
+                      rank={index + 1}
+                      isSelected={selectedPRs.has(pr.html_url)}
+                      onToggleSelect={() => handleToggleSelect(pr.html_url)}
+                      onSimulate={onSelectPR ? () => onSelectPR(pr.html_url) : undefined}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -583,14 +694,12 @@ function PRCandidateCard({
   isSelected,
   onToggleSelect,
   onSimulate,
-  disabled,
 }: {
   pr: PRCandidate;
   rank: number;
   isSelected: boolean;
   onToggleSelect: () => void;
   onSimulate?: () => void;
-  disabled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -610,8 +719,7 @@ function PRCandidateCard({
               type="checkbox"
               checked={isSelected}
               onChange={onToggleSelect}
-              disabled={disabled}
-              className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
             />
           </div>
 
@@ -686,8 +794,7 @@ function PRCandidateCard({
                       e.stopPropagation();
                       onSimulate();
                     }}
-                    disabled={disabled}
-                    className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors whitespace-nowrap"
                   >
                     Simulate
                   </button>
@@ -700,8 +807,7 @@ function PRCandidateCard({
               <div className="mt-3">
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  disabled={disabled}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 disabled:opacity-50"
+                  className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                 >
                   <svg
                     className={`w-3 h-3 transition-transform ${expanded ? "rotate-90" : ""}`}

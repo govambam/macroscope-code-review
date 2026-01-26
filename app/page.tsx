@@ -3574,6 +3574,10 @@ export default function Home() {
                     setPrUrl(prUrl);
                     handleCreateModeChange("pr");
                   }}
+                  onSimulationComplete={() => {
+                    closeCreatePRModal();
+                    refreshFromGitHub();
+                  }}
                 />
               ) : (
               <form onSubmit={handleSubmit} className="space-y-6">
