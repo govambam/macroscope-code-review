@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { PRCandidate, DiscoverResponse } from "@/lib/types/discover";
 
@@ -30,29 +29,18 @@ function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
     setShowTooltip(false);
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-green-600";
-    if (score >= 60) return "text-amber-600";
-    return "text-gray-600";
-  };
-
   return (
     <div
       className="relative inline-block"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-orange-50 rounded-lg">
-        <svg className="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        <span className={`text-sm font-semibold ${getScoreColor(overall)}`}>
-          {overall}
-        </span>
-      </div>
+      <span className="text-sm font-semibold text-gray-900">
+        Score: {overall}
+      </span>
 
       {showTooltip && (
-        <div className="absolute z-50 left-0 top-full mt-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3 min-w-[180px]">
+        <div className="absolute z-50 right-0 top-full mt-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3 min-w-[180px]">
           <div className="font-semibold mb-2 border-b border-gray-700 pb-2">
             Overall Score: {overall}
           </div>
@@ -66,7 +54,7 @@ function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
               <span className="font-medium">{recency}/100</span>
             </div>
           </div>
-          <div className="absolute -top-1 left-4 w-2 h-2 bg-gray-900 transform rotate-45" />
+          <div className="absolute -top-1 right-4 w-2 h-2 bg-gray-900 transform rotate-45" />
         </div>
       )}
     </div>
@@ -661,17 +649,6 @@ function PRCandidateCard({
                   </span>
                   <span>{pr.changed_files} files</span>
                   <span>{pr.commits} commits</span>
-                  <span className="flex items-center gap-1">
-                    <Image
-                      src={pr.author_avatar_url}
-                      alt={pr.author}
-                      width={16}
-                      height={16}
-                      className="rounded-full"
-                      unoptimized
-                    />
-                    {pr.author}
-                  </span>
                 </div>
 
                 {/* Risk categories (from advanced search) */}
@@ -702,9 +679,12 @@ function PRCandidateCard({
                 {/* Individual simulate button (when not selected) */}
                 {onSimulate && !isSelected && (
                   <button
-                    onClick={onSimulate}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSimulate();
+                    }}
                     disabled={disabled}
-                    className="px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Simulate
                   </button>
