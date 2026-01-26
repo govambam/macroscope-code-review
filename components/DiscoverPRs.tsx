@@ -15,6 +15,15 @@ function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Cleanup timeout on unmount to prevent state updates on unmounted component
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleMouseEnter = () => {
     timeoutRef.current = setTimeout(() => {
       setShowTooltip(true);
