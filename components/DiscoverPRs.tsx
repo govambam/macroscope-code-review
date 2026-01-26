@@ -144,7 +144,8 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
 
   const handleSelectAll = useCallback(() => {
     if (!results) return;
-    if (selectedPRs.size === results.candidates.length) {
+    const maxSelectable = Math.min(results.candidates.length, MAX_SELECTIONS);
+    if (selectedPRs.size === maxSelectable) {
       setSelectedPRs(new Set());
     } else {
       const limited = results.candidates.slice(0, MAX_SELECTIONS).map((pr) => pr.html_url);
@@ -485,7 +486,7 @@ export function DiscoverPRs({ onSelectPR }: { onSelectPR?: (prUrl: string) => vo
                   disabled={isSimulating}
                   className="text-sm text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50"
                 >
-                  {selectedPRs.size === results.candidates.length ? "Deselect All" : "Select All"}
+                  {selectedPRs.size === Math.min(results.candidates.length, MAX_SELECTIONS) ? "Deselect All" : "Select All"}
                 </button>
               )}
             </div>
