@@ -465,6 +465,23 @@ export function getPRByUrl(forkedPrUrl: string): PRRecord | null {
 }
 
 /**
+ * Get a PR by repo owner, repo name, and PR number.
+ * Joins with forks table to match by owner/repo.
+ */
+export function getPRByRepoAndNumber(owner: string, repo: string, prNumber: number): (PRRecord & { fork_id: number }) | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT p.*, p.fork_id
+    FROM prs p
+    JOIN forks f ON p.fork_id = f.id
+    WHERE f.repo_owner = ? AND f.repo_name = ? AND p.pr_number = ?
+  `);
+
+  return stmt.get(owner, repo, prNumber) as (PRRecord & { fork_id: number }) | null;
+}
+
+/**
  * Update bug count for a PR (also updates last_bug_check_at and updated_at timestamps).
  */
 export function updatePRBugCount(prId: number, bugCount: number): void {
