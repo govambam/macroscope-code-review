@@ -109,7 +109,7 @@ export function PRCard({
           className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors min-h-[44px] ${
             pr.hasAnalysis
               ? 'bg-green-600 hover:bg-green-700 text-white'
-              : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+              : 'bg-primary hover:bg-primary-hover text-white'
           }`}
         >
           {pr.hasAnalysis ? (

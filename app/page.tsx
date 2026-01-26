@@ -249,6 +249,7 @@ export default function Home() {
   const [cacheRepo, setCacheRepo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<StatusMessage[]>([]);
+  const [formValidationError, setFormValidationError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
 
   // Auto-scroll status container to bottom when new messages arrive
@@ -513,30 +514,47 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Inline validation (same pattern as Discover tab)
+    if (createMode === "pr") {
+      if (!prUrl.trim()) {
+        setFormValidationError("Please enter a Pull Request URL");
+        return;
+      }
+      const prUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+      if (!prUrlRegex.test(prUrl)) {
+        setFormValidationError("Invalid PR URL format. Expected: https://github.com/owner/repo/pull/123");
+        return;
+      }
+    } else {
+      if (!repoUrl.trim()) {
+        setFormValidationError("Please enter a Repository URL");
+        return;
+      }
+      const githubUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/;
+      if (!githubUrlRegex.test(repoUrl)) {
+        setFormValidationError("Invalid GitHub URL format. Expected: https://github.com/owner/repo-name");
+        return;
+      }
+      if (specifyCommit && !commitHash.trim()) {
+        setFormValidationError("Please enter a commit hash");
+        return;
+      }
+      if (specifyCommit && commitHash) {
+        const hashRegex = /^[a-f0-9]{7,40}$/i;
+        if (!hashRegex.test(commitHash)) {
+          setFormValidationError("Invalid commit hash format. Expected 7-40 character hex string");
+          return;
+        }
+      }
+    }
+
+    setFormValidationError(null);
     setLoading(true);
     setStatus([]);
     setResult(null);
 
     try {
-      // Client-side validation
-      if (createMode === "commit") {
-        const githubUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/;
-        if (!githubUrlRegex.test(repoUrl)) {
-          throw new Error("Invalid GitHub URL format. Expected: https://github.com/owner/repo-name");
-        }
-
-        if (specifyCommit && commitHash) {
-          const hashRegex = /^[a-f0-9]{7,40}$/i;
-          if (!hashRegex.test(commitHash)) {
-            throw new Error("Invalid commit hash format. Expected 7-40 character hex string");
-          }
-        }
-      } else {
-        const prUrlRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
-        if (!prUrlRegex.test(prUrl)) {
-          throw new Error("Invalid PR URL format. Expected: https://github.com/owner/repo/pull/123");
-        }
-      }
 
       // Build request body
       const body =
@@ -644,18 +662,21 @@ export default function Home() {
     setCreateMode(newMode);
     setStatus([]);
     setResult(null);
+    setFormValidationError(null);
   };
 
   const openCreatePRModal = () => {
     setShowCreatePRModal(true);
     setStatus([]);
     setResult(null);
+    setFormValidationError(null);
   };
 
   const closeCreatePRModal = () => {
     setShowCreatePRModal(false);
     setCreatePRModalExpanded(false);
     setCacheRepo(false);
+    setFormValidationError(null);
   };
 
   // Analyze Internal PR function
@@ -2398,7 +2419,7 @@ export default function Home() {
                                           className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
                                             pr.hasAnalysis
                                               ? "bg-green-50 text-green-700 hover:bg-green-100"
-                                              : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                                              : "bg-primary-light text-primary hover:bg-primary/10"
                                           }`}
                                         >
                                           {pr.hasAnalysis ? (
@@ -3620,10 +3641,14 @@ export default function Home() {
                         type="text"
                         id="prUrl"
                         value={prUrl}
-                        onChange={(e) => setPrUrl(e.target.value)}
+                        onChange={(e) => {
+                          setPrUrl(e.target.value);
+                          if (formValidationError) setFormValidationError(null);
+                        }}
                         placeholder="https://github.com/owner/repo/pull/123"
-                        className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                        required
+                        className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors ${
+                          formValidationError ? "border-red-300" : "border-border"
+                        }`}
                         disabled={loading}
                       />
                       <p className="mt-2 text-sm text-text-muted">
@@ -3661,10 +3686,14 @@ export default function Home() {
                         type="text"
                         id="repoUrl"
                         value={repoUrl}
-                        onChange={(e) => setRepoUrl(e.target.value)}
+                        onChange={(e) => {
+                          setRepoUrl(e.target.value);
+                          if (formValidationError) setFormValidationError(null);
+                        }}
                         placeholder="https://github.com/owner/repo-name"
-                        className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                        required
+                        className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors ${
+                          formValidationError ? "border-red-300" : "border-border"
+                        }`}
                         disabled={loading}
                       />
                       <p className="mt-2 text-sm text-text-muted">
@@ -3698,10 +3727,14 @@ export default function Home() {
                           type="text"
                           id="commitHashModal"
                           value={commitHash}
-                          onChange={(e) => setCommitHash(e.target.value)}
+                          onChange={(e) => {
+                            setCommitHash(e.target.value);
+                            if (formValidationError) setFormValidationError(null);
+                          }}
                           placeholder="abc1234..."
-                          className="w-full px-4 py-3 bg-white border border-border rounded-lg text-black placeholder:text-text-muted font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                          required={specifyCommit}
+                          className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder:text-text-muted font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors ${
+                            formValidationError ? "border-red-300" : "border-border"
+                          }`}
                           disabled={loading}
                         />
                         <p className="mt-2 text-sm text-text-muted">
@@ -3735,7 +3768,7 @@ export default function Home() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full flex items-center justify-center py-3 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full max-w-xs mx-auto flex items-center justify-center py-2.5 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <>
@@ -3749,6 +3782,15 @@ export default function Home() {
                     "Create Pull Request"
                   )}
                 </button>
+
+                {formValidationError && (
+                  <div className="mt-2 flex items-center justify-center gap-2 text-sm text-red-600">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    {formValidationError}
+                  </div>
+                )}
               </form>
               )}
 

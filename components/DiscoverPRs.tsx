@@ -424,7 +424,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
       case "error":
         return "text-red-600";
       case "progress":
-        return "text-indigo-600";
+        return "text-primary";
       default:
         return "text-gray-700";
     }
@@ -434,13 +434,13 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
     <div className="space-y-6">
       {/* Simulation Progress Panel */}
       {(isSimulating || simulationComplete) && simulationProgress && (
-        <div className="border border-indigo-200 rounded-lg overflow-hidden bg-white">
+        <div className="border border-primary/20 rounded-lg overflow-hidden bg-white">
           {/* Progress Header */}
-          <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-200">
+          <div className="bg-primary-light px-4 py-3 border-b border-primary/20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {isSimulating && (
-                  <svg className="animate-spin h-5 w-5 text-indigo-600" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-5 w-5 text-primary" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
@@ -450,7 +450,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 )}
-                <span className="font-semibold text-indigo-900">
+                <span className="font-semibold text-accent">
                   {simulationComplete
                     ? `Simulation Complete (${simulationProgress.successCount}/${simulationProgress.total} successful)`
                     : `Simulating PRs (${simulationProgress.completed}/${simulationProgress.total})`
@@ -458,16 +458,16 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                 </span>
               </div>
               {simulationProgress.currentPR && !simulationComplete && (
-                <span className="text-sm text-indigo-700">
+                <span className="text-sm text-primary">
                   Current: {simulationProgress.currentPR}
                 </span>
               )}
             </div>
 
             {/* Progress Bar */}
-            <div className="mt-3 h-2 bg-indigo-100 rounded-full overflow-hidden">
+            <div className="mt-3 h-2 bg-primary/10 rounded-full overflow-hidden">
               <div
-                className="h-full bg-indigo-600 transition-all duration-300"
+                className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${(simulationProgress.completed / simulationProgress.total) * 100}%` }}
               />
             </div>
@@ -491,10 +491,10 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
 
           {/* Actions */}
           {simulationComplete && (
-            <div className="px-4 py-3 bg-white border-t border-indigo-200 flex justify-end">
+            <div className="px-4 py-3 bg-white border-t border-primary/20 flex justify-end">
               <button
                 onClick={handleFinishSimulation}
-                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors"
               >
                 View PRs in Dashboard
               </button>
@@ -519,7 +519,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                   if (validationError) setValidationError(null);
                 }}
                 placeholder="owner/repo or https://github.com/owner/repo"
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary ${
                   validationError ? "border-red-300" : "border-gray-300"
                 }`}
                 onKeyDown={(e) => e.key === "Enter" && handleDiscover()}
@@ -534,7 +534,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                   onClick={() => setMode("fast")}
                   className={`px-4 py-2 text-sm font-medium transition-colors ${
                     mode === "fast"
-                      ? "bg-indigo-600 text-white"
+                      ? "bg-primary text-white"
                       : "bg-white text-gray-700 hover:bg-gray-50"
                   }`}
                 >
@@ -544,7 +544,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                   onClick={() => setMode("advanced")}
                   className={`px-4 py-2 text-sm font-medium transition-colors ${
                     mode === "advanced"
-                      ? "bg-indigo-600 text-white"
+                      ? "bg-primary text-white"
                       : "bg-white text-gray-700 hover:bg-gray-50"
                   }`}
                 >
@@ -560,7 +560,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
             <div>
               <button
                 onClick={() => setShowFilters(!showFilters)}
-                className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                className="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
               >
                 <svg
                   className={`w-4 h-4 transition-transform ${showFilters ? "rotate-90" : ""}`}
@@ -581,7 +581,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                       type="checkbox"
                       checked={includeOpen}
                       onChange={(e) => setIncludeOpen(e.target.checked)}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
                     />
                     <span className="text-sm">Include open PRs</span>
                   </label>
@@ -591,7 +591,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                       type="checkbox"
                       checked={includeMerged}
                       onChange={(e) => setIncludeMerged(e.target.checked)}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
                     />
                     <span className="text-sm">Include merged PRs</span>
                   </label>
@@ -604,7 +604,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                       onChange={(e) => setMergedWithinDays(parseInt(e.target.value) || 30)}
                       min={1}
                       max={365}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-primary focus:border-primary"
                     />
                   </div>
 
@@ -618,7 +618,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                         setMinLinesChanged(Number.isNaN(parsed) ? 50 : parsed);
                       }}
                       min={0}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-primary focus:border-primary"
                     />
                   </div>
                 </div>
@@ -626,11 +626,11 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
             </div>
 
             {/* Discover Button */}
-            <div>
+            <div className="flex flex-col items-center">
               <button
                 onClick={handleDiscover}
                 disabled={isLoading}
-                className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                className="w-full max-w-xs px-4 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
               >
                 {isLoading ? (
                   <span className="flex items-center justify-center gap-2">
@@ -646,7 +646,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
               </button>
 
               {validationError && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-red-600">
+                <div className="mt-2 flex items-center justify-center gap-2 text-sm text-red-600">
                   <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                   </svg>
@@ -676,7 +676,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                   {results.candidates.length > 0 && (
                     <button
                       onClick={handleSelectAll}
-                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                      className="text-sm text-primary hover:text-primary-hover font-medium"
                     >
                       {selectedPRs.size === Math.min(results.candidates.length, MAX_SELECTIONS) ? "Deselect All" : "Select All"}
                     </button>
@@ -694,7 +694,7 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                       </span>
                       <button
                         onClick={handleSimulateSelected}
-                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                        className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors flex items-center gap-2"
                       >
                         Simulate Selected ({selectedPRs.size})
                       </button>
@@ -764,8 +764,8 @@ function PRCandidateCard({
     <div
       className={`border rounded-lg overflow-hidden transition-colors bg-white ${
         isSelected
-          ? "border-indigo-500 bg-indigo-50/50 ring-1 ring-indigo-500"
-          : "border-gray-200 hover:border-indigo-300"
+          ? "border-primary bg-primary-light/50 ring-1 ring-primary"
+          : "border-gray-200 hover:border-primary/30"
       }`}
     >
       <div className="p-4">
@@ -776,7 +776,7 @@ function PRCandidateCard({
               type="checkbox"
               checked={isSelected}
               onChange={onToggleSelect}
-              className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+              className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary cursor-pointer"
             />
           </div>
 
@@ -786,7 +786,7 @@ function PRCandidateCard({
               <div className="flex-1 min-w-0">
                 {/* Header row */}
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className="text-lg font-semibold text-indigo-600">#{rank}</span>
+                  <span className="text-lg font-semibold text-primary">#{rank}</span>
                   <span
                     className={`px-2 py-0.5 text-xs font-medium rounded ${
                       pr.state === "open"
@@ -804,7 +804,7 @@ function PRCandidateCard({
                   href={pr.html_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-base font-medium text-gray-900 hover:text-indigo-600 line-clamp-2"
+                  className="text-base font-medium text-gray-900 hover:text-primary line-clamp-2"
                 >
                   {pr.title}
                 </a>
@@ -851,7 +851,7 @@ function PRCandidateCard({
                       e.stopPropagation();
                       onSimulate();
                     }}
-                    className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors whitespace-nowrap"
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors whitespace-nowrap"
                   >
                     Simulate
                   </button>
@@ -864,7 +864,7 @@ function PRCandidateCard({
               <div className="mt-3">
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                  className="text-xs text-primary hover:text-primary-hover flex items-center gap-1"
                 >
                   <svg
                     className={`w-3 h-3 transition-transform ${expanded ? "rotate-90" : ""}`}

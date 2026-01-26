@@ -1,4 +1,5 @@
 import { sendMessageAndParseJSON } from "@/lib/services/anthropic";
+import { loadPrompt, getPromptMetadata } from "@/lib/services/prompt-loader";
 
 export interface FileInfo {
   filename: string;
@@ -23,27 +24,20 @@ export async function assessPRRisk(
     .map((f) => `- ${f.filename} (+${f.additions}/-${f.deletions})`)
     .join("\n");
 
-  const prompt = `Assess the bug risk of this pull request based on the files changed.
+  // Load prompt from database/filesystem (editable in Settings)
+  const prompt = loadPrompt("discover-scoring", {
+    PR_TITLE: prTitle,
+    TOTAL_LINES: String(totalLinesChanged),
+    FILES_LIST: fileList,
+  });
 
-PR Title: "${prTitle}"
-Total lines changed: ${totalLinesChanged}
-
-Files changed:
-${fileList}
-
-Respond with JSON only:
-{
-  "assessment": "2-3 sentence explanation of what this PR does and why it might contain bugs worth catching. Focus on specific risks like concurrency issues, error handling gaps, security concerns, data integrity, etc. If this looks low-risk (docs, config, tests only), say so.",
-  "categories": ["list", "of", "risk", "categories"]
-}
-
-Risk categories to choose from: concurrency, auth, security, data-handling, error-handling, state-management, api-changes, database, caching, serialization, networking, core-logic, refactor, new-feature, config, tests, docs, low-risk
-
-Return 1-4 most relevant categories.`;
+  // Get model from prompt metadata, fallback to default
+  const metadata = getPromptMetadata("discover-scoring");
+  const model = metadata.model || "claude-sonnet-4-20250514";
 
   try {
     const result = await sendMessageAndParseJSON<RiskAssessmentResult>(prompt, {
-      model: "claude-sonnet-4-20250514",
+      model,
       maxTokens: 500,
       temperature: 0,
     });
