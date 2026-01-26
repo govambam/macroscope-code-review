@@ -51,7 +51,7 @@ export async function POST(): Promise<NextResponse<PollResponse>> {
       });
     }
 
-    console.log(`Polling ${pendingPRs.length} PRs for Macroscope reviews...`);
+    console.log(`[Polling] Polling ${pendingPRs.length} PRs for Macroscope reviews:`, pendingPRs.map(p => `${p.repo_owner}/${p.repo_name}#${p.pr_number} (${p.macroscope_review_status})`));
 
     const updates: PollResult[] = [];
 
