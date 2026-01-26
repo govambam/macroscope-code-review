@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PRCandidate, DiscoverResponse } from "@/lib/types/discover";
 
@@ -28,6 +28,14 @@ function PRScoreDisplay({ overall, complexity, recency }: PRScoreDisplayProps) {
     }
     setShowTooltip(false);
   };
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div
