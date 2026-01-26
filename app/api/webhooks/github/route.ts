@@ -29,6 +29,9 @@ export async function POST(request: NextRequest) {
 
     // 3. Parse payload and get event type
     const event = JSON.parse(payload);
+    if (!event || typeof event !== "object") {
+      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    }
     const eventType = request.headers.get("x-github-event");
 
     console.log(`[Webhook] Received: ${eventType} - ${event.action || "no action"}`);
