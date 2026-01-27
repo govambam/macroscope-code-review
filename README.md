@@ -2,6 +2,8 @@
 
 A web application for reviewing code with [Macroscope](https://macroscope.dev). This tool helps you get Macroscope code reviews on any GitHub pull request and analyze the findings with AI to identify meaningful bugs.
 
+**Live App:** [app.codereview.studio](https://app.codereview.studio)
+
 ---
 
 ## User Guide
@@ -53,7 +55,7 @@ Use this when you have a specific PR URL you want to simulate.
 
 **What happens behind the scenes:** The tool forks the repository to your GitHub account and recreates the PR commits, allowing Macroscope to review it.
 
-#### Internal Repositories 
+#### Internal Repositories
 
 Use this when Macroscope has already reviewed a PR in one of your repositories.
 
@@ -79,7 +81,7 @@ The main dashboard shows all your review activity:
 - **Filters**: Filter by owner (My PRs / All PRs) or type (Internal / Simulated)
 - **Sort**: Sort repositories by name, date, or PR count
 - **Bulk Actions**: Select multiple PRs or repos to delete
-- **Refresh**: Sync with GitHub 
+- **Refresh**: Sync with GitHub
 
 ### Analyzing Bugs
 
@@ -167,17 +169,13 @@ You can also manually add repositories to the cache list:
 
 ## Technical Documentation
 
-> **Deep Dive:** For detailed technical documentation on how PR Simulation, Repository Caching, and AI Analysis work under the hood (including architecture diagrams, code snippets, and Q&A), see **[Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md)**.
+For detailed technical documentation on architecture, implementation details, API reference, and development setup, see **[Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md)**.
 
-### Tech Stack
+---
 
-- **Framework**: Next.js 16 with App Router
-- **UI**: React 19, Tailwind CSS v4
-- **Authentication**: NextAuth.js with GitHub OAuth
-- **Database**: SQLite via better-sqlite3
-- **Git Operations**: simple-git
-- **GitHub API**: @octokit/rest
-- **AI Analysis**: Anthropic SDK (Claude)
+## Running Locally
+
+If you need to run the application locally for development or testing:
 
 ### Prerequisites
 
@@ -186,174 +184,22 @@ You can also manually add repositories to the cache list:
 - GitHub account with Personal Access Token
 - Anthropic API Key
 
-### Local Development Setup
-
-#### 1. Clone and Install
+### Quick Start
 
 ```bash
+# Clone and install
 git clone https://github.com/govambam/macroscope-code-review.git
 cd macroscope-code-review
 npm install
-```
 
-#### 2. Create GitHub Personal Access Token
-
-1. Go to [GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)](https://github.com/settings/tokens)
-2. Click **Generate new token (classic)**
-3. Select the `repo` scope (full control of private repositories)
-4. Copy the token
-
-#### 3. Create GitHub OAuth App
-
-1. Go to [GitHub Settings > Developer settings > OAuth Apps](https://github.com/settings/developers)
-2. Click **New OAuth App**
-3. Set Authorization callback URL to `http://localhost:3000/api/auth/callback/github`
-4. Copy the Client ID and Client Secret
-
-#### 4. Get Anthropic API Key
-
-1. Go to [Anthropic Console](https://console.anthropic.com/settings/keys)
-2. Create an account or sign in
-3. Click **Create Key** and copy the API key
-
-#### 5. Configure Environment Variables
-
-```bash
+# Configure environment
 cp .env.local.example .env.local
-```
+# Edit .env.local with your credentials (see Technical Documentation for details)
 
-Edit `.env.local`:
-
-```env
-# GitHub Bot Token (for macroscope-gtm-bot account)
-# All forks and PRs are created under the macroscope-gtm organization
-GITHUB_BOT_TOKEN=ghp_your_bot_token_here
-
-# GitHub OAuth (for user authentication)
-GITHUB_CLIENT_ID=your_client_id
-GITHUB_CLIENT_SECRET=your_client_secret
-
-# Anthropic API Key
-ANTHROPIC_API_KEY=sk-ant-your_key_here
-
-# NextAuth Secret (generate with: openssl rand -base64 32)
-NEXTAUTH_SECRET=your_random_secret
-NEXTAUTH_URL=http://localhost:3000
-```
-
-#### 6. Run Development Server
-
-```bash
+# Run development server
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
 
-### API Routes
-
-| Route | Method | Description |
-|-------|--------|-------------|
-| `/api/discover-prs` | POST | Discover and score PRs from a repository |
-| `/api/create-pr` | POST | PR simulation with SSE streaming |
-| `/api/analyze-pr` | POST | Analyze simulated PR findings |
-| `/api/analyze-internal-pr` | POST | Analyze internal PR findings |
-| `/api/forks` | GET | List all forks and PRs |
-| `/api/forks` | DELETE | Delete forks or PRs |
-| `/api/forks/check-bugs` | POST | Count Macroscope comments on a PR |
-| `/api/users` | GET | List organization members |
-| `/api/prs/owner` | PATCH | Update PR owner |
-| `/api/generate-email` | POST | Generate outreach email |
-| `/api/prompts` | GET/POST | Manage analysis prompts |
-| `/api/prompts/versions` | GET | Get prompt version history |
-| `/api/prompts/versions/revert` | POST | Revert to a previous prompt version |
-| `/api/prompts/schema-info` | GET | Get expected output schema for a prompt type |
-| `/api/prompts/validate-schema` | POST | Validate prompt against expected schema |
-| `/api/cache` | GET/POST/DELETE | Manage repository cache list |
-| `/api/cache/clear` | POST | Clear all cached repositories |
-
-### Database Schema
-
-The SQLite database stores:
-- **forks**: Repository forks created by the tool
-- **prs**: Pull requests tracked in each fork
-- **pr_analyses**: Cached AI analysis results (supports V1 and V2 schema formats)
-- **generated_emails**: Generated outreach emails
-- **prompts**: Customizable analysis prompts with version history
-- **prompt_versions**: Historical versions of each prompt for rollback
-- **cached_repos**: List of repositories to cache for faster cloning
-
-### How PR Simulation Works
-
-The PR simulation recreates external PRs using a two-branch strategy to avoid merge conflicts:
-
-```
-Your Fork
-│
-├── main ─────────────────────────────► (synced with upstream)
-│
-├── base-for-pr-123 ──────────────────► (frozen at PR's base commit)
-│         │
-│         └── review-pr-123 ──────────► (cherry-picked PR commits)
-│
-└── PR: review-pr-123 → base-for-pr-123 (clean diff)
-```
-
-**Process:**
-1. Parse PR URL and fetch all commits
-2. Find the true base commit (parent of first PR commit)
-3. Fork the repository if needed
-4. Create `base-for-pr-{N}` branch at the base commit
-5. Create `review-pr-{N}` branch and cherry-pick all commits
-6. Create PR from review branch to base branch
-
-This ensures a clean diff regardless of what's been merged since.
-
-### Deployment
-
-The app is deployed on Railway. Key configuration:
-
-```toml
-# railway.toml
-[build]
-builder = "nixpacks"
-
-[deploy]
-healthcheckPath = "/api/health"
-healthcheckTimeout = 300
-restartPolicyType = "ON_FAILURE"
-```
-
-Environment variables needed in production:
-- All `.env.local` variables
-- `NEXTAUTH_URL` set to production URL
-
-### Troubleshooting
-
-#### "GitHub token not configured"
-Ensure `GITHUB_BOT_TOKEN` is set in `.env.local` and restart the dev server.
-
-#### "Cherry-pick failed" / Merge conflicts
-The commit cannot be cleanly applied. Try:
-- Deleting existing branches in your fork
-- Re-running the simulation
-
-#### "No Macroscope review found"
-For internal PR analysis:
-- Ensure Macroscope GitHub app is installed on the repository
-- Wait for Macroscope to complete its review
-
-#### Rate limiting
-GitHub API has rate limits. Wait a few minutes if you're creating many PRs quickly.
-
-### Development Commands
-
-```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm start        # Start production server
-npm run lint     # Run linter
-```
-
----
-
-
+For detailed setup instructions including how to create GitHub tokens and OAuth apps, see the [Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md#local-development-setup).
