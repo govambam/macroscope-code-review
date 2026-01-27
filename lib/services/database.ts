@@ -30,7 +30,6 @@ export interface PRRecord {
   last_bug_check_at: string | null;
   is_internal: boolean;
   created_by: string | null;
-  macroscope_review_pending: boolean; // true when PR created, false when Macroscope check completes
   created_at: string;
   updated_at: string | null;
 }
@@ -223,12 +222,6 @@ function initializeSchema(db: Database.Database): void {
     console.log("Added original_pr_merged_at column to prs table");
   }
 
-  // Migration: Add macroscope_review_pending column to track when Macroscope is reviewing a PR
-  if (!columnNames.includes("macroscope_review_pending")) {
-    db.exec("ALTER TABLE prs ADD COLUMN macroscope_review_pending BOOLEAN DEFAULT FALSE");
-    console.log("Added macroscope_review_pending column to prs table");
-  }
-
   // Create PR analyses table
   db.exec(`
     CREATE TABLE IF NOT EXISTS pr_analyses (
@@ -395,15 +388,14 @@ export function savePR(
     updateBugCheckTime?: boolean;
     isInternal?: boolean;
     createdBy?: string | null;
-    macroscopeReviewPending?: boolean; // true when PR created, awaiting Macroscope review
   } = {}
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, original_pr_state, original_pr_merged_at, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, macroscope_review_pending, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prs (fork_id, pr_number, pr_title, forked_pr_url, original_pr_url, original_pr_title, original_pr_state, original_pr_merged_at, has_macroscope_bugs, bug_count, state, commit_count, last_bug_check_at, is_internal, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fork_id, pr_number)
     DO UPDATE SET
       pr_title = COALESCE(excluded.pr_title, prs.pr_title),
@@ -418,8 +410,7 @@ export function savePR(
       commit_count = COALESCE(excluded.commit_count, prs.commit_count),
       last_bug_check_at = COALESCE(excluded.last_bug_check_at, prs.last_bug_check_at),
       is_internal = COALESCE(excluded.is_internal, prs.is_internal),
-      created_by = COALESCE(prs.created_by, excluded.created_by),
-      macroscope_review_pending = COALESCE(excluded.macroscope_review_pending, prs.macroscope_review_pending)
+      created_by = COALESCE(prs.created_by, excluded.created_by)
     RETURNING id
   `);
 
@@ -441,7 +432,6 @@ export function savePR(
     lastBugCheckAt,
     options.isInternal ? 1 : 0,
     options.createdBy ?? null,
-    options.macroscopeReviewPending !== undefined ? (options.macroscopeReviewPending ? 1 : 0) : null,
     now, // created_at for insert (ignored on update)
     now  // updated_at for insert (not updated on conflict)
   ) as { id: number };
@@ -475,48 +465,17 @@ export function getPRByUrl(forkedPrUrl: string): PRRecord | null {
 }
 
 /**
- * Get a PR by repo owner, repo name, and PR number.
- * Joins with forks table to match by owner/repo.
- */
-export function getPRByRepoAndNumber(owner: string, repo: string, prNumber: number): (PRRecord & { fork_id: number }) | null {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    SELECT p.*, p.fork_id
-    FROM prs p
-    JOIN forks f ON p.fork_id = f.id
-    WHERE f.repo_owner = ? AND f.repo_name = ? AND p.pr_number = ?
-  `);
-
-  return stmt.get(owner, repo, prNumber) as (PRRecord & { fork_id: number }) | null;
-}
-
-/**
- * Update bug count for a PR (also updates last_bug_check_at, updated_at, and clears macroscope_review_pending).
+ * Update bug count for a PR (also updates last_bug_check_at and updated_at timestamps).
  */
 export function updatePRBugCount(prId: number, bugCount: number): void {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    UPDATE prs SET has_macroscope_bugs = ?, bug_count = ?, last_bug_check_at = ?, updated_at = ?, macroscope_review_pending = 0 WHERE id = ?
+    UPDATE prs SET has_macroscope_bugs = ?, bug_count = ?, last_bug_check_at = ?, updated_at = ? WHERE id = ?
   `);
 
   stmt.run(bugCount > 0 ? 1 : 0, bugCount, now, now, prId);
-}
-
-/**
- * Set or clear the macroscope_review_pending flag for a PR.
- */
-export function setMacroscopeReviewPending(prId: number, pending: boolean): void {
-  const db = getDatabase();
-  const now = new Date().toISOString();
-
-  const stmt = db.prepare(`
-    UPDATE prs SET macroscope_review_pending = ?, updated_at = ? WHERE id = ?
-  `);
-
-  stmt.run(pending ? 1 : 0, now, prId);
 }
 
 /**
