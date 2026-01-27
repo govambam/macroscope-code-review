@@ -1,6 +1,8 @@
-# Macroscope Code Review Tool
+# Code Review Studio
 
-A web application for reviewing code with [Macroscope](https://macroscope.dev). This tool helps you get Macroscope code reviews on any GitHub pull request and analyze the findings with AI to identify meaningful bugs.
+**Powered by [Macroscope](https://macroscope.dev)**
+
+A web application for AI-powered code review analysis. This tool helps you get Macroscope code reviews on any GitHub pull request and analyze the findings with AI to identify meaningful bugs.
 
 **Live App:** [app.codereview.studio](https://app.codereview.studio)
 

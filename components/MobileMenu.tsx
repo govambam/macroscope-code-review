@@ -63,15 +63,7 @@ export function MobileMenu({ className = '' }: MobileMenuProps) {
 
         {/* Logo */}
         <Link href="/" className="flex items-center">
-          <Image
-            src="/Macroscope-text-logo.png"
-            alt="Macroscope"
-            width={120}
-            height={24}
-            className="h-6 w-auto"
-            priority
-            unoptimized
-          />
+          <span className="text-base font-semibold text-gray-900 tracking-tight" style={{ fontFamily: 'var(--font-geist-mono)' }}>Code Review Studio</span>
         </Link>
 
         {/* User avatar */}
@@ -111,14 +103,10 @@ export function MobileMenu({ className = '' }: MobileMenuProps) {
           <div className="fixed top-0 left-0 bottom-0 w-[280px] bg-white z-50 shadow-xl flex flex-col md:hidden animate-in slide-in-from-left duration-200">
             {/* Menu Header */}
             <div className="h-14 flex items-center justify-between px-4 border-b border-gray-200">
-              <Image
-                src="/Macroscope-text-logo.png"
-                alt="Macroscope"
-                width={120}
-                height={24}
-                className="h-6 w-auto"
-                unoptimized
-              />
+              <div className="flex flex-col">
+                <span className="text-base font-semibold text-gray-900 tracking-tight" style={{ fontFamily: 'var(--font-geist-mono)' }}>Code Review Studio</span>
+                <span className="text-xs text-gray-400">Powered by <span className="text-primary">Macroscope</span></span>
+              </div>
               <button
                 onClick={() => setIsOpen(false)}
                 className="p-2 -mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center"

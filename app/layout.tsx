@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import "./globals.css";
@@ -12,9 +12,16 @@ const geist = Geist({
   weight: ["400", "500", "600", "700"],
 });
 
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "Macroscope PR Creator",
-  description: "Recreate commits as PRs for Macroscope code reviews",
+  title: "Code Review Studio",
+  description: "AI-powered code review analysis - Powered by Macroscope",
 };
 
 export default async function RootLayout({
@@ -26,7 +33,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${geist.variable} font-sans antialiased bg-white min-h-screen text-black`}>
+      <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased bg-white min-h-screen text-black`}>
         <Providers session={session}>
           {children}
         </Providers>

@@ -1708,15 +1708,10 @@ export default function Home() {
       <aside className="hidden md:flex w-64 bg-white border-r border-border flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
-          <Image
-            src="/Macroscope-text-logo.png"
-            alt="Macroscope"
-            width={140}
-            height={28}
-            className="h-7 w-auto"
-            priority
-            unoptimized
-          />
+          <div className="flex flex-col">
+            <span className="text-lg font-semibold text-accent tracking-tight" style={{ fontFamily: 'var(--font-geist-mono)' }}>Code Review Studio</span>
+            <span className="text-xs text-text-muted">Powered by <span className="text-primary">Macroscope</span></span>
+          </div>
         </div>
 
         {/* Navigation Links */}
