@@ -205,3 +205,4 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000)
 
 For detailed setup instructions including how to create GitHub tokens and OAuth apps, see the [Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md#local-development-setup).
+
