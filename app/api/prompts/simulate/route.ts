@@ -203,6 +203,8 @@ ${comment.macroscope_comment_text}
       let bugExplanation = "Sample bug explanation";
       let bugSeverity = "high";
       let totalBugs = 1;
+      let impactScenario = "";
+      let codeSuggestion = "";
 
       if (isV2AnalysisResult(analysisResult)) {
         const best = getBestBugForOutreach(analysisResult);
@@ -210,6 +212,8 @@ ${comment.macroscope_comment_text}
           bugTitle = best.title || "Untitled Bug";
           bugExplanation = best.explanation_short || best.explanation || "No explanation available";
           bugSeverity = (best.category?.replace("bug_", "") || "high");
+          impactScenario = best.impact_scenario || "";
+          codeSuggestion = best.code_suggestion || "";
         }
         totalBugs = analysisResult.meaningful_bugs_count ?? 1;
       } else if ("meaningful_bugs_found" in analysisResult && analysisResult.meaningful_bugs_found) {
@@ -237,6 +241,8 @@ ${comment.macroscope_comment_text}
         BUG_EXPLANATION: bugExplanation,
         BUG_SEVERITY: bugSeverity,
         TOTAL_BUGS: String(totalBugs),
+        IMPACT_SCENARIO: impactScenario,
+        CODE_SNIPPET: codeSuggestion,
       };
     } else if (promptType === "discover-scoring") {
       isJsonPrompt = true;
