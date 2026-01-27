@@ -19,7 +19,7 @@ export interface EmailBugInput {
 
 /**
  * Input for email generation.
- * Only PR and bug data - recipient info will be Attio merge fields.
+ * Only PR and bug data - recipient info will be Apollo merge fields.
  */
 export interface EmailGenerationInput {
   originalPrUrl: string; // URL to their original PR in their repo
@@ -57,13 +57,13 @@ export function extractPrNumber(url: string): string | null {
 
 /**
  * Generates an outreach email using the bug analysis results.
- * The email will contain Attio merge fields for personalization:
- * - { First Name } - Recipient's first name
- * - { Company Name } - Prospect's company name
- * - { Sender Name } - Sender's name
+ * The email will contain Apollo merge fields for personalization:
+ * - {{first_name}} - Recipient's first name
+ * - {{company}} - Prospect's company name
+ * - {{sender_first_name}} - Sender's first name
  *
  * @param input - Email generation parameters (PR and bug data only)
- * @returns Generated email text with Attio merge fields
+ * @returns Generated email text with Apollo merge fields
  * @throws Error if prompt loading or API call fails
  */
 export async function generateEmail(input: EmailGenerationInput): Promise<string> {
