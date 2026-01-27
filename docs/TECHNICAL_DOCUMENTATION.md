@@ -17,9 +17,9 @@ This document provides in-depth technical documentation for four core features o
    - [Overview](#overview)
    - [Why Simulate PRs?](#why-simulate-prs)
    - [The Fork Strategy](#the-fork-strategy)
+   - [Simulation Strategies](#simulation-strategies)
    - [Step-by-Step Flow](#step-by-step-flow)
    - [Branch Architecture](#branch-architecture)
-   - [Cherry-Pick Strategy](#cherry-pick-strategy)
    - [Q&A: PR Simulation](#qa-pr-simulation)
 
 3. [Repository Caching](#repository-caching)
@@ -359,16 +359,17 @@ Here's what happens when you click "Simulate PR" for a GitHub PR URL:
 │                                                                           │
 │  Step 2: Parse & Fetch PR                                                │
 │          └─► GET /repos/{owner}/{repo}/pulls/{pr_number}                 │
-│          └─► Extract: title, author, state, merge status                 │
+│          └─► Extract: title, author, state, merge status, merge_commit   │
 │                                                                           │
-│  Step 3: Fetch PR Commits                                                │
-│          └─► GET /repos/{owner}/{repo}/pulls/{pr_number}/commits         │
-│          └─► Build list of commits to cherry-pick                        │
-│          └─► Filter out merge commits (they can't be cherry-picked)      │
+│  Step 3: Select Simulation Strategy                                      │
+│          └─► If MERGED: Try merge commit parents strategy                │
+│          └─► If OPEN (or merged failed): Try PR head fetch strategy      │
+│          └─► If both fail: Fall back to cherry-pick strategy             │
 │                                                                           │
-│  Step 4: Find Original Base Commit                                       │
-│          └─► Get parent of first PR commit                               │
-│          └─► This is the exact point where the PR branched off           │
+│  Step 4: Fetch Required Data                                             │
+│          └─► For merge-commit: Fetch merge commit to get parents         │
+│          └─► For pr-head-fetch: Fetch PR ref and base branch ref         │
+│          └─► For cherry-pick: Fetch all PR commits, find true base       │
 │                                                                           │
 │  Step 5: Check/Create Fork                                               │
 │          └─► Check if macroscope-gtm/{repo} exists                       │
@@ -383,18 +384,17 @@ Here's what happens when you click "Simulate PR" for a GitHub PR URL:
 │          └─► If not cached: full clone to temp directory                 │
 │          └─► Add upstream remote for fetching original commits           │
 │                                                                           │
-│  Step 8: Create Branches                                                 │
-│          └─► Create base-for-pr-{N} at original base commit              │
-│          └─► Create review-pr-{N} from same base commit                  │
+│  Step 8: Create Branches (varies by strategy)                            │
+│          └─► Direct strategies: Create branches at base/head commits     │
+│          └─► Cherry-pick: Create branches, then cherry-pick commits      │
 │                                                                           │
-│  Step 9: Cherry-Pick Commits                                             │
-│          └─► For each commit in original PR:                             │
-│              └─► git cherry-pick {sha}                                   │
-│          └─► Skip merge commits                                          │
+│  Step 9: Push Branches                                                   │
+│          └─► Force push base-for-pr-{N} branch                           │
+│          └─► Force push review-pr-{N} branch                             │
 │                                                                           │
-│  Step 10: Push & Create PR                                               │
-│           └─► Force push both branches                                   │
+│  Step 10: Create PR & Save                                               │
 │           └─► Create PR: review-pr-{N} → base-for-pr-{N}                 │
+│           └─► Include strategy info in PR description                    │
 │           └─► Save to database for tracking                              │
 │                                                                           │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -461,63 +461,155 @@ await repoGit.checkout(["-b", baseBranchName, baseCommit]);  // base-for-pr-123
 await repoGit.checkout(["-b", branchName, baseCommit]);      // review-pr-123
 ```
 
-### Cherry-Pick Strategy
+### Simulation Strategies
 
-We use `git cherry-pick` to replay commits instead of merging or rebasing. Here's why:
+The PR simulation system uses three strategies to recreate PRs, selected based on the PR state and what information is available. The system prioritizes strategies that preserve the exact state of the original PR.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    WHY CHERRY-PICK?                                      │
+│                    STRATEGY SELECTION PRIORITY                           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│  Option 1: git merge                                                     │
-│  ───────────────────                                                     │
-│  Problem: Merge brings in the entire branch history, not just the PR     │
-│           commits. This could include unrelated changes.                 │
+│  1. MERGED PRs → Merge Commit Parents Strategy                           │
+│     ─────────────────────────────────────────                            │
+│     • Fetch the merge commit SHA from the PR                             │
+│     • Extract Parent 0 (base) and Parent 1 (PR head) from merge commit   │
+│     • Create branches directly at these commits                          │
+│     • Result: Exact state at merge time preserved                        │
 │                                                                          │
-│  Option 2: git rebase                                                    │
-│  ───────────────────                                                     │
-│  Problem: Rebase rewrites commit history. We want to preserve the        │
-│           exact commit SHAs for traceability.                            │
+│     Also handles SQUASH MERGES:                                          │
+│     • Detected when merge commit has only 1 parent                       │
+│     • Uses base branch head and squash commit                            │
 │                                                                          │
-│  Option 3: git cherry-pick ✓                                             │
-│  ──────────────────────────                                              │
-│  Benefits:                                                               │
-│   • Applies only the specific commits from the PR                        │
-│   • Preserves commit messages and authorship                             │
-│   • Creates new commits with traceable parent references                 │
-│   • Easy to skip merge commits (which can't be cherry-picked directly)   │
+│  2. OPEN PRs → Direct PR Head Fetch Strategy                             │
+│     ─────────────────────────────────────────                            │
+│     • Fetch using refs/pull/{number}/head                                │
+│     • Use base branch head as the base commit                            │
+│     • Create branches directly without cherry-picking                    │
+│     • Result: Current PR state preserved exactly                         │
+│                                                                          │
+│  3. FALLBACK → Cherry-Pick Strategy                                      │
+│     ──────────────────────────────────                                   │
+│     • Only used if strategies 1 and 2 fail                               │
+│     • Fetch all PR commits from GitHub API                               │
+│     • Find true base (parent of first PR commit)                         │
+│     • Cherry-pick each non-merge commit sequentially                     │
+│     • Result: PR recreated commit-by-commit                              │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Handling Merge Commits:**
+**Why multiple strategies?**
 
-PRs often contain merge commits (e.g., "Merge branch 'main' into feature"). These cannot be cherry-picked normally:
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    STRATEGY COMPARISON                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Strategy              Pros                         Cons                 │
+│  ────────              ────                         ────                 │
+│                                                                          │
+│  Merge Commit          • Exact merged state         • Only works for     │
+│  Parents               • Fast (no cherry-pick)        merged PRs         │
+│                        • Handles squash merges      • Needs merge commit │
+│                                                       SHA                │
+│                                                                          │
+│  PR Head Fetch         • Works for open PRs         • May include        │
+│                        • Fast (no cherry-pick)        changes not in     │
+│                        • Current state preserved      original PR        │
+│                                                                          │
+│  Cherry-Pick           • Always works               • Slower             │
+│                        • Works even if PR           • May fail on        │
+│                          branch deleted               conflicts          │
+│                                                     • Skips merge        │
+│                                                       commits            │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation:**
 
 ```typescript
-// Filter out merge commits
+// Strategy priority selection
+let useDirectStrategy = false;
+let directBaseCommit: string | undefined;
+let directHeadCommit: string | undefined;
+let strategyName: string = "cherry-pick";
+
+if (isPRMerged && mergeCommitSha) {
+  // MERGED PR: Use merge commit parent strategy
+  const mergeCommit = await octokit.repos.getCommit({ ref: mergeCommitSha });
+
+  if (mergeCommit.parents.length >= 2) {
+    // Standard merge commit
+    directBaseCommit = mergeCommit.parents[0].sha;  // base branch
+    directHeadCommit = mergeCommit.parents[1].sha;  // PR head
+    useDirectStrategy = true;
+    strategyName = "merge-commit";
+  } else if (mergeCommit.parents.length === 1) {
+    // Squash merge - single parent
+    directBaseCommit = mergeCommit.parents[0].sha;
+    directHeadCommit = mergeCommitSha;
+    useDirectStrategy = true;
+    strategyName = "squash-merge";
+  }
+}
+
+// For OPEN PRs (or if merged strategy failed), try fetching PR head
+if (!useDirectStrategy) {
+  try {
+    const prRef = await octokit.git.getRef({ ref: `pull/${prNumber}/head` });
+    directHeadCommit = prRef.object.sha;
+
+    const baseRef = await octokit.git.getRef({ ref: `heads/${baseBranch}` });
+    directBaseCommit = baseRef.object.sha;
+
+    useDirectStrategy = true;
+    strategyName = "pr-head-fetch";
+  } catch {
+    // Fall back to cherry-pick
+  }
+}
+```
+
+**Cherry-Pick Fallback Details:**
+
+When cherry-pick is used, we handle merge commits specially:
+
+```typescript
+// Filter out merge commits (they can't be cherry-picked directly)
 const mergeCommitCount = prCommits.filter(c => c.isMergeCommit).length;
 const commitsToApply = prCommits.filter(c => !c.isMergeCommit);
 
 // A commit is a merge commit if it has more than one parent
 const isMergeCommit = (c.parents?.length || 0) > 1;
+
+// Cherry-pick each commit
+for (const commit of commitsToApply) {
+  await git.raw(["cherry-pick", commit.sha]);
+}
 ```
 
 ### Q&A: PR Simulation
 
-**Q: Why not just clone the PR branch directly?**
+**Q: Why are there multiple simulation strategies?**
 
-A: The PR branch lives in the contributor's fork, which may:
-- Be deleted after the PR is merged
-- Have restricted access
-- Not be available if the contributor's account is deleted
+A: Different PR states require different approaches:
+- **Merged PRs**: The merge commit contains the exact state at merge time. Using merge commit parents is the most accurate way to recreate the PR.
+- **Open PRs**: The PR head ref (`refs/pull/N/head`) gives us the current state without needing to cherry-pick.
+- **Fallback**: Cherry-pick is used when the above strategies aren't available (e.g., merge commit deleted, PR branch force-pushed).
 
-By cherry-picking the commits, we create an independent copy that doesn't depend on the original fork's existence.
+**Q: Why is merge commit parents preferred for merged PRs?**
+
+A: The merge commit's parents represent:
+- Parent 0: The exact state of the base branch at merge time
+- Parent 1: The exact state of the PR branch at merge time
+
+This gives us a perfect reproduction of what was reviewed and merged, even if commits were rebased or squashed before merging.
 
 **Q: What happens if the original PR has merge conflicts?**
 
-A: The cherry-pick will fail, and we abort the operation. The user sees an error message indicating which commit couldn't be applied. This is intentional - we want to recreate the PR exactly, and conflicts indicate the base has diverged significantly.
+A: With the direct strategies (merge-commit, pr-head-fetch), conflicts don't occur because we're using the exact commits. With cherry-pick fallback, the operation will fail and the user sees an error message indicating which commit couldn't be applied.
 
 **Q: Why use force push?**
 
@@ -530,9 +622,15 @@ A: We use `--force` when pushing branches because:
 await repoGit.push(["origin", branchName, "--force"]);
 ```
 
+**Q: How are squash merges handled?**
+
+A: Squash merges are detected when the merge commit has only one parent (the base branch). In this case:
+- directBaseCommit = the single parent (base branch state)
+- directHeadCommit = the merge commit SHA itself (contains all squashed changes)
+
 **Q: What about large PRs with hundreds of commits?**
 
-A: We process all commits sequentially. The GitHub API returns up to 100 commits per page. For PRs with more commits, we'd need pagination (current implementation handles up to 100 commits per PR).
+A: With direct strategies, commit count doesn't matter - we just use the base and head commits. For cherry-pick fallback, we process commits sequentially (GitHub API returns up to 100 commits per page).
 
 **Q: Can this handle PRs from private repositories?**
 
@@ -1369,6 +1467,179 @@ The frontend shows "Response was truncated" and suggests retrying with fewer com
 | Schema Validation | Prevent breaking prompt changes | Zod schemas, Claude schema extraction |
 
 All features work together: Discover Mode helps find the best PRs to review, caching makes simulation fast (especially for bulk operations), simulation creates the isolated environment for Macroscope review, and AI analysis extracts actionable bugs from the review comments with schema validation ensuring prompt changes don't break the pipeline.
+
+---
+
+## Development Setup
+
+### Tech Stack
+
+- **Framework**: Next.js 16 with App Router
+- **UI**: React 19, Tailwind CSS v4
+- **Authentication**: NextAuth.js with GitHub OAuth
+- **Database**: SQLite via better-sqlite3
+- **Git Operations**: simple-git
+- **GitHub API**: @octokit/rest
+- **AI Analysis**: Anthropic SDK (Claude)
+
+### Prerequisites
+
+- Node.js 20 or later
+- Git installed and configured
+- GitHub account with Personal Access Token
+- Anthropic API Key
+
+### Local Development Setup
+
+#### 1. Clone and Install
+
+```bash
+git clone https://github.com/govambam/macroscope-code-review.git
+cd macroscope-code-review
+npm install
+```
+
+#### 2. Create GitHub Personal Access Token
+
+1. Go to [GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**
+3. Select the `repo` scope (full control of private repositories)
+4. Copy the token
+
+#### 3. Create GitHub OAuth App
+
+1. Go to [GitHub Settings > Developer settings > OAuth Apps](https://github.com/settings/developers)
+2. Click **New OAuth App**
+3. Set Authorization callback URL to `http://localhost:3000/api/auth/callback/github`
+4. Copy the Client ID and Client Secret
+
+#### 4. Get Anthropic API Key
+
+1. Go to [Anthropic Console](https://console.anthropic.com/settings/keys)
+2. Create an account or sign in
+3. Click **Create Key** and copy the API key
+
+#### 5. Configure Environment Variables
+
+```bash
+cp .env.local.example .env.local
+```
+
+Edit `.env.local`:
+
+```env
+# GitHub Bot Token (for macroscope-gtm-bot account)
+# All forks and PRs are created under the macroscope-gtm organization
+GITHUB_BOT_TOKEN=ghp_your_bot_token_here
+
+# GitHub OAuth (for user authentication)
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+
+# Anthropic API Key
+ANTHROPIC_API_KEY=sk-ant-your_key_here
+
+# NextAuth Secret (generate with: openssl rand -base64 32)
+NEXTAUTH_SECRET=your_random_secret
+NEXTAUTH_URL=http://localhost:3000
+```
+
+#### 6. Run Development Server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000)
+
+### Development Commands
+
+```bash
+npm run dev      # Start development server
+npm run build    # Build for production
+npm start        # Start production server
+npm run lint     # Run linter
+```
+
+---
+
+## API Reference
+
+### API Routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/discover-prs` | POST | Discover and score PRs from a repository |
+| `/api/create-pr` | POST | PR simulation with SSE streaming |
+| `/api/analyze-pr` | POST | Analyze simulated PR findings |
+| `/api/analyze-internal-pr` | POST | Analyze internal PR findings |
+| `/api/forks` | GET | List all forks and PRs |
+| `/api/forks` | DELETE | Delete forks or PRs |
+| `/api/forks/check-bugs` | POST | Count Macroscope comments on a PR |
+| `/api/users` | GET | List organization members |
+| `/api/prs/owner` | PATCH | Update PR owner |
+| `/api/generate-email` | POST | Generate outreach email |
+| `/api/prompts` | GET/POST | Manage analysis prompts |
+| `/api/prompts/versions` | GET | Get prompt version history |
+| `/api/prompts/versions/revert` | POST | Revert to a previous prompt version |
+| `/api/prompts/schema-info` | GET | Get expected output schema for a prompt type |
+| `/api/prompts/validate-schema` | POST | Validate prompt against expected schema |
+| `/api/cache` | GET/POST/DELETE | Manage repository cache list |
+| `/api/cache/clear` | POST | Clear all cached repositories |
+
+### Database Schema
+
+The SQLite database stores:
+- **forks**: Repository forks created by the tool
+- **prs**: Pull requests tracked in each fork
+- **pr_analyses**: Cached AI analysis results (supports V1 and V2 schema formats)
+- **generated_emails**: Generated outreach emails
+- **prompts**: Customizable analysis prompts with version history
+- **prompt_versions**: Historical versions of each prompt for rollback
+- **cached_repos**: List of repositories to cache for faster cloning
+
+---
+
+## Deployment
+
+### Railway Deployment
+
+The app is deployed on Railway. Key configuration:
+
+```toml
+# railway.toml
+[build]
+builder = "nixpacks"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+```
+
+Environment variables needed in production:
+- All `.env.local` variables
+- `NEXTAUTH_URL` set to production URL
+
+---
+
+## Troubleshooting
+
+### "GitHub token not configured"
+Ensure `GITHUB_BOT_TOKEN` is set in `.env.local` and restart the dev server.
+
+### "Cherry-pick failed" / Merge conflicts
+The commit cannot be cleanly applied. This typically only happens with the cherry-pick fallback strategy. The merge-commit and pr-head-fetch strategies don't have this issue. Try:
+- Deleting existing branches in your fork
+- Re-running the simulation
+
+### "No Macroscope review found"
+For internal PR analysis:
+- Ensure Macroscope GitHub app is installed on the repository
+- Wait for Macroscope to complete its review
+
+### Rate limiting
+GitHub API has rate limits. Wait a few minutes if you're creating many PRs quickly.
 
 ---
 
