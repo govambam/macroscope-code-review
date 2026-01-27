@@ -65,7 +65,7 @@ export const prAnalysisSchema = z.object({
  * The output should be a formatted email starting with "Subject:" line.
  */
 export const emailGenerationSchema = z.string().describe(
-  "Plain text email output starting with 'Subject:' line, containing Attio merge fields like { First Name }, { Company Name }, { Sender Name }"
+  "Plain text email output starting with 'Subject:' line, containing Apollo merge fields like {{first_name}}, {{company}}, {{sender_first_name}}"
 );
 
 /**
