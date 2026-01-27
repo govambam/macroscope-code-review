@@ -918,7 +918,6 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
                 state: "open",
                 commitCount: effectiveCommitCount,
                 createdBy: session?.user?.login || session?.user?.name || null,
-                macroscopeReviewPending: true, // Macroscope will review this PR
               }
             );
           } catch (dbError) {
@@ -1457,7 +1456,6 @@ ${isMergeCommit ? "\n**Note:** This was a merge commit, cherry-picked with `-m 1
                 state: "open",
                 commitCount: commitsToApplyInCommitMode.length || 1,
                 createdBy: session?.user?.login || session?.user?.name || null,
-                macroscopeReviewPending: true, // Macroscope will review this PR
               }
             );
           } catch (dbError) {

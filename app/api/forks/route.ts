@@ -26,7 +26,6 @@ interface PRRecord {
   originalPrUrl?: string | null;
   isInternal?: boolean;
   createdBy?: string | null;
-  macroscopeReviewPending?: boolean;
 }
 
 interface ForkRecord {
@@ -120,7 +119,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           originalPrUrl: dbPR.original_pr_url ?? null,
           isInternal: Boolean(dbPR.is_internal),
           createdBy: dbPR.created_by ?? null,
-          macroscopeReviewPending: Boolean(dbPR.macroscope_review_pending),
         })),
       }));
 
@@ -260,7 +258,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             originalPrUrl: dbPR?.original_pr_url ?? null,
             createdBy: dbPR?.created_by ?? null,
             isInternal: false,
-            macroscopeReviewPending: Boolean(dbPR?.macroscope_review_pending),
           };
         }),
       };
@@ -291,7 +288,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
           originalPrUrl: dbPR.original_pr_url ?? null,
           isInternal: true,
-          macroscopeReviewPending: Boolean(dbPR.macroscope_review_pending),
         })),
       }));
 

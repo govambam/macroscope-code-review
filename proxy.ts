@@ -21,12 +21,10 @@ export const config = {
      * Match all request paths except:
      * - /auth/* (auth pages - signin, error)
      * - /api/auth/* (NextAuth API routes)
-     * - /api/webhooks/* (GitHub webhooks - no auth required)
-     * - /api/health (health check endpoint)
      * - /_next/static (static files)
      * - /_next/image (image optimization)
      * - /favicon.ico, /robots.txt (public files)
      */
-    "/((?!auth|api/auth|api/webhooks|api/health|_next/static|_next/image|favicon.ico|robots.txt).*)",
+    "/((?!auth|api/auth|_next/static|_next/image|favicon.ico|robots.txt).*)",
   ],
 }
