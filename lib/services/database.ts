@@ -441,7 +441,7 @@ export function savePR(
     lastBugCheckAt,
     options.isInternal ? 1 : 0,
     options.createdBy ?? null,
-    options.macroscopeReviewPending ? 1 : 0,
+    options.macroscopeReviewPending !== undefined ? (options.macroscopeReviewPending ? 1 : 0) : null,
     now, // created_at for insert (ignored on update)
     now  // updated_at for insert (not updated on conflict)
   ) as { id: number };
