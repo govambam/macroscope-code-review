@@ -1,6 +1,6 @@
 # Technical Documentation: Discover Mode, PR Simulation, Repository Caching & AI Analysis
 
-This document provides in-depth technical documentation for four core features of the Macroscope Code Review tool: **Discover Mode**, **PR Simulation**, **Repository Caching**, and **AI Analysis with Schema Validation**. It's intended for engineers who want to understand the architecture, implementation details, and design decisions.
+This document provides in-depth technical documentation for four core features of Code Review Studio: **Discover Mode**, **PR Simulation**, **Repository Caching**, and **AI Analysis with Schema Validation**. It's intended for engineers who want to understand the architecture, implementation details, and design decisions.
 
 ---
 

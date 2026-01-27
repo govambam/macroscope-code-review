@@ -9,20 +9,18 @@ function SignInContent() {
   const error = searchParams.get('error')
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 font-sans">
       <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-md">
         <div className="text-center">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-primary rounded-full flex items-center justify-center">
-              <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center">
+              <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
               </svg>
             </div>
           </div>
-          <h2 className="text-3xl font-bold text-gray-900">Macroscope PR Creator</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Sign in with your GitHub account to access the team workspace
-          </p>
+          <h2 className="text-3xl font-semibold text-gray-900" style={{ fontFamily: 'var(--font-geist-mono)' }}>Code Review Studio</h2>
+          <p className="mt-2 text-xs text-gray-400">Powered by <span className="text-primary">Macroscope</span></p>
         </div>
 
         {error && (
