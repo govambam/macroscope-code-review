@@ -158,6 +158,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Log what Apollo returned after clearing to verify it worked
+    const clearData = clearResult.data as { account?: { typed_custom_fields?: Record<string, unknown> } };
+    console.log("[CLEAR] Apollo response - checking if fields were cleared:");
+    for (const fieldId of ALL_FIELD_IDS) {
+      const value = clearData.account?.typed_custom_fields?.[fieldId];
+      console.log(`  ${fieldId}: ${value === null || value === undefined ? "CLEARED ✓" : `STILL HAS VALUE: "${String(value).substring(0, 50)}..."`}`);
+    }
+
     console.log("Custom fields cleared successfully");
 
     // Step 2: Set the new values
@@ -212,10 +220,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Log the response for debugging
+    // Log the response for debugging - compare what we sent vs what Apollo returned
+    const updateData = updateResult.data as { account?: { id?: string; name?: string; typed_custom_fields?: Record<string, string> } };
+
+    console.log("[UPDATE] Comparing sent values vs Apollo response:");
+    for (const [fieldId, sentValue] of Object.entries(customFieldsById)) {
+      const returnedValue = updateData.account?.typed_custom_fields?.[fieldId];
+      const sentPreview = sentValue.substring(0, 50);
+      const returnedPreview = returnedValue ? returnedValue.substring(0, 50) : "undefined";
+      const match = sentValue === returnedValue;
+      console.log(`  ${fieldId}:`);
+      console.log(`    SENT:     "${sentPreview}..."`);
+      console.log(`    RETURNED: "${returnedPreview}..."`);
+      console.log(`    MATCH: ${match ? "✓ YES" : "✗ NO - UPDATE FAILED"}`);
+    }
+
     console.log("Apollo update response:", JSON.stringify(updateResult.data, null, 2));
 
-    const data = updateResult.data as { account?: { id?: string; name?: string } };
+    const data = updateData;
 
     return NextResponse.json<ApolloUpdateResponse>({
       success: true,
