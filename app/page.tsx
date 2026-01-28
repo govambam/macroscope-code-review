@@ -430,7 +430,7 @@ export default function Home() {
   // Analysis Modal state
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [modalTab, setModalTab] = useState<"analysis" | "email">("analysis");
-  const [modalExpanded, setModalExpanded] = useState(false);
+  const [modalExpanded, setModalExpanded] = useState(true); // Default to expanded
   const [selectedPrTitle, setSelectedPrTitle] = useState("");
   const [showUrlPrompt, setShowUrlPrompt] = useState(false);
   const [pendingForceRefresh, setPendingForceRefresh] = useState(false);
@@ -1583,7 +1583,7 @@ export default function Home() {
 
   const closeAnalysisModal = () => {
     setShowAnalysisModal(false);
-    setModalExpanded(false);
+    setModalExpanded(true); // Reset to expanded for next open
     setModalTab("analysis");
     setShowUrlPrompt(false);
     setPendingForceRefresh(false);
@@ -3907,126 +3907,6 @@ export default function Home() {
                                   "Save Changes"
                                 )}
                               </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Apollo Integration Section */}
-                      {editedEmail && (
-                        <div className="mt-6 border-t border-border pt-6">
-                          <h3 className="text-sm font-medium text-accent mb-3">Send to Apollo</h3>
-                          <p className="text-xs text-text-secondary mb-4">
-                            Search for an Apollo account and send all 4 emails to their custom fields.
-                          </p>
-
-                          {/* Search Input */}
-                          <div className="flex gap-2 mb-3">
-                            <input
-                              type="text"
-                              value={apolloSearchQuery}
-                              onChange={(e) => setApolloSearchQuery(e.target.value)}
-                              onKeyDown={(e) => e.key === "Enter" && handleApolloSearch()}
-                              placeholder="Search company name..."
-                              className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                            />
-                            <button
-                              onClick={handleApolloSearch}
-                              disabled={apolloSearchLoading || !apolloSearchQuery.trim()}
-                              className="px-4 py-2 text-sm font-medium bg-bg-subtle hover:bg-gray-100 border border-border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {apolloSearchLoading ? (
-                                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                </svg>
-                              ) : (
-                                "Search"
-                              )}
-                            </button>
-                          </div>
-
-                          {/* Search Results */}
-                          {apolloSearchResults.length > 0 && (
-                            <div className="mb-3 border border-border rounded-lg divide-y divide-border max-h-48 overflow-y-auto">
-                              {apolloSearchResults.map((account) => (
-                                <button
-                                  key={account.id}
-                                  onClick={() => setApolloSelectedAccount({ id: account.id, name: account.name })}
-                                  className={`w-full px-3 py-2 text-left text-sm hover:bg-bg-subtle transition-colors ${
-                                    apolloSelectedAccount?.id === account.id ? "bg-primary/5 border-l-2 border-l-primary" : ""
-                                  }`}
-                                >
-                                  <div className="font-medium text-text-primary">{account.name}</div>
-                                  {account.domain && (
-                                    <div className="text-xs text-text-secondary">{account.domain}</div>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Selected Account & Send Button */}
-                          {apolloSelectedAccount && (
-                            <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
-                              <div>
-                                <div className="text-sm font-medium text-text-primary">
-                                  Selected: {apolloSelectedAccount.name}
-                                </div>
-                                <div className="text-xs text-text-secondary">
-                                  Will send all 4 emails to account custom fields
-                                </div>
-                              </div>
-                              <button
-                                onClick={handleApolloSend}
-                                disabled={apolloSending}
-                                className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
-                              >
-                                {apolloSending ? (
-                                  <span className="flex items-center gap-2">
-                                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                    </svg>
-                                    Sending...
-                                  </span>
-                                ) : apolloSendSuccess ? (
-                                  <span className="flex items-center gap-2">
-                                    <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    Sent
-                                  </span>
-                                ) : (
-                                  "Send to Apollo"
-                                )}
-                              </button>
-                            </div>
-                          )}
-
-                          {/* Error Message */}
-                          {apolloError && (
-                            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                              <div className="flex items-start gap-2">
-                                <svg className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <div className="text-sm text-red-800">{apolloError}</div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Success Message */}
-                          {apolloSendSuccess && (
-                            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                              <div className="flex items-start gap-2">
-                                <svg className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                                <div className="text-sm text-green-800">
-                                  Email sequence sent to Apollo successfully
-                                </div>
-                              </div>
                             </div>
                           )}
                         </div>
