@@ -387,9 +387,12 @@ export default function Home() {
   // Email Generation state
   const [emailLoading, setEmailLoading] = useState(false);
   const [generatedEmail, setGeneratedEmail] = useState<EmailSequence | null>(null);
+  const [editedEmail, setEditedEmail] = useState<EmailSequence | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailCopied, setEmailCopied] = useState(false);
   const [activeEmailTab, setActiveEmailTab] = useState<EmailTabKey>("email_1");
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [showUnsavedChangesPrompt, setShowUnsavedChangesPrompt] = useState(false);
 
   // Apollo integration state
   const [apolloSearchQuery, setApolloSearchQuery] = useState("");
@@ -1486,6 +1489,7 @@ export default function Home() {
         try {
           const parsedEmail = JSON.parse(data.cachedEmail) as EmailSequence;
           setGeneratedEmail(parsedEmail);
+          setEditedEmail(JSON.parse(JSON.stringify(parsedEmail))); // Deep copy for editing
         } catch {
           // Legacy format - ignore cached email if it's not valid JSON
           console.warn("Cached email is not in new JSON format, ignoring");
@@ -1537,6 +1541,7 @@ export default function Home() {
     setAnalysisOriginalUrl("");
     setAnalysisResult(null);
     setGeneratedEmail(null);
+    setEditedEmail(null);
     setEmailError(null);
     setCurrentAnalysisId(null);
     setIsViewingCached(false);
@@ -1603,8 +1608,8 @@ export default function Home() {
   };
 
   const copyEmail = async () => {
-    if (!generatedEmail) return;
-    const activeEmail = generatedEmail[activeEmailTab];
+    if (!editedEmail) return;
+    const activeEmail = editedEmail[activeEmailTab];
     const emailText = `Subject: ${activeEmail.subject}\n\n${activeEmail.body}`;
     try {
       await navigator.clipboard.writeText(emailText);
@@ -1656,19 +1661,28 @@ export default function Home() {
   };
 
   const handleApolloSend = async () => {
-    if (!apolloSelectedAccount || !generatedEmail) return;
+    if (!apolloSelectedAccount || !editedEmail) return;
 
     setApolloSending(true);
     setApolloError(null);
     setApolloSendSuccess(false);
 
     try {
+      // Save any unsaved changes first
+      if (hasUnsavedEmailChanges()) {
+        const saved = await handleSaveEmail();
+        if (!saved) {
+          setApolloError("Failed to save email changes before sending");
+          return;
+        }
+      }
+
       const response = await fetch("/api/apollo/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accountId: apolloSelectedAccount.id,
-          emailSequence: generatedEmail,
+          emailSequence: editedEmail,
         }),
       });
 
@@ -1721,19 +1735,28 @@ export default function Home() {
   };
 
   const handleAttioSend = async () => {
-    if (!attioSelectedRecord || !generatedEmail) return;
+    if (!attioSelectedRecord || !editedEmail) return;
 
     setAttioSending(true);
     setAttioError(null);
     setAttioSendSuccess(false);
 
     try {
+      // Save any unsaved changes first
+      if (hasUnsavedEmailChanges()) {
+        const saved = await handleSaveEmail();
+        if (!saved) {
+          setAttioError("Failed to save email changes before sending");
+          return;
+        }
+      }
+
       const response = await fetch("/api/attio/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           recordId: attioSelectedRecord.id,
-          emailSequence: generatedEmail,
+          emailSequence: editedEmail,
         }),
       });
 
@@ -1749,6 +1772,80 @@ export default function Home() {
       setAttioError(error instanceof Error ? error.message : "Failed to send to Attio");
     } finally {
       setAttioSending(false);
+    }
+  };
+
+  // Email editing functions
+  const hasUnsavedEmailChanges = (): boolean => {
+    if (!generatedEmail || !editedEmail) return false;
+    return JSON.stringify(generatedEmail) !== JSON.stringify(editedEmail);
+  };
+
+  const handleEmailEdit = (field: "subject" | "body", value: string) => {
+    if (!editedEmail) return;
+    setEditedEmail({
+      ...editedEmail,
+      [activeEmailTab]: {
+        ...editedEmail[activeEmailTab],
+        [field]: value,
+      },
+    });
+  };
+
+  const handleSaveEmail = async (): Promise<boolean> => {
+    if (!editedEmail || !currentAnalysisId) return false;
+
+    setEmailSaving(true);
+    try {
+      const response = await fetch("/api/emails/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analysisId: currentAnalysisId,
+          emailContent: JSON.stringify(editedEmail),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Update generatedEmail to match editedEmail (no longer unsaved)
+        setGeneratedEmail(JSON.parse(JSON.stringify(editedEmail)));
+        return true;
+      } else {
+        setEmailError(data.error || "Failed to save email");
+        return false;
+      }
+    } catch (error) {
+      setEmailError(error instanceof Error ? error.message : "Failed to save email");
+      return false;
+    } finally {
+      setEmailSaving(false);
+    }
+  };
+
+  const handleCloseModalWithCheck = () => {
+    if (hasUnsavedEmailChanges()) {
+      setShowUnsavedChangesPrompt(true);
+    } else {
+      closeAnalysisModal();
+    }
+  };
+
+  const handleDiscardChanges = () => {
+    setShowUnsavedChangesPrompt(false);
+    // Reset editedEmail to match generatedEmail
+    if (generatedEmail) {
+      setEditedEmail(JSON.parse(JSON.stringify(generatedEmail)));
+    }
+    closeAnalysisModal();
+  };
+
+  const handleSaveAndClose = async () => {
+    const saved = await handleSaveEmail();
+    if (saved) {
+      setShowUnsavedChangesPrompt(false);
+      closeAnalysisModal();
     }
   };
 
@@ -1844,6 +1941,7 @@ export default function Home() {
     setEmailLoading(true);
     setEmailError(null);
     setGeneratedEmail(null);
+    setEditedEmail(null);
     // Switch to email tab immediately to show loading skeleton
     setModalTab("email");
 
@@ -1870,6 +1968,7 @@ export default function Home() {
 
       if (data.success && data.email) {
         setGeneratedEmail(data.email);
+        setEditedEmail(JSON.parse(JSON.stringify(data.email))); // Deep copy for editing
         // Automatically switch to email tab after successful generation
         setModalTab("email");
       } else {
@@ -2961,7 +3060,7 @@ export default function Home() {
         className={`fixed inset-0 bg-black/50 z-40 transition-opacity duration-200 ${
           showAnalysisModal ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
-        onClick={closeAnalysisModal}
+        onClick={handleCloseModalWithCheck}
       />
       {/* Modal Container */}
       <div
@@ -3047,7 +3146,7 @@ export default function Home() {
                 </button>
                 {/* Close Button */}
                 <button
-                  onClick={closeAnalysisModal}
+                  onClick={handleCloseModalWithCheck}
                   className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
                 >
                   <svg className="h-6 w-6 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -3766,23 +3865,55 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* Active Email Content */}
-                      {generatedEmail && (
+                      {/* Active Email Content - Editable */}
+                      {editedEmail && (
                         <div className="bg-bg-subtle border border-border rounded-lg p-4 space-y-3">
                           <div className="flex items-start gap-2">
-                            <span className="text-sm font-medium text-accent shrink-0">Subject:</span>
-                            <span className="text-sm text-text-primary">{generatedEmail[activeEmailTab].subject}</span>
+                            <label className="text-sm font-medium text-accent shrink-0 pt-2">Subject:</label>
+                            <input
+                              type="text"
+                              value={editedEmail[activeEmailTab].subject}
+                              onChange={(e) => handleEmailEdit("subject", e.target.value)}
+                              className="flex-1 px-3 py-2 text-sm text-text-primary bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
                           </div>
                           <div className="border-t border-border pt-3">
-                            <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
-                              {generatedEmail[activeEmailTab].body}
-                            </pre>
+                            <label className="text-sm font-medium text-accent block mb-2">Body:</label>
+                            <textarea
+                              value={editedEmail[activeEmailTab].body}
+                              onChange={(e) => handleEmailEdit("body", e.target.value)}
+                              rows={12}
+                              className="w-full px-3 py-2 text-sm text-text-secondary bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y font-sans"
+                            />
                           </div>
+                          {/* Save Button - only shown when there are unsaved changes */}
+                          {hasUnsavedEmailChanges() && (
+                            <div className="flex items-center justify-between pt-2 border-t border-border">
+                              <span className="text-xs text-amber-600">You have unsaved changes</span>
+                              <button
+                                onClick={handleSaveEmail}
+                                disabled={emailSaving}
+                                className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+                              >
+                                {emailSaving ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    Saving...
+                                  </span>
+                                ) : (
+                                  "Save Changes"
+                                )}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
                       {/* Apollo Integration Section */}
-                      {generatedEmail && (
+                      {editedEmail && (
                         <div className="mt-6 border-t border-border pt-6">
                           <h3 className="text-sm font-medium text-accent mb-3">Send to Apollo</h3>
                           <p className="text-xs text-text-secondary mb-4">
@@ -3902,7 +4033,7 @@ export default function Home() {
                       )}
 
                       {/* Attio Integration Section */}
-                      {generatedEmail && (
+                      {editedEmail && (
                         <div className="mt-6 border-t border-border pt-6">
                           <h3 className="text-sm font-medium text-accent mb-3">Send to Attio</h3>
                           <p className="text-xs text-text-secondary mb-4">
@@ -4028,6 +4159,43 @@ export default function Home() {
           </div>
         </div>
       {/* End Analysis Modal */}
+
+      {/* Unsaved Changes Prompt Modal */}
+      {showUnsavedChangesPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/50"
+            onClick={() => setShowUnsavedChangesPrompt(false)}
+          />
+          <div className="relative bg-white rounded-xl shadow-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold text-accent mb-2">Unsaved Changes</h3>
+            <p className="text-sm text-text-secondary mb-6">
+              You have unsaved changes to your email. Would you like to save them before closing?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={handleDiscardChanges}
+                className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+              >
+                Discard
+              </button>
+              <button
+                onClick={() => setShowUnsavedChangesPrompt(false)}
+                className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent hover:bg-bg-subtle rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAndClose}
+                disabled={emailSaving}
+                className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+              >
+                {emailSaving ? "Saving..." : "Save & Close"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create PR Modal */}
       {showCreatePRModal && (

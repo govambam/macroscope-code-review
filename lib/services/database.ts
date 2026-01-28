@@ -651,6 +651,44 @@ export function saveGeneratedEmail(
 }
 
 /**
+ * Update an existing generated email's content.
+ */
+export function updateGeneratedEmail(emailId: number, emailContent: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE generated_emails
+    SET email_content = ?
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(emailContent, emailId);
+  return result.changes > 0;
+}
+
+/**
+ * Update an email by analysis ID (for when we don't have the email ID).
+ * Updates the most recent email for the given analysis.
+ */
+export function updateGeneratedEmailByAnalysisId(analysisId: number, emailContent: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE generated_emails
+    SET email_content = ?
+    WHERE id = (
+      SELECT id FROM generated_emails
+      WHERE pr_analysis_id = ?
+      ORDER BY generated_at DESC
+      LIMIT 1
+    )
+  `);
+
+  const result = stmt.run(emailContent, analysisId);
+  return result.changes > 0;
+}
+
+/**
  * Get all emails for an analysis.
  */
 export function getEmailsForAnalysis(analysisId: number): GeneratedEmailRecord[] {
