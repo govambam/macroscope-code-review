@@ -52,8 +52,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const body: ApolloSearchRequest = await request.json();
-    const { query } = body;
+    const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json<ApolloSearchResponse>(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
+    const { query } = body as ApolloSearchRequest;
 
     if (!query || typeof query !== "string" || query.trim().length === 0) {
       return NextResponse.json<ApolloSearchResponse>(

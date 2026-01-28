@@ -52,8 +52,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const body: ApolloUpdateRequest = await request.json();
-    const { accountId, emailSequence } = body;
+    const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json<ApolloUpdateResponse>(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
+    const { accountId, emailSequence } = body as ApolloUpdateRequest;
 
     // Validate request
     if (!accountId || typeof accountId !== "string") {
@@ -85,7 +91,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Update the account using Apollo API
     // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/update_account
-    const response = await fetch(`https://api.apollo.io/v1/accounts/${accountId}`, {
+    const response = await fetch(`https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
