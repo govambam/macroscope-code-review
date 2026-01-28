@@ -89,6 +89,13 @@ export interface CachedRepoRecord {
   notes: string | null;
 }
 
+export interface SlackUserMappingRecord {
+  id: number;
+  github_username: string;
+  slack_user_id: string;
+  created_at: string;
+}
+
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -328,6 +335,16 @@ function initializeSchema(db: Database.Database): void {
       cached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       notes TEXT,
       UNIQUE(repo_owner, repo_name)
+    )
+  `);
+
+  // Create Slack user mappings table for webhook notifications
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS slack_user_mappings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      github_username TEXT NOT NULL UNIQUE,
+      slack_user_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -1157,6 +1174,65 @@ export function getRecentPRWithAnalysisAndEmail(): {
   }
 
   return { pr, analysis, email };
+}
+
+/**
+ * Get Slack user ID by GitHub username.
+ */
+export function getSlackUserMapping(githubUsername: string): SlackUserMappingRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM slack_user_mappings WHERE github_username = ?
+  `);
+
+  return (stmt.get(githubUsername) as SlackUserMappingRecord | undefined) ?? null;
+}
+
+/**
+ * Save or update a Slack user mapping.
+ * Returns the mapping ID.
+ */
+export function saveSlackUserMapping(githubUsername: string, slackUserId: string): number {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    INSERT INTO slack_user_mappings (github_username, slack_user_id)
+    VALUES (?, ?)
+    ON CONFLICT(github_username)
+    DO UPDATE SET slack_user_id = excluded.slack_user_id
+    RETURNING id
+  `);
+
+  const result = stmt.get(githubUsername, slackUserId) as { id: number };
+  return result.id;
+}
+
+/**
+ * Get all Slack user mappings.
+ */
+export function getAllSlackUserMappings(): SlackUserMappingRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM slack_user_mappings ORDER BY github_username ASC
+  `);
+
+  return stmt.all() as SlackUserMappingRecord[];
+}
+
+/**
+ * Delete a Slack user mapping.
+ */
+export function deleteSlackUserMapping(githubUsername: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    DELETE FROM slack_user_mappings WHERE github_username = ?
+  `);
+
+  const result = stmt.run(githubUsername);
+  return result.changes > 0;
 }
 
 /**
