@@ -39,6 +39,34 @@ The following data will be interpolated into this prompt. Use it to generate the
 
 ---
 
+## Template Context (Important)
+
+The email bodies you generate will be inserted into Apollo/Attio templates that already include certain elements. Your output should NOT duplicate these:
+
+**Email 1 Template:**
+- Subject: Uses your `email_1.subject` directly
+- Body structure: `{{first_name}} - I ran Macroscope on a few recent {{company}} PRs and flagged a few issues worth a look. here's one example:` + YOUR BODY + [TEMPLATE HANDLES: separator, value statement, trial CTA] + `{{sender_first_name}}`
+- Your body should start directly with the PR reference (e.g., "In '[PR_TITLE]'...")
+- Your body should END with the review link — do NOT include the separator (---), value statement, or CTA (template handles these)
+
+**Email 2 Template:**
+- Subject: `Re:` + your `email_1.subject` (template adds "Re:" automatically)
+- Body: `{{first_name}}` + YOUR BODY + `{{sender_first_name}}`
+- Your body should start with "— " (em dash)
+
+**Email 3 Template:**
+- Subject: Your `email_3.subject` + `{{company}}` (template appends company name)
+- Body: `{{first_name}}` + YOUR BODY + `{{sender_first_name}}`
+- Your subject should end with "at " (company name gets appended)
+- Your body should start with "— "
+
+**Email 4 Template:**
+- Subject: Uses your `email_4.subject` directly
+- Body: `{{first_name}}` + YOUR BODY + `{{sender_first_name}}`
+- Your body should start with "— "
+
+---
+
 ## Sequence Strategy
 
 **Email 1: The Proof Point**
@@ -87,49 +115,42 @@ Using the data provided above, generate the following for each email:
 
 Good examples: "Race condition in your column updates", "Silent data loss in fact table sync", "NPE risk in shutdown sequence"
 
-**Body structure:**
-- Opening: "{{first_name}} — I ran Macroscope on a few recent {{company}} PRs and it flagged several issues worth a look. Here's one example:"
+**Body structure (template handles intro, closing CTA, and sign-off):**
 - PR reference with plain URL (e.g., "In [shortened title] ([URL]), which merged recently:")
 - Bug explanation (full)
-- Impact line with **Impact:** prefix
+- Impact line with "Impact:" prefix (no bold/asterisks)
 - Optional fix description (plain English) with review link
-- Review link: "See the full review here: [FORKED_PR_URL]"
-- Separator line (---)
-- Value statement about Macroscope
-- CTA: "If you want to see what else we found (and what we'd catch going forward), book 15 min here: https://calendly.com/macroscope/demo"
-- Sign off with {{sender_first_name}}
+- END with review link: "See the full review here: [FORKED_PR_URL]"
+- Do NOT include separator (---), value statement, or CTA — template handles these
 
 ### Email 2: The Fix Offer
 
-**Subject:** Re: [same subject as Email 1]
+**Subject:** Use the exact same subject as Email 1 (the template adds "Re:" automatically)
 
-**Body structure:**
-- Opening referencing the bug type and PR
+**Body structure (template prepends {{first_name}}, so start with "— "):**
+- Start with "— " then reference the bug type and PR
 - Explanation of "Fix It For Me" feature (bullet points)
 - Optional fix link if CODE_SNIPPET exists
 - CTA: "Happy to show you how it works. Book 15 min here: https://calendly.com/macroscope/demo"
-- Sign off
 
 ### Email 3: The Broader Value
 
-**Subject:** Beyond code review at {{company}}
+**Subject:** "Beyond code review at " (end with "at " — template appends company name automatically)
 
-**Body structure:**
-- Opening: "{{first_name}} — one more thought, then I'll leave you alone."
+**Body structure (template prepends {{first_name}}, so start with "— "):**
+- Start with "— one more thought, then I'll leave you alone."
 - Three feature highlights (Status, Codebase AMA, Automated summaries)
 - Connection back to the bug type/component
 - CTA with Calendly link
-- Sign off
 
 ### Email 4: The Breakup
 
 **Subject:** Closing the loop
 
-**Body structure:**
-- Short acknowledgment that timing isn't right
+**Body structure (template prepends {{first_name}}, so start with "— "):**
+- Start with "— I know timing isn't always right for new tools, even when they'd help."
 - Install link: "If you ever want to see how Macroscope reviews {{company}}'s PRs, the link's here: https://macroscope.com/install"
-- Friendly close
-- Sign off
+- Friendly close about quick setup time
 
 ---
 
