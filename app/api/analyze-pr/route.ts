@@ -19,6 +19,7 @@ import {
   getPRByUrl,
   getEmailsForAnalysis,
   updatePROriginalInfo,
+  updatePRBugCount,
 } from "@/lib/services/database";
 
 interface AnalyzeRequest {
@@ -282,6 +283,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (originalPrUrl) {
           updatePROriginalInfo(prId, originalPrUrl, originalPrTitle || null, originalPrState, originalPrMergedAt);
         }
+        // Update bug count for existing PR
+        let bugCount = 0;
+        if (isV2AnalysisResult(result)) {
+          bugCount = result.meaningful_bugs_count;
+        } else if (result.meaningful_bugs_found) {
+          bugCount = result.total_macroscope_bugs_found;
+        }
+        updatePRBugCount(prId, bugCount);
       } else {
         // Create fork and PR records
         const forkId = saveFork(
