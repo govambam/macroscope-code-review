@@ -37,11 +37,52 @@ const APOLLO_FIELD_IDS = {
   macroscope_email_4_body: "6979682b979d150021c01504",
 };
 
+const ALL_FIELD_IDS = Object.values(APOLLO_FIELD_IDS);
+
+/**
+ * Helper function to update Apollo account custom fields
+ */
+async function updateApolloAccount(
+  apiKey: string,
+  accountId: string,
+  customFields: Record<string, string>
+): Promise<{ ok: boolean; status: number; data?: unknown; error?: string }> {
+  const requestBody = {
+    account: {
+      typed_custom_fields: customFields,
+    },
+  };
+
+  const response = await fetch(
+    `https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "X-Api-Key": apiKey,
+      },
+      body: JSON.stringify(requestBody),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    return { ok: false, status: response.status, error: errorText };
+  }
+
+  const data = await response.json();
+  return { ok: true, status: response.status, data };
+}
+
 /**
  * POST /api/apollo/update
  *
  * Updates an Apollo account's custom fields with the email sequence.
  * Uses hardcoded field IDs for the macroscope email fields.
+ *
+ * To handle Apollo's behavior of not overwriting existing values,
+ * we first clear the fields with empty strings, then set the new values.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -81,7 +122,41 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Build the update payload using hardcoded field IDs
+    // Step 1: Clear all custom fields first (set to empty strings)
+    // This is needed because Apollo doesn't overwrite existing values
+    const emptyFields: Record<string, string> = {};
+    for (const fieldId of ALL_FIELD_IDS) {
+      emptyFields[fieldId] = "";
+    }
+
+    console.log("Step 1: Clearing existing custom fields...");
+    const clearResult = await updateApolloAccount(apolloApiKey, accountId, emptyFields);
+
+    if (!clearResult.ok) {
+      console.error("Failed to clear custom fields:", clearResult.status, clearResult.error);
+
+      if (clearResult.status === 401) {
+        return NextResponse.json<ApolloUpdateResponse>(
+          { success: false, error: "Invalid Apollo API key" },
+          { status: 401 }
+        );
+      }
+      if (clearResult.status === 404) {
+        return NextResponse.json<ApolloUpdateResponse>(
+          { success: false, error: "Account not found in Apollo" },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json<ApolloUpdateResponse>(
+        { success: false, error: `Failed to clear custom fields: ${clearResult.status}` },
+        { status: clearResult.status }
+      );
+    }
+
+    console.log("Custom fields cleared successfully");
+
+    // Step 2: Set the new values
     const customFieldsById: Record<string, string> = {
       [APOLLO_FIELD_IDS.macroscope_email_1_subject]: emailSequence.email_1.subject,
       [APOLLO_FIELD_IDS.macroscope_email_1_body]: emailSequence.email_1.body,
@@ -93,45 +168,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       [APOLLO_FIELD_IDS.macroscope_email_4_body]: emailSequence.email_4.body,
     };
 
-    // Wrap in account object with typed_custom_fields as required by Apollo API
-    const requestBody = {
-      account: {
-        typed_custom_fields: customFieldsById,
-      },
-    };
+    console.log("Step 2: Setting new custom field values...");
+    const updateResult = await updateApolloAccount(apolloApiKey, accountId, customFieldsById);
 
-    console.log("Updating Apollo account with request body:", JSON.stringify(requestBody, null, 2));
+    if (!updateResult.ok) {
+      console.error("Failed to set custom fields:", updateResult.status, updateResult.error);
 
-    // Update the account using Apollo API with field IDs
-    // Using POST method which may better support overwriting existing custom field values
-    // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/update_account
-    const response = await fetch(`https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-cache",
-        "X-Api-Key": apolloApiKey,
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Apollo API error:", response.status, errorText);
-
-      if (response.status === 401) {
+      if (updateResult.status === 401) {
         return NextResponse.json<ApolloUpdateResponse>(
           { success: false, error: "Invalid Apollo API key" },
           { status: 401 }
         );
       }
-      if (response.status === 404) {
+      if (updateResult.status === 404) {
         return NextResponse.json<ApolloUpdateResponse>(
           { success: false, error: "Account not found in Apollo" },
           { status: 404 }
         );
       }
-      if (response.status === 422) {
+      if (updateResult.status === 422) {
         return NextResponse.json<ApolloUpdateResponse>(
           {
             success: false,
@@ -140,7 +195,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           { status: 422 }
         );
       }
-      if (response.status === 429) {
+      if (updateResult.status === 429) {
         return NextResponse.json<ApolloUpdateResponse>(
           { success: false, error: "Apollo API rate limit exceeded. Please try again later." },
           { status: 429 }
@@ -148,15 +203,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       return NextResponse.json<ApolloUpdateResponse>(
-        { success: false, error: `Apollo API error: ${response.status}` },
-        { status: response.status }
+        { success: false, error: `Apollo API error: ${updateResult.status}` },
+        { status: updateResult.status }
       );
     }
 
-    const data = await response.json();
-
     // Log the response for debugging
-    console.log("Apollo update response:", JSON.stringify(data, null, 2));
+    console.log("Apollo update response:", JSON.stringify(updateResult.data, null, 2));
+
+    const data = updateResult.data as { account?: { id?: string; name?: string } };
 
     return NextResponse.json<ApolloUpdateResponse>({
       success: true,
