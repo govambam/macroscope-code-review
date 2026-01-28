@@ -1527,6 +1527,12 @@ export default function Home() {
     setExpectingCachedResult(hasExistingAnalysis);
     setSelectedPrTitle(prTitle);
     setModalTab("analysis");
+    // Reset Apollo state when switching PRs
+    setApolloSearchQuery("");
+    setApolloSearchResults([]);
+    setApolloSelectedAccount(null);
+    setApolloError(null);
+    setApolloSendSuccess(false);
 
     // If there's an existing analysis, set loading state BEFORE opening modal
     // This prevents the "Ready to Analyze" blip
