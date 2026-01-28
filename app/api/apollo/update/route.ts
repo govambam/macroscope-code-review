@@ -93,7 +93,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       [APOLLO_FIELD_IDS.macroscope_email_4_body]: emailSequence.email_4.body,
     };
 
-    console.log("Updating Apollo account with custom fields:", JSON.stringify(customFieldsById, null, 2));
+    // Wrap custom fields in typed_custom_fields object as required by Apollo API
+    const requestBody = {
+      typed_custom_fields: customFieldsById,
+    };
+
+    console.log("Updating Apollo account with request body:", JSON.stringify(requestBody, null, 2));
 
     // Update the account using Apollo API with field IDs
     // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/update_account
@@ -104,7 +109,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "Cache-Control": "no-cache",
         "X-Api-Key": apolloApiKey,
       },
-      body: JSON.stringify(customFieldsById),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
