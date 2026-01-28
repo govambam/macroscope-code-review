@@ -115,17 +115,17 @@ The app integrates with Apollo CRM to send generated email sequences directly to
    - Add `APOLLO_API_KEY=your_key` to your environment variables
 
 2. **Create Required Custom Fields in Apollo**:
-   The app expects the following custom fields on Account records (names are case-sensitive):
+   The app expects the following custom fields on Account records (use lowercase names):
    | Field Name | Type | Description |
    |------------|------|-------------|
-   | `MACROSCOPE_EMAIL_1_SUBJECT` | Text | Email 1 subject line |
-   | `MACROSCOPE_EMAIL_1_BODY` | Text | Email 1 body content |
-   | `MACROSCOPE_EMAIL_2_SUBJECT` | Text | Email 2 subject line |
-   | `MACROSCOPE_EMAIL_2_BODY` | Text | Email 2 body content |
-   | `MACROSCOPE_EMAIL_3_SUBJECT` | Text | Email 3 subject line |
-   | `MACROSCOPE_EMAIL_3_BODY` | Text | Email 3 body content |
-   | `MACROSCOPE_EMAIL_4_SUBJECT` | Text | Email 4 subject line |
-   | `MACROSCOPE_EMAIL_4_BODY` | Text | Email 4 body content |
+   | `macroscope_email_1_subject` | Multi-line text | Email 1 subject line |
+   | `macroscope_email_1_body` | Multi-line text | Email 1 body content |
+   | `macroscope_email_2_subject` | Multi-line text | Email 2 subject line |
+   | `macroscope_email_2_body` | Multi-line text | Email 2 body content |
+   | `macroscope_email_3_subject` | Multi-line text | Email 3 subject line |
+   | `macroscope_email_3_body` | Multi-line text | Email 3 body content |
+   | `macroscope_email_4_subject` | Multi-line text | Email 4 subject line |
+   | `macroscope_email_4_body` | Multi-line text | Email 4 body content |
 
    Create these at: Apollo Settings > Customize > Custom Fields > Account
 

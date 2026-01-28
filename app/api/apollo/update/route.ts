@@ -28,15 +28,15 @@ interface ApolloUpdateResponse {
  * POST /api/apollo/update
  *
  * Updates an Apollo account's custom fields with the email sequence.
- * Expected custom fields in Apollo (case-sensitive, uppercase):
- * - MACROSCOPE_EMAIL_1_SUBJECT
- * - MACROSCOPE_EMAIL_1_BODY
- * - MACROSCOPE_EMAIL_2_SUBJECT
- * - MACROSCOPE_EMAIL_2_BODY
- * - MACROSCOPE_EMAIL_3_SUBJECT
- * - MACROSCOPE_EMAIL_3_BODY
- * - MACROSCOPE_EMAIL_4_SUBJECT
- * - MACROSCOPE_EMAIL_4_BODY
+ * Expected custom fields in Apollo (lowercase):
+ * - macroscope_email_1_subject
+ * - macroscope_email_1_body
+ * - macroscope_email_2_subject
+ * - macroscope_email_2_body
+ * - macroscope_email_3_subject
+ * - macroscope_email_3_body
+ * - macroscope_email_4_subject
+ * - macroscope_email_4_body
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -76,16 +76,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Field name to value mapping
+    // Field name to value mapping (lowercase to match Apollo field names)
     const fieldValues: Record<string, string> = {
-      MACROSCOPE_EMAIL_1_SUBJECT: emailSequence.email_1.subject,
-      MACROSCOPE_EMAIL_1_BODY: emailSequence.email_1.body,
-      MACROSCOPE_EMAIL_2_SUBJECT: emailSequence.email_2.subject,
-      MACROSCOPE_EMAIL_2_BODY: emailSequence.email_2.body,
-      MACROSCOPE_EMAIL_3_SUBJECT: emailSequence.email_3.subject,
-      MACROSCOPE_EMAIL_3_BODY: emailSequence.email_3.body,
-      MACROSCOPE_EMAIL_4_SUBJECT: emailSequence.email_4.subject,
-      MACROSCOPE_EMAIL_4_BODY: emailSequence.email_4.body,
+      macroscope_email_1_subject: emailSequence.email_1.subject,
+      macroscope_email_1_body: emailSequence.email_1.body,
+      macroscope_email_2_subject: emailSequence.email_2.subject,
+      macroscope_email_2_body: emailSequence.email_2.body,
+      macroscope_email_3_subject: emailSequence.email_3.subject,
+      macroscope_email_3_body: emailSequence.email_3.body,
+      macroscope_email_4_subject: emailSequence.email_4.subject,
+      macroscope_email_4_body: emailSequence.email_4.body,
     };
 
     // First, fetch custom field definitions to get the field IDs
