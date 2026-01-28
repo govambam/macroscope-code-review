@@ -93,9 +93,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       [APOLLO_FIELD_IDS.macroscope_email_4_body]: emailSequence.email_4.body,
     };
 
-    // Wrap custom fields in typed_custom_fields object as required by Apollo API
+    // Wrap in account object with typed_custom_fields as required by Apollo API
     const requestBody = {
-      typed_custom_fields: customFieldsById,
+      account: {
+        typed_custom_fields: customFieldsById,
+      },
     };
 
     console.log("Updating Apollo account with request body:", JSON.stringify(requestBody, null, 2));
