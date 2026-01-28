@@ -103,9 +103,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log("Updating Apollo account with request body:", JSON.stringify(requestBody, null, 2));
 
     // Update the account using Apollo API with field IDs
+    // Using POST method which may better support overwriting existing custom field values
     // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/update_account
     const response = await fetch(`https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`, {
-      method: "PUT",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache",
