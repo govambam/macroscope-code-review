@@ -45,13 +45,17 @@ const ALL_FIELD_IDS = Object.values(APOLLO_FIELD_IDS);
 async function updateApolloAccount(
   apiKey: string,
   accountId: string,
-  customFields: Record<string, string>
+  customFields: Record<string, string | null>,
+  logLabel: string
 ): Promise<{ ok: boolean; status: number; data?: unknown; error?: string }> {
   const requestBody = {
     account: {
       typed_custom_fields: customFields,
     },
   };
+
+  // Log what we're sending
+  console.log(`[${logLabel}] Sending to Apollo:`, JSON.stringify(requestBody, null, 2));
 
   const response = await fetch(
     `https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`,
@@ -122,15 +126,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Step 1: Clear all custom fields first (set to empty strings)
+    // Step 1: Clear all custom fields first (set to null)
     // This is needed because Apollo doesn't overwrite existing values
-    const emptyFields: Record<string, string> = {};
+    const emptyFields: Record<string, null> = {};
     for (const fieldId of ALL_FIELD_IDS) {
-      emptyFields[fieldId] = "";
+      emptyFields[fieldId] = null;
     }
 
     console.log("Step 1: Clearing existing custom fields...");
-    const clearResult = await updateApolloAccount(apolloApiKey, accountId, emptyFields);
+    const clearResult = await updateApolloAccount(apolloApiKey, accountId, emptyFields, "CLEAR");
 
     if (!clearResult.ok) {
       console.error("Failed to clear custom fields:", clearResult.status, clearResult.error);
@@ -169,7 +173,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     };
 
     console.log("Step 2: Setting new custom field values...");
-    const updateResult = await updateApolloAccount(apolloApiKey, accountId, customFieldsById);
+    const updateResult = await updateApolloAccount(apolloApiKey, accountId, customFieldsById, "UPDATE");
 
     if (!updateResult.ok) {
       console.error("Failed to set custom fields:", updateResult.status, updateResult.error);
