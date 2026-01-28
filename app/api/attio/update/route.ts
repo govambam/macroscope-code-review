@@ -73,9 +73,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    if (!emailSequence || !emailSequence.email_1 || !emailSequence.email_2 || !emailSequence.email_3 || !emailSequence.email_4) {
+    // Validate emailSequence has all 4 emails with subject and body
+    const isValidEmail = (email: unknown): email is EmailEntry =>
+      typeof email === "object" &&
+      email !== null &&
+      typeof (email as EmailEntry).subject === "string" &&
+      typeof (email as EmailEntry).body === "string";
+
+    if (
+      !emailSequence ||
+      !isValidEmail(emailSequence.email_1) ||
+      !isValidEmail(emailSequence.email_2) ||
+      !isValidEmail(emailSequence.email_3) ||
+      !isValidEmail(emailSequence.email_4)
+    ) {
       return NextResponse.json<AttioUpdateResponse>(
-        { success: false, error: "emailSequence with all 4 emails is required" },
+        { success: false, error: "emailSequence with all 4 emails (each with subject and body) is required" },
         { status: 400 }
       );
     }
