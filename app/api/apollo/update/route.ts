@@ -76,10 +76,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Build custom field values
-    // Apollo custom field names must match exactly (case-sensitive)
-    // Based on Apollo UI, fields are uppercase: MACROSCOPE_EMAIL_1_SUBJECT, etc.
-    const customFields: Record<string, string> = {
+    // Field name to value mapping
+    const fieldValues: Record<string, string> = {
       MACROSCOPE_EMAIL_1_SUBJECT: emailSequence.email_1.subject,
       MACROSCOPE_EMAIL_1_BODY: emailSequence.email_1.body,
       MACROSCOPE_EMAIL_2_SUBJECT: emailSequence.email_2.subject,
@@ -90,7 +88,65 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       MACROSCOPE_EMAIL_4_BODY: emailSequence.email_4.body,
     };
 
-    // Update the account using Apollo API
+    // First, fetch custom field definitions to get the field IDs
+    // Apollo requires field IDs (not names) when updating custom fields
+    const fieldsResponse = await fetch("https://api.apollo.io/v1/typed_custom_fields", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "X-Api-Key": apolloApiKey,
+      },
+    });
+
+    if (!fieldsResponse.ok) {
+      console.error("Failed to fetch custom field definitions:", fieldsResponse.status);
+      return NextResponse.json<ApolloUpdateResponse>(
+        { success: false, error: "Failed to fetch Apollo custom field definitions" },
+        { status: 500 }
+      );
+    }
+
+    const fieldsData = await fieldsResponse.json();
+
+    // Build a map of field name -> field ID
+    // Apollo returns typed_custom_fields array with objects containing id and label
+    const fieldNameToId: Record<string, string> = {};
+    if (fieldsData.typed_custom_fields && Array.isArray(fieldsData.typed_custom_fields)) {
+      for (const field of fieldsData.typed_custom_fields) {
+        if (field.label && field.id) {
+          // Store both exact match and uppercase version for flexibility
+          fieldNameToId[field.label] = field.id;
+          fieldNameToId[field.label.toUpperCase()] = field.id;
+        }
+      }
+    }
+
+    // Build the update payload using field IDs
+    const customFieldsById: Record<string, string> = {};
+    const missingFields: string[] = [];
+
+    for (const [fieldName, value] of Object.entries(fieldValues)) {
+      const fieldId = fieldNameToId[fieldName];
+      if (fieldId) {
+        customFieldsById[fieldId] = value;
+      } else {
+        missingFields.push(fieldName);
+      }
+    }
+
+    if (missingFields.length > 0) {
+      console.warn("Missing custom field IDs for:", missingFields);
+      return NextResponse.json<ApolloUpdateResponse>(
+        {
+          success: false,
+          error: `Custom fields not found in Apollo: ${missingFields.join(", ")}. Please create these fields in Apollo Settings > Customize > Custom Fields > Account.`,
+        },
+        { status: 422 }
+      );
+    }
+
+    // Update the account using Apollo API with field IDs
     // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/update_account
     const response = await fetch(`https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`, {
       method: "PUT",
@@ -99,9 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "Cache-Control": "no-cache",
         "X-Api-Key": apolloApiKey,
       },
-      body: JSON.stringify({
-        ...customFields,
-      }),
+      body: JSON.stringify(customFieldsById),
     });
 
     if (!response.ok) {
