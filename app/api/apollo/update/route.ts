@@ -109,18 +109,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const fieldsData = await fieldsResponse.json();
 
+    // Log the full response to debug field structure
+    console.log("Apollo custom fields response:", JSON.stringify(fieldsData, null, 2));
+
     // Build a map of field name -> field ID
     // Apollo returns typed_custom_fields array with objects containing id and label
     const fieldNameToId: Record<string, string> = {};
     if (fieldsData.typed_custom_fields && Array.isArray(fieldsData.typed_custom_fields)) {
       for (const field of fieldsData.typed_custom_fields) {
+        // Log each field to see structure
+        console.log("Field:", field.id, field.label, field.name, field.modality);
         if (field.label && field.id) {
-          // Store both exact match and uppercase version for flexibility
+          // Store exact match, uppercase, and lowercase versions
           fieldNameToId[field.label] = field.id;
           fieldNameToId[field.label.toUpperCase()] = field.id;
+          fieldNameToId[field.label.toLowerCase()] = field.id;
+        }
+        // Also try 'name' property if 'label' doesn't exist
+        if (field.name && field.id) {
+          fieldNameToId[field.name] = field.id;
+          fieldNameToId[field.name.toUpperCase()] = field.id;
+          fieldNameToId[field.name.toLowerCase()] = field.id;
         }
       }
     }
+
+    console.log("Field name to ID mapping:", JSON.stringify(fieldNameToId, null, 2));
 
     // Build the update payload using field IDs
     const customFieldsById: Record<string, string> = {};
