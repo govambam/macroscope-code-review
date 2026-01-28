@@ -28,15 +28,15 @@ interface ApolloUpdateResponse {
  * POST /api/apollo/update
  *
  * Updates an Apollo account's custom fields with the email sequence.
- * Expected custom fields in Apollo:
- * - macroscope_email_1_subject
- * - macroscope_email_1_body
- * - macroscope_email_2_subject
- * - macroscope_email_2_body
- * - macroscope_email_3_subject
- * - macroscope_email_3_body
- * - macroscope_email_4_subject
- * - macroscope_email_4_body
+ * Expected custom fields in Apollo (case-sensitive, uppercase):
+ * - MACROSCOPE_EMAIL_1_SUBJECT
+ * - MACROSCOPE_EMAIL_1_BODY
+ * - MACROSCOPE_EMAIL_2_SUBJECT
+ * - MACROSCOPE_EMAIL_2_BODY
+ * - MACROSCOPE_EMAIL_3_SUBJECT
+ * - MACROSCOPE_EMAIL_3_BODY
+ * - MACROSCOPE_EMAIL_4_SUBJECT
+ * - MACROSCOPE_EMAIL_4_BODY
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -77,16 +77,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // Build custom field values
-    // Apollo custom field format: { custom_field_name: value }
+    // Apollo custom field names must match exactly (case-sensitive)
+    // Based on Apollo UI, fields are uppercase: MACROSCOPE_EMAIL_1_SUBJECT, etc.
     const customFields: Record<string, string> = {
-      macroscope_email_1_subject: emailSequence.email_1.subject,
-      macroscope_email_1_body: emailSequence.email_1.body,
-      macroscope_email_2_subject: emailSequence.email_2.subject,
-      macroscope_email_2_body: emailSequence.email_2.body,
-      macroscope_email_3_subject: emailSequence.email_3.subject,
-      macroscope_email_3_body: emailSequence.email_3.body,
-      macroscope_email_4_subject: emailSequence.email_4.subject,
-      macroscope_email_4_body: emailSequence.email_4.body,
+      MACROSCOPE_EMAIL_1_SUBJECT: emailSequence.email_1.subject,
+      MACROSCOPE_EMAIL_1_BODY: emailSequence.email_1.body,
+      MACROSCOPE_EMAIL_2_SUBJECT: emailSequence.email_2.subject,
+      MACROSCOPE_EMAIL_2_BODY: emailSequence.email_2.body,
+      MACROSCOPE_EMAIL_3_SUBJECT: emailSequence.email_3.subject,
+      MACROSCOPE_EMAIL_3_BODY: emailSequence.email_3.body,
+      MACROSCOPE_EMAIL_4_SUBJECT: emailSequence.email_4.subject,
+      MACROSCOPE_EMAIL_4_BODY: emailSequence.email_4.body,
     };
 
     // Update the account using Apollo API
@@ -142,6 +143,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const data = await response.json();
+
+    // Log the response for debugging
+    console.log("Apollo update response:", JSON.stringify(data, null, 2));
 
     return NextResponse.json<ApolloUpdateResponse>({
       success: true,
