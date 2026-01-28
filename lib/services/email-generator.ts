@@ -1,6 +1,25 @@
 import { loadPrompt, getPromptMetadata } from "./prompt-loader";
-import { sendMessage, DEFAULT_MODEL } from "./anthropic";
+import { sendMessageAndParseJSON, DEFAULT_MODEL } from "./anthropic";
 import { BugSnippet, AnalysisComment } from "./pr-analyzer";
+
+/**
+ * Single email entry in the sequence.
+ */
+export interface EmailEntry {
+  subject: string;
+  body: string;
+}
+
+/**
+ * Complete 4-email outreach sequence returned by the email generator.
+ * Contains Apollo merge fields like {{first_name}}, {{company}}, {{sender_first_name}}
+ */
+export interface EmailSequence {
+  email_1: EmailEntry;
+  email_2: EmailEntry;
+  email_3: EmailEntry;
+  email_4: EmailEntry;
+}
 
 /**
  * Extended bug info for email generation.
@@ -56,17 +75,17 @@ export function extractPrNumber(url: string): string | null {
 }
 
 /**
- * Generates an outreach email using the bug analysis results.
- * The email will contain Apollo merge fields for personalization:
+ * Generates a 4-email outreach sequence using the bug analysis results.
+ * Each email will contain Apollo merge fields for personalization:
  * - {{first_name}} - Recipient's first name
  * - {{company}} - Prospect's company name
  * - {{sender_first_name}} - Sender's first name
  *
  * @param input - Email generation parameters (PR and bug data only)
- * @returns Generated email text with Apollo merge fields
+ * @returns EmailSequence object with 4 emails, each containing subject and body
  * @throws Error if prompt loading or API call fails
  */
-export async function generateEmail(input: EmailGenerationInput): Promise<string> {
+export async function generateEmail(input: EmailGenerationInput): Promise<EmailSequence> {
   const {
     originalPrUrl,
     prTitle,
@@ -139,12 +158,12 @@ export async function generateEmail(input: EmailGenerationInput): Promise<string
   const metadata = getPromptMetadata("email-generation");
   const model = metadata.model || DEFAULT_MODEL;
 
-  // Send to Claude and get response (not JSON, just text)
-  const email = await sendMessage(prompt, {
+  // Send to Claude and parse JSON response
+  const emailSequence = await sendMessageAndParseJSON<EmailSequence>(prompt, {
     model,
-    maxTokens: 2048,
+    maxTokens: 4096, // Increased for 4-email sequence
     temperature: 0.3, // Slight creativity for natural language
   });
 
-  return email.trim();
+  return emailSequence;
 }

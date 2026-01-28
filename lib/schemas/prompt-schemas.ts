@@ -60,13 +60,24 @@ export const prAnalysisSchema = z.object({
 });
 
 /**
- * Schema for Email Generation prompt output
- * The email generation prompt returns plain text (not JSON).
- * The output should be a formatted email starting with "Subject:" line.
+ * Schema for individual email in the sequence
  */
-export const emailGenerationSchema = z.string().describe(
-  "Plain text email output starting with 'Subject:' line, containing Apollo merge fields like {{first_name}}, {{company}}, {{sender_first_name}}"
-);
+const emailEntrySchema = z.object({
+  subject: z.string(),
+  body: z.string(),
+});
+
+/**
+ * Schema for Email Generation prompt output
+ * The email generation prompt returns JSON with a 4-email sequence.
+ * Each email contains Apollo merge fields like {{first_name}}, {{company}}, {{sender_first_name}}
+ */
+export const emailGenerationSchema = z.object({
+  email_1: emailEntrySchema.describe("The Proof Point - Lead with value by showing what Macroscope can catch"),
+  email_2: emailEntrySchema.describe("The Fix Offer - Introduce 'Fix It For Me' feature"),
+  email_3: emailEntrySchema.describe("The Broader Value - Pivot from tactical to strategic"),
+  email_4: emailEntrySchema.describe("The Breakup - Short, respectful close"),
+});
 
 /**
  * Map prompt names to their expected output schemas

@@ -92,7 +92,7 @@ After Macroscope reviews a PR, click the **Run** action (or **View** for PRs tha
 1. **View Meaningful Bugs**: AI filters out style suggestions and minor issues
 2. **See Severity Levels**: Bugs are classified by category (Critical, High, Medium, Low, Suggestion, Style, Nitpick)
 3. **Find Most Impactful**: The single best bug for outreach is highlighted with a star
-4. **Generate Emails**: Create outreach emails with Attio merge fields
+4. **Generate Email Sequence**: Create a 4-email outreach sequence with Apollo merge fields
 
 Behind the scenes we are using Claude Opus 4.5 to analyze the bugs found during Macroscope's review. The prompts and models used for analysis can be updated in Settings > Prompts.
 
@@ -102,6 +102,54 @@ The AI analysis returns structured data including:
 - **Bug Counts**: Total comments processed, meaningful bugs found, outreach-ready bugs
 - **Per-Comment Analysis**: Each comment is categorized with severity, explanation, impact scenario, and suggested fix
 - **Summary**: Bugs grouped by severity with an overall recommendation
+
+### Apollo Integration
+
+The app integrates with Apollo CRM to send generated email sequences directly to account custom fields.
+
+#### Setting Up Apollo Integration
+
+1. **Get an Apollo API Key**:
+   - Go to [Apollo Settings > Integrations > API](https://app.apollo.io/#/settings/integrations/api)
+   - Generate an API key with Account write permissions
+   - Add `APOLLO_API_KEY=your_key` to your environment variables
+
+2. **Create Required Custom Fields in Apollo**:
+   The app expects the following custom fields on Account records:
+   | Field Name | Type | Description |
+   |------------|------|-------------|
+   | `macroscope_email_1_subject` | Text | Email 1 subject line |
+   | `macroscope_email_1_body` | Text | Email 1 body content |
+   | `macroscope_email_2_subject` | Text | Email 2 subject line |
+   | `macroscope_email_2_body` | Text | Email 2 body content |
+   | `macroscope_email_3_subject` | Text | Email 3 subject line |
+   | `macroscope_email_3_body` | Text | Email 3 body content |
+   | `macroscope_email_4_subject` | Text | Email 4 subject line |
+   | `macroscope_email_4_body` | Text | Email 4 body content |
+
+   Create these at: Apollo Settings > Customize > Custom Fields > Account
+
+3. **Using the Integration**:
+   - Generate an email sequence from the analysis modal
+   - In the "Send to Apollo" section, search for the company
+   - Select the matching account and click "Send to Apollo"
+   - All 4 emails will be saved to the account's custom fields
+
+#### Email Sequence Structure
+
+The generated email sequence includes 4 emails designed for progressive outreach:
+
+| Email | Name | Purpose |
+|-------|------|---------|
+| 1 | Proof Point | Lead with value - demonstrate what Macroscope catches |
+| 2 | Fix Offer | Follow up on the bug, introduce "Fix It For Me" feature |
+| 3 | Broader Value | Pivot from bugs to strategic visibility features |
+| 4 | Breakup | Respectful close, make it easy to re-engage later |
+
+Each email contains Apollo merge fields:
+- `{{first_name}}` - Recipient's first name
+- `{{company}}` - Company name
+- `{{sender_first_name}}` - Sender's first name
 
 ### Managing Prompts
 

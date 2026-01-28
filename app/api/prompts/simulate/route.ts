@@ -196,7 +196,7 @@ ${comment.macroscope_comment_text}
           : "1",
       };
     } else if (promptType === "email-generation") {
-      isJsonPrompt = false;
+      isJsonPrompt = true; // Email generation now outputs JSON format
 
       // Get best bug for outreach (with safe defaults)
       let bugTitle = "Sample Bug";
