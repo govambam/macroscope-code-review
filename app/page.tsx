@@ -408,6 +408,22 @@ export default function Home() {
   const [apolloSendSuccess, setApolloSendSuccess] = useState(false);
   const [apolloError, setApolloError] = useState<string | null>(null);
 
+  // Attio integration state
+  const [attioSearchQuery, setAttioSearchQuery] = useState("");
+  const [attioSearchResults, setAttioSearchResults] = useState<Array<{
+    id: string;
+    name: string;
+    domain: string | null;
+  }>>([]);
+  const [attioSearchLoading, setAttioSearchLoading] = useState(false);
+  const [attioSelectedRecord, setAttioSelectedRecord] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [attioSending, setAttioSending] = useState(false);
+  const [attioSendSuccess, setAttioSendSuccess] = useState(false);
+  const [attioError, setAttioError] = useState<string | null>(null);
+
   // Analysis Modal state
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [modalTab, setModalTab] = useState<"analysis" | "email">("analysis");
@@ -1533,6 +1549,12 @@ export default function Home() {
     setApolloSelectedAccount(null);
     setApolloError(null);
     setApolloSendSuccess(false);
+    // Reset Attio state when switching PRs
+    setAttioSearchQuery("");
+    setAttioSearchResults([]);
+    setAttioSelectedRecord(null);
+    setAttioError(null);
+    setAttioSendSuccess(false);
 
     // If there's an existing analysis, set loading state BEFORE opening modal
     // This prevents the "Ready to Analyze" blip
@@ -1662,6 +1684,71 @@ export default function Home() {
       setApolloError(error instanceof Error ? error.message : "Failed to send to Apollo");
     } finally {
       setApolloSending(false);
+    }
+  };
+
+  // Attio integration functions
+  const handleAttioSearch = async () => {
+    if (!attioSearchQuery.trim()) return;
+
+    setAttioSearchLoading(true);
+    setAttioError(null);
+    setAttioSearchResults([]);
+    setAttioSelectedRecord(null);
+
+    try {
+      const response = await fetch("/api/attio/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: attioSearchQuery.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.records) {
+        setAttioSearchResults(data.records);
+        if (data.records.length === 0) {
+          setAttioError("No companies found matching your search");
+        }
+      } else {
+        setAttioError(data.error || "Failed to search Attio companies");
+      }
+    } catch (error) {
+      setAttioError(error instanceof Error ? error.message : "Failed to search Attio companies");
+    } finally {
+      setAttioSearchLoading(false);
+    }
+  };
+
+  const handleAttioSend = async () => {
+    if (!attioSelectedRecord || !generatedEmail) return;
+
+    setAttioSending(true);
+    setAttioError(null);
+    setAttioSendSuccess(false);
+
+    try {
+      const response = await fetch("/api/attio/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recordId: attioSelectedRecord.id,
+          emailSequence: generatedEmail,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setAttioSendSuccess(true);
+        setTimeout(() => setAttioSendSuccess(false), 3000);
+      } else {
+        setAttioError(data.error || "Failed to send to Attio");
+      }
+    } catch (error) {
+      setAttioError(error instanceof Error ? error.message : "Failed to send to Attio");
+    } finally {
+      setAttioSending(false);
     }
   };
 
@@ -3807,6 +3894,126 @@ export default function Home() {
                                 </svg>
                                 <div className="text-sm text-green-800">
                                   Email sequence sent to Apollo successfully
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Attio Integration Section */}
+                      {generatedEmail && (
+                        <div className="mt-6 border-t border-border pt-6">
+                          <h3 className="text-sm font-medium text-accent mb-3">Send to Attio</h3>
+                          <p className="text-xs text-text-secondary mb-4">
+                            Search for a company in Attio and send all 4 emails to their custom attributes.
+                          </p>
+
+                          {/* Search Input */}
+                          <div className="flex gap-2 mb-3">
+                            <input
+                              type="text"
+                              value={attioSearchQuery}
+                              onChange={(e) => setAttioSearchQuery(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && handleAttioSearch()}
+                              placeholder="Search company name..."
+                              className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                            <button
+                              onClick={handleAttioSearch}
+                              disabled={attioSearchLoading || !attioSearchQuery.trim()}
+                              className="px-4 py-2 text-sm font-medium bg-bg-subtle hover:bg-gray-100 border border-border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {attioSearchLoading ? (
+                                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                              ) : (
+                                "Search"
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Search Results */}
+                          {attioSearchResults.length > 0 && (
+                            <div className="mb-3 border border-border rounded-lg divide-y divide-border max-h-48 overflow-y-auto">
+                              {attioSearchResults.map((record) => (
+                                <button
+                                  key={record.id}
+                                  onClick={() => setAttioSelectedRecord({ id: record.id, name: record.name })}
+                                  className={`w-full px-3 py-2 text-left text-sm hover:bg-bg-subtle transition-colors ${
+                                    attioSelectedRecord?.id === record.id ? "bg-primary/5 border-l-2 border-l-primary" : ""
+                                  }`}
+                                >
+                                  <div className="font-medium text-text-primary">{record.name}</div>
+                                  {record.domain && (
+                                    <div className="text-xs text-text-secondary">{record.domain}</div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Selected Record & Send Button */}
+                          {attioSelectedRecord && (
+                            <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                              <div>
+                                <div className="text-sm font-medium text-text-primary">
+                                  Selected: {attioSelectedRecord.name}
+                                </div>
+                                <div className="text-xs text-text-secondary">
+                                  Will send all 4 emails to company custom attributes
+                                </div>
+                              </div>
+                              <button
+                                onClick={handleAttioSend}
+                                disabled={attioSending}
+                                className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+                              >
+                                {attioSending ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    Sending...
+                                  </span>
+                                ) : attioSendSuccess ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Sent
+                                  </span>
+                                ) : (
+                                  "Send to Attio"
+                                )}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Error Message */}
+                          {attioError && (
+                            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                              <div className="flex items-start gap-2">
+                                <svg className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div className="text-sm text-red-800">{attioError}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Success Message */}
+                          {attioSendSuccess && (
+                            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="flex items-start gap-2">
+                                <svg className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                                <div className="text-sm text-green-800">
+                                  Email sequence sent to Attio successfully
                                 </div>
                               </div>
                             </div>
