@@ -96,10 +96,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       [APOLLO_FIELD_IDS.macroscope_email_4_body]: emailSequence.email_4.body,
     };
 
+    // IMPORTANT: Do NOT wrap in { account: {...} } - that breaks the API
+    // The correct format is { typed_custom_fields: {...} } directly
     const requestBody = {
-      account: {
-        typed_custom_fields: customFieldsById,
-      },
+      typed_custom_fields: customFieldsById,
     };
 
     console.log("Sending to Apollo:", JSON.stringify(requestBody, null, 2));
