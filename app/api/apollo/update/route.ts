@@ -24,38 +24,37 @@ interface ApolloUpdateResponse {
   accountName?: string;
 }
 
-// Hardcoded Apollo custom field IDs
-// These were created via the Apollo API and won't change
-const APOLLO_FIELD_IDS = {
-  macroscope_email_1_subject: "697967aa1f5edb000d93a158",
-  macroscope_email_1_body: "6979681c0d207100193f8e7e",
-  macroscope_email_2_subject: "6979680bff3e0e00192f1e38",
-  macroscope_email_2_body: "6979681fec7fc4002117ee99",
-  macroscope_email_3_subject: "69796813ff3e0e0011702a78",
-  macroscope_email_3_body: "69796825d01e21000d61c202",
-  macroscope_email_4_subject: "69796818d01e21000d61c1be",
-  macroscope_email_4_body: "6979682b979d150021c01504",
+// Apollo custom field names (as created in Apollo)
+// Using names instead of IDs to try a different API approach
+const APOLLO_FIELD_NAMES = {
+  email_1_subject: "macroscope_email_1_subject",
+  email_1_body: "macroscope_email_1_body",
+  email_2_subject: "macroscope_email_2_subject",
+  email_2_body: "macroscope_email_2_body",
+  email_3_subject: "macroscope_email_3_subject",
+  email_3_body: "macroscope_email_3_body",
+  email_4_subject: "macroscope_email_4_subject",
+  email_4_body: "macroscope_email_4_body",
 };
 
-const ALL_FIELD_IDS = Object.values(APOLLO_FIELD_IDS);
+const ALL_FIELD_NAMES = Object.values(APOLLO_FIELD_NAMES);
 
 /**
- * Helper function to update Apollo account custom fields
+ * Helper function to update Apollo account custom fields using the custom_fields array format.
+ * This uses field NAMES instead of field IDs, which may have different overwrite behavior.
  */
-async function updateApolloAccount(
+async function updateApolloAccountWithNames(
   apiKey: string,
   accountId: string,
-  customFields: Record<string, string | null>,
+  fields: Array<{ name: string; value: string }>,
   logLabel: string
 ): Promise<{ ok: boolean; status: number; data?: unknown; error?: string }> {
   const requestBody = {
-    account: {
-      typed_custom_fields: customFields,
-    },
+    custom_fields: fields,
   };
 
   // Log what we're sending
-  console.log(`[${logLabel}] Sending to Apollo:`, JSON.stringify(requestBody, null, 2));
+  console.log(`[${logLabel}] Sending to Apollo (custom_fields format):`, JSON.stringify(requestBody, null, 2));
 
   const response = await fetch(
     `https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`,
@@ -72,10 +71,12 @@ async function updateApolloAccount(
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.log(`[${logLabel}] Apollo response error:`, response.status, errorText);
     return { ok: false, status: response.status, error: errorText };
   }
 
   const data = await response.json();
+  console.log(`[${logLabel}] Apollo response:`, JSON.stringify(data, null, 2));
   return { ok: true, status: response.status, data };
 }
 
@@ -83,10 +84,9 @@ async function updateApolloAccount(
  * POST /api/apollo/update
  *
  * Updates an Apollo account's custom fields with the email sequence.
- * Uses hardcoded field IDs for the macroscope email fields.
+ * Uses field NAMES with custom_fields array format (instead of typed_custom_fields with IDs).
  *
- * To handle Apollo's behavior of not overwriting existing values,
- * we first clear the fields with empty strings, then set the new values.
+ * This approach may have different merge/overwrite behavior than typed_custom_fields.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -126,15 +126,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Step 1: Clear all custom fields first (set to null)
+    // Step 1: Clear all custom fields first (set to empty string)
     // This is needed because Apollo doesn't overwrite existing values
-    const emptyFields: Record<string, null> = {};
-    for (const fieldId of ALL_FIELD_IDS) {
-      emptyFields[fieldId] = null;
-    }
-
-    console.log("Step 1: Clearing existing custom fields...");
-    const clearResult = await updateApolloAccount(apolloApiKey, accountId, emptyFields, "CLEAR");
+    console.log("Step 1: Clearing existing custom fields (using empty string)...");
+    const clearFields = ALL_FIELD_NAMES.map(name => ({ name, value: "" }));
+    const clearResult = await updateApolloAccountWithNames(apolloApiKey, accountId, clearFields, "CLEAR");
 
     if (!clearResult.ok) {
       console.error("Failed to clear custom fields:", clearResult.status, clearResult.error);
@@ -158,22 +154,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Check if fields were actually cleared
+    const clearData = clearResult.data as { account?: { typed_custom_fields?: Record<string, unknown> } };
+    console.log("[CLEAR] Checking if fields were cleared in response...");
+
     console.log("Custom fields cleared successfully");
 
     // Step 2: Set the new values
-    const customFieldsById: Record<string, string> = {
-      [APOLLO_FIELD_IDS.macroscope_email_1_subject]: emailSequence.email_1.subject,
-      [APOLLO_FIELD_IDS.macroscope_email_1_body]: emailSequence.email_1.body,
-      [APOLLO_FIELD_IDS.macroscope_email_2_subject]: emailSequence.email_2.subject,
-      [APOLLO_FIELD_IDS.macroscope_email_2_body]: emailSequence.email_2.body,
-      [APOLLO_FIELD_IDS.macroscope_email_3_subject]: emailSequence.email_3.subject,
-      [APOLLO_FIELD_IDS.macroscope_email_3_body]: emailSequence.email_3.body,
-      [APOLLO_FIELD_IDS.macroscope_email_4_subject]: emailSequence.email_4.subject,
-      [APOLLO_FIELD_IDS.macroscope_email_4_body]: emailSequence.email_4.body,
-    };
-
     console.log("Step 2: Setting new custom field values...");
-    const updateResult = await updateApolloAccount(apolloApiKey, accountId, customFieldsById, "UPDATE");
+    const updateFields = [
+      { name: APOLLO_FIELD_NAMES.email_1_subject, value: emailSequence.email_1.subject },
+      { name: APOLLO_FIELD_NAMES.email_1_body, value: emailSequence.email_1.body },
+      { name: APOLLO_FIELD_NAMES.email_2_subject, value: emailSequence.email_2.subject },
+      { name: APOLLO_FIELD_NAMES.email_2_body, value: emailSequence.email_2.body },
+      { name: APOLLO_FIELD_NAMES.email_3_subject, value: emailSequence.email_3.subject },
+      { name: APOLLO_FIELD_NAMES.email_3_body, value: emailSequence.email_3.body },
+      { name: APOLLO_FIELD_NAMES.email_4_subject, value: emailSequence.email_4.subject },
+      { name: APOLLO_FIELD_NAMES.email_4_body, value: emailSequence.email_4.body },
+    ];
+
+    const updateResult = await updateApolloAccountWithNames(apolloApiKey, accountId, updateFields, "UPDATE");
 
     if (!updateResult.ok) {
       console.error("Failed to set custom fields:", updateResult.status, updateResult.error);
@@ -194,7 +194,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json<ApolloUpdateResponse>(
           {
             success: false,
-            error: "Failed to update custom fields. The field IDs may have changed in Apollo.",
+            error: "Failed to update custom fields. The field names may not exist in Apollo.",
           },
           { status: 422 }
         );
@@ -211,9 +211,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: updateResult.status }
       );
     }
-
-    // Log the response for debugging
-    console.log("Apollo update response:", JSON.stringify(updateResult.data, null, 2));
 
     const data = updateResult.data as { account?: { id?: string; name?: string } };
 
