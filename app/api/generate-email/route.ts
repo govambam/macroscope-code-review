@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateEmail, EmailGenerationInput } from "@/lib/services/email-generator";
+import { generateEmail, EmailGenerationInput, EmailSequence } from "@/lib/services/email-generator";
 import { BugSnippet } from "@/lib/services/pr-analyzer";
 import { saveGeneratedEmail } from "@/lib/services/database";
 
@@ -16,7 +16,7 @@ interface GenerateEmailRequest {
 
 interface GenerateEmailResponse {
   success: boolean;
-  email?: string;
+  email?: EmailSequence;
   error?: string;
   emailId?: number; // Database ID of the saved email
 }
@@ -24,8 +24,8 @@ interface GenerateEmailResponse {
 /**
  * POST /api/generate-email
  *
- * Generates an outreach email based on bug analysis results.
- * The email will contain Attio merge fields for personalization.
+ * Generates a 4-email outreach sequence based on bug analysis results.
+ * Each email contains Apollo merge fields for personalization ({{first_name}}, {{company}}, etc.)
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.warn("Generating email for a closed (not merged) PR - outreach may not be relevant");
     }
 
-    // Generate the email (with Attio merge fields for personalization)
+    // Generate the email sequence (with Apollo merge fields for personalization)
     const input: EmailGenerationInput = {
       originalPrUrl: body.originalPrUrl,
       prTitle: body.prTitle,
@@ -81,20 +81,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       totalBugs: body.totalBugs || 1,
     };
 
-    const email = await generateEmail(input);
+    const emailSequence = await generateEmail(input);
 
-    // Save email to database if we have an analysis ID
-    // Use placeholder values since we're using Attio merge fields
+    // Save email sequence to database if we have an analysis ID
+    // Store as JSON string, use placeholder values for Apollo merge fields
     let emailId: number | undefined;
     if (body.analysisId) {
       try {
         emailId = saveGeneratedEmail(
           body.analysisId,
-          "{ First Name }", // Attio merge field
+          "{{first_name}}", // Apollo merge field
           null,
-          "{ Company Name }", // Attio merge field
-          "{ Sender Name }", // Attio merge field
-          email
+          "{{company}}", // Apollo merge field
+          "{{sender_first_name}}", // Apollo merge field
+          JSON.stringify(emailSequence)
         );
       } catch (dbError) {
         console.error("Failed to save email to database:", dbError);
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json<GenerateEmailResponse>({
       success: true,
-      email,
+      email: emailSequence,
       emailId,
     });
   } catch (error) {

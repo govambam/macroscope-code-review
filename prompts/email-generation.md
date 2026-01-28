@@ -1,6 +1,6 @@
 # Email Generation Prompt
 Model: claude-sonnet-4-20250514
-Purpose: Generate personalized 4-email outreach sequence incorporating bug analysis
+Purpose: Generate personalized 4-email outreach sequence as JSON for Apollo CRM integration
 
 ---
 
@@ -10,6 +10,13 @@ You are writing a 4-email outreach sequence for Macroscope, an AI code review to
 
 **CRITICAL: Use Apollo merge field syntax for all personalization variables.**
 Apollo uses this format: `{{variable_name}}` (double curly braces, lowercase with underscores)
+
+**CRITICAL: Use plain text URLs, not HTML or Markdown links.**
+Format links as: "Link text: URL" on a single line.
+Example: "See the full review here: https://github.com/example/repo/pull/1"
+
+**CRITICAL: Return valid JSON only.**
+Your response must be a valid JSON object with no additional text before or after.
 
 ---
 
@@ -58,7 +65,7 @@ Using the data provided above, generate the following for each email:
   - If open: mention it's still open/pending
 - Use BUG_EXPLANATION as the main bug description (keep it as provided, don't truncate)
 - Use IMPACT_SCENARIO for the impact line
-- If CODE_SNIPPET exists, mention that a fix suggestion is available in the review link
+- If CODE_SNIPPET exists, mention that a fix suggestion is available in the review link (describe it in plain English, don't include actual code)
 - Derive a short bug type descriptor from BUG_TITLE (e.g., "race condition", "null pointer risk")
 
 **For Emails 2-4:**
@@ -67,7 +74,7 @@ Using the data provided above, generate the following for each email:
 
 ---
 
-## Email Templates
+## Email Content Guidelines
 
 ### Email 1: The Proof Point
 
@@ -80,90 +87,49 @@ Using the data provided above, generate the following for each email:
 
 Good examples: "Race condition in your column updates", "Silent data loss in fact table sync", "NPE risk in shutdown sequence"
 
-**Body:**
-
-{{first_name}} — I ran Macroscope on a few recent {{company}} PRs and it flagged several issues worth a look. Here's one example:
-
-[Write PR reference based on PR_STATUS - if merged: "In [shortened PR title](ORIGINAL_PR_URL), which merged recently:" / if open: "In [shortened PR title](ORIGINAL_PR_URL), which is still open:"]
-
-[Insert BUG_EXPLANATION here - use the full explanation as provided]
-
-**Impact:** [Insert IMPACT_SCENARIO here]
-
-[If CODE_SNIPPET exists, write: "The fix is straightforward — [describe the fix in plain English, one sentence]. [See the suggested change →](FORKED_PR_URL)" — otherwise omit this paragraph]
-
-[See the full review →](FORKED_PR_URL)
-
----
-
-This is the kind of thing Macroscope catches on every PR — automatically, before merge.
-
-If you want to see what else we found (and what we'd catch going forward): [Book 15 min](https://calendly.com/macroscope/demo)
-
-— {{sender_first_name}}
-
----
+**Body structure:**
+- Opening: "{{first_name}} — I ran Macroscope on a few recent {{company}} PRs and it flagged several issues worth a look. Here's one example:"
+- PR reference with plain URL (e.g., "In [shortened title] ([URL]), which merged recently:")
+- Bug explanation (full)
+- Impact line with **Impact:** prefix
+- Optional fix description (plain English) with review link
+- Review link: "See the full review here: [FORKED_PR_URL]"
+- Separator line (---)
+- Value statement about Macroscope
+- CTA: "If you want to see what else we found (and what we'd catch going forward), book 15 min here: https://calendly.com/macroscope/demo"
+- Sign off with {{sender_first_name}}
 
 ### Email 2: The Fix Offer
 
-**Subject:** Re: [Use the same subject from Email 1]
+**Subject:** Re: [same subject as Email 1]
 
-**Body:**
-
-{{first_name}} — following up on that [bug type] example I shared last week from [[shortened PR title]](ORIGINAL_PR_URL).
-
-If it's still on your team's backlog, Macroscope can push a fix directly. Here's how it works:
-
-- Macroscope's agent opens a new PR with the proposed fix
-- Runs through your CI pipeline automatically
-- Iterates until all checks pass
-- Auto-merges to the original branch when ready
-
-[If CODE_SNIPPET exists, write: "The fix: [describe the fix in plain English]. [View the change →](FORKED_PR_URL)" — otherwise omit]
-
-Happy to show you how it works: [Book 15 min](https://calendly.com/macroscope/demo)
-
-— {{sender_first_name}}
-
----
+**Body structure:**
+- Opening referencing the bug type and PR
+- Explanation of "Fix It For Me" feature (bullet points)
+- Optional fix link if CODE_SNIPPET exists
+- CTA: "Happy to show you how it works. Book 15 min here: https://calendly.com/macroscope/demo"
+- Sign off
 
 ### Email 3: The Broader Value
 
 **Subject:** Beyond code review at {{company}}
 
-**Body:**
-
-{{first_name}} — one more thought, then I'll leave you alone.
-
-Beyond catching bugs, engineering leaders use Macroscope to understand what's actually happening across their codebase:
-
-**Status** — Know where every project stands without chasing updates. Macroscope tracks progress from the code itself.
-
-**Codebase AMA** — Ask questions about your codebase in Slack and get accurate answers. "How does auth work?" "Who last touched the billing module?"
-
-**Automated summaries** — Commit and PR summaries broadcast to Slack. Your team stays informed without extra meetings.
-
-This all runs on the same deep codebase understanding that caught issues like the [bug type] in your [component/file area derived from context].
-
-If any of this would be useful for {{company}}: [Book 15 min](https://calendly.com/macroscope/demo)
-
-— {{sender_first_name}}
-
----
+**Body structure:**
+- Opening: "{{first_name}} — one more thought, then I'll leave you alone."
+- Three feature highlights (Status, Codebase AMA, Automated summaries)
+- Connection back to the bug type/component
+- CTA with Calendly link
+- Sign off
 
 ### Email 4: The Breakup
 
 **Subject:** Closing the loop
 
-**Body:**
-
-{{first_name}} — I'll assume the timing isn't right.
-
-If you ever want to see how Macroscope reviews {{company}}'s PRs, the link's here: [macroscope.com/install](https://macroscope.com/install)
-
-Feel free to reach out if things change.
-
-— {{sender_first_name}}
+**Body structure:**
+- Short acknowledgment that timing isn't right
+- Install link: "If you ever want to see how Macroscope reviews {{company}}'s PRs, the link's here: https://macroscope.com/install"
+- Friendly close
+- Sign off
 
 ---
 
@@ -192,31 +158,30 @@ Feel free to reach out if things change.
 - Don't make Email 4 guilt-trippy or sarcastic
 - Don't frame this as a bug report — it's a demonstration of capability
 - Don't output placeholder text like {VARIABLE_NAME} — always fill in the actual content
+- Don't use HTML or Markdown link syntax — use plain text URLs
+- Don't include any text outside the JSON object
 
 ---
 
 ## Output Format
 
-Return all 4 emails in sequence, clearly labeled. Each email should have the actual content filled in (not placeholders). Start each email with "Subject:" followed by the body.
+Return ONLY a valid JSON object with this exact structure. No markdown code fences, no explanation, just the JSON:
 
-Format:
-
-=== EMAIL 1: THE PROOF POINT ===
-Subject: [actual subject line]
-
-[actual email body with all content filled in]
-
-=== EMAIL 2: THE FIX OFFER ===
-Subject: [actual subject line]
-
-[actual email body with all content filled in]
-
-=== EMAIL 3: THE BROADER VALUE ===
-Subject: [actual subject line]
-
-[actual email body with all content filled in]
-
-=== EMAIL 4: THE BREAKUP ===
-Subject: [actual subject line]
-
-[actual email body with all content filled in]
+{
+  "email_1": {
+    "subject": "Subject line for email 1",
+    "body": "Full body text for email 1 with plain text URLs"
+  },
+  "email_2": {
+    "subject": "Subject line for email 2",
+    "body": "Full body text for email 2 with plain text URLs"
+  },
+  "email_3": {
+    "subject": "Subject line for email 3",
+    "body": "Full body text for email 3 with plain text URLs"
+  },
+  "email_4": {
+    "subject": "Subject line for email 4",
+    "body": "Full body text for email 4 with plain text URLs"
+  }
+}

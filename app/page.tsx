@@ -93,6 +93,21 @@ interface PRAnalysisResultV2 {
 // Union type for both formats
 type PRAnalysisResult = PRAnalysisResultV1 | PRAnalysisResultV2;
 
+// Email sequence types for Apollo integration
+interface EmailEntry {
+  subject: string;
+  body: string;
+}
+
+interface EmailSequence {
+  email_1: EmailEntry;
+  email_2: EmailEntry;
+  email_3: EmailEntry;
+  email_4: EmailEntry;
+}
+
+type EmailTabKey = "email_1" | "email_2" | "email_3" | "email_4";
+
 // Type guards
 function isV2Result(result: PRAnalysisResult): result is PRAnalysisResultV2 {
   return "all_comments" in result && "summary" in result;
@@ -151,7 +166,7 @@ function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean 
 // Email Generation types
 interface EmailGenerationResponse {
   success: boolean;
-  email?: string;
+  email?: EmailSequence;
   error?: string;
 }
 
@@ -166,7 +181,7 @@ interface AnalysisApiResponse {
   originalPrMergedAt?: string | null;
   cached?: boolean;
   analysisId?: number;
-  cachedEmail?: string;
+  cachedEmail?: string; // JSON string of EmailSequence
   needsOriginalPrUrl?: boolean;
 }
 
@@ -371,9 +386,27 @@ export default function Home() {
 
   // Email Generation state
   const [emailLoading, setEmailLoading] = useState(false);
-  const [generatedEmail, setGeneratedEmail] = useState<string | null>(null);
+  const [generatedEmail, setGeneratedEmail] = useState<EmailSequence | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailCopied, setEmailCopied] = useState(false);
+  const [activeEmailTab, setActiveEmailTab] = useState<EmailTabKey>("email_1");
+
+  // Apollo integration state
+  const [apolloSearchQuery, setApolloSearchQuery] = useState("");
+  const [apolloSearchResults, setApolloSearchResults] = useState<Array<{
+    id: string;
+    name: string;
+    domain: string | null;
+    website_url: string | null;
+  }>>([]);
+  const [apolloSearchLoading, setApolloSearchLoading] = useState(false);
+  const [apolloSelectedAccount, setApolloSelectedAccount] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [apolloSending, setApolloSending] = useState(false);
+  const [apolloSendSuccess, setApolloSendSuccess] = useState(false);
+  const [apolloError, setApolloError] = useState<string | null>(null);
 
   // Analysis Modal state
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
@@ -1432,9 +1465,15 @@ export default function Home() {
         setIsViewingCached(true);
       }
 
-      // If there's a cached email, display it
+      // If there's a cached email, parse and display it
       if (data.cachedEmail) {
-        setGeneratedEmail(data.cachedEmail);
+        try {
+          const parsedEmail = JSON.parse(data.cachedEmail) as EmailSequence;
+          setGeneratedEmail(parsedEmail);
+        } catch {
+          // Legacy format - ignore cached email if it's not valid JSON
+          console.warn("Cached email is not in new JSON format, ignoring");
+        }
       }
 
       // Update forks cache to reflect that this PR now has an analysis
@@ -1537,19 +1576,86 @@ export default function Home() {
 
   const copyEmail = async () => {
     if (!generatedEmail) return;
+    const activeEmail = generatedEmail[activeEmailTab];
+    const emailText = `Subject: ${activeEmail.subject}\n\n${activeEmail.body}`;
     try {
-      await navigator.clipboard.writeText(generatedEmail);
+      await navigator.clipboard.writeText(emailText);
       setEmailCopied(true);
       setTimeout(() => setEmailCopied(false), 2000);
     } catch {
       const textArea = document.createElement("textarea");
-      textArea.value = generatedEmail;
+      textArea.value = emailText;
       document.body.appendChild(textArea);
       textArea.select();
       document.execCommand("copy");
       document.body.removeChild(textArea);
       setEmailCopied(true);
       setTimeout(() => setEmailCopied(false), 2000);
+    }
+  };
+
+  // Apollo integration functions
+  const handleApolloSearch = async () => {
+    if (!apolloSearchQuery.trim()) return;
+
+    setApolloSearchLoading(true);
+    setApolloError(null);
+    setApolloSearchResults([]);
+    setApolloSelectedAccount(null);
+
+    try {
+      const response = await fetch("/api/apollo/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: apolloSearchQuery.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.accounts) {
+        setApolloSearchResults(data.accounts);
+        if (data.accounts.length === 0) {
+          setApolloError("No accounts found matching your search");
+        }
+      } else {
+        setApolloError(data.error || "Failed to search Apollo accounts");
+      }
+    } catch (error) {
+      setApolloError(error instanceof Error ? error.message : "Failed to search Apollo accounts");
+    } finally {
+      setApolloSearchLoading(false);
+    }
+  };
+
+  const handleApolloSend = async () => {
+    if (!apolloSelectedAccount || !generatedEmail) return;
+
+    setApolloSending(true);
+    setApolloError(null);
+    setApolloSendSuccess(false);
+
+    try {
+      const response = await fetch("/api/apollo/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: apolloSelectedAccount.id,
+          emailSequence: generatedEmail,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setApolloSendSuccess(true);
+        setTimeout(() => setApolloSendSuccess(false), 3000);
+      } else {
+        setApolloError(data.error || "Failed to send to Apollo");
+      }
+    } catch (error) {
+      setApolloError(error instanceof Error ? error.message : "Failed to send to Apollo");
+    } finally {
+      setApolloSending(false);
     }
   };
 
@@ -3505,10 +3611,10 @@ export default function Home() {
                       </div>
                     </div>
                   ) : (
-                    /* Email Content */
+                    /* Email Sequence Content */
                     <>
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-medium text-accent">Generated Email</h3>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-medium text-accent">4-Email Outreach Sequence</h3>
                         <div className="flex items-center gap-3">
                           <button
                             onClick={handleGenerateEmail}
@@ -3535,17 +3641,172 @@ export default function Home() {
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                 </svg>
-                                Copy to Clipboard
+                                Copy Selected
                               </>
                             )}
                           </button>
                         </div>
                       </div>
-                      <div className="bg-bg-subtle border border-border rounded-lg p-4">
-                        <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
-                          {generatedEmail}
-                        </pre>
+
+                      {/* Email Sequence Tabs */}
+                      <div className="border-b border-border mb-4">
+                        <div className="flex gap-1">
+                          {([
+                            { key: "email_1", label: "Email 1", desc: "Proof Point" },
+                            { key: "email_2", label: "Email 2", desc: "Fix Offer" },
+                            { key: "email_3", label: "Email 3", desc: "Broader Value" },
+                            { key: "email_4", label: "Email 4", desc: "Breakup" },
+                          ] as const).map(({ key, label, desc }) => (
+                            <button
+                              key={key}
+                              onClick={() => setActiveEmailTab(key)}
+                              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                                activeEmailTab === key
+                                  ? "border-primary text-primary"
+                                  : "border-transparent text-text-secondary hover:text-accent hover:border-gray-300"
+                              }`}
+                            >
+                              <span>{label}</span>
+                              <span className="hidden sm:inline text-xs ml-1 opacity-70">({desc})</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
+
+                      {/* Active Email Content */}
+                      {generatedEmail && (
+                        <div className="bg-bg-subtle border border-border rounded-lg p-4 space-y-3">
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-accent shrink-0">Subject:</span>
+                            <span className="text-sm text-text-primary">{generatedEmail[activeEmailTab].subject}</span>
+                          </div>
+                          <div className="border-t border-border pt-3">
+                            <pre className="text-sm text-text-secondary whitespace-pre-wrap font-sans">
+                              {generatedEmail[activeEmailTab].body}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Apollo Integration Section */}
+                      {generatedEmail && (
+                        <div className="mt-6 border-t border-border pt-6">
+                          <h3 className="text-sm font-medium text-accent mb-3">Send to Apollo</h3>
+                          <p className="text-xs text-text-secondary mb-4">
+                            Search for an Apollo account and send all 4 emails to their custom fields.
+                          </p>
+
+                          {/* Search Input */}
+                          <div className="flex gap-2 mb-3">
+                            <input
+                              type="text"
+                              value={apolloSearchQuery}
+                              onChange={(e) => setApolloSearchQuery(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && handleApolloSearch()}
+                              placeholder="Search company name..."
+                              className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                            />
+                            <button
+                              onClick={handleApolloSearch}
+                              disabled={apolloSearchLoading || !apolloSearchQuery.trim()}
+                              className="px-4 py-2 text-sm font-medium bg-bg-subtle hover:bg-gray-100 border border-border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {apolloSearchLoading ? (
+                                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                              ) : (
+                                "Search"
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Search Results */}
+                          {apolloSearchResults.length > 0 && (
+                            <div className="mb-3 border border-border rounded-lg divide-y divide-border max-h-48 overflow-y-auto">
+                              {apolloSearchResults.map((account) => (
+                                <button
+                                  key={account.id}
+                                  onClick={() => setApolloSelectedAccount({ id: account.id, name: account.name })}
+                                  className={`w-full px-3 py-2 text-left text-sm hover:bg-bg-subtle transition-colors ${
+                                    apolloSelectedAccount?.id === account.id ? "bg-primary/5 border-l-2 border-l-primary" : ""
+                                  }`}
+                                >
+                                  <div className="font-medium text-text-primary">{account.name}</div>
+                                  {account.domain && (
+                                    <div className="text-xs text-text-secondary">{account.domain}</div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Selected Account & Send Button */}
+                          {apolloSelectedAccount && (
+                            <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                              <div>
+                                <div className="text-sm font-medium text-text-primary">
+                                  Selected: {apolloSelectedAccount.name}
+                                </div>
+                                <div className="text-xs text-text-secondary">
+                                  Will send all 4 emails to account custom fields
+                                </div>
+                              </div>
+                              <button
+                                onClick={handleApolloSend}
+                                disabled={apolloSending}
+                                className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+                              >
+                                {apolloSending ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    Sending...
+                                  </span>
+                                ) : apolloSendSuccess ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Sent
+                                  </span>
+                                ) : (
+                                  "Send to Apollo"
+                                )}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Error Message */}
+                          {apolloError && (
+                            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                              <div className="flex items-start gap-2">
+                                <svg className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div className="text-sm text-red-800">{apolloError}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Success Message */}
+                          {apolloSendSuccess && (
+                            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="flex items-start gap-2">
+                                <svg className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                                <div className="text-sm text-green-800">
+                                  Email sequence sent to Apollo successfully
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
