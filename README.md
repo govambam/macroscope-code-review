@@ -91,16 +91,18 @@ After Macroscope reviews a PR, click the **Run** action (or **View** for PRs tha
 
 1. **View Meaningful Bugs**: AI filters out style suggestions and minor issues
 2. **See Severity Levels**: Bugs are classified by category (Critical, High, Medium, Low, Suggestion, Style, Nitpick)
-3. **Find Most Impactful**: The single best bug for outreach is highlighted with a star
-4. **Generate Email Sequence**: Create a 4-email outreach sequence with Apollo merge fields
+3. **See Suggested Fixes**: When Macroscope provides a code fix, a syntax-highlighted diff image is generated showing the original buggy code (red) and the fix (green)
+4. **Select Bug for Outreach**: Click any meaningful bug card to select it for email generation (the AI auto-selects the best one, but you can override)
+5. **Generate Email Sequence**: Create a 4-email outreach sequence with Apollo merge fields
 
-Behind the scenes we are using Claude Opus 4.5 to analyze the bugs found during Macroscope's review. The prompts and models used for analysis can be updated in Settings > Prompts.
+Behind the scenes we are using Claude to analyze the bugs found during Macroscope's review. The prompts and models used for analysis can be updated in Settings > Prompts.
 
 #### Analysis Output (V2 Format)
 
 The AI analysis returns structured data including:
 - **Bug Counts**: Total comments processed, meaningful bugs found, outreach-ready bugs
 - **Per-Comment Analysis**: Each comment is categorized with severity, explanation, impact scenario, and suggested fix
+- **Code Suggestion Images**: When a suggested fix is available, a GitHub-style diff image is generated using Shiki syntax highlighting and uploaded to Cloudflare R2
 - **Summary**: Bugs grouped by severity with an overall recommendation
 
 ### Apollo Integration
@@ -150,6 +152,25 @@ Each email contains Apollo merge fields:
 - `{{first_name}}` - Recipient's first name
 - `{{company}}` - Company name
 - `{{sender_first_name}}` - Sender's first name
+
+### Code Suggestion Images
+
+When Macroscope provides a code fix (via a `suggestion` block), the analysis generates a syntax-highlighted diff image showing the original code and the fix side by side. These images are displayed in the analysis modal and can be used in outreach.
+
+**Requirements:**
+- Cloudflare R2 storage must be configured (see environment variables below)
+- Images are generated using Puppeteer + Chromium (serverless-compatible) with Shiki syntax highlighting
+- The image width adjusts dynamically to fit the code content, wrapping long lines when needed
+
+**R2 Environment Variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `R2_ACCESS_KEY_ID` | Cloudflare R2 access key |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret key |
+| `R2_BUCKET_NAME` | R2 bucket name for storing images |
+| `R2_ACCOUNT_ID` | Cloudflare account ID |
+| `R2_PUBLIC_DOMAIN` | Public domain for serving images (e.g., `pub-xxx.r2.dev`) |
 
 ### Managing Prompts
 

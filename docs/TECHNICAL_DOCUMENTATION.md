@@ -36,9 +36,10 @@ This document provides in-depth technical documentation for four core features o
    - [Overview](#analysis-overview)
    - [Analysis Pipeline](#analysis-pipeline)
    - [Schema Versions (V1 vs V2)](#schema-versions-v1-vs-v2)
-   - [Dynamic Token Limits](#dynamic-token-limits)
+   - [Streaming API & Dynamic Token Limits](#streaming-api--dynamic-token-limits)
    - [Schema Registry with Zod](#schema-registry-with-zod)
    - [Schema Validation Flow](#schema-validation-flow)
+   - [Code Suggestion Image Generation](#code-suggestion-image-generation)
    - [Q&A: AI Analysis](#qa-ai-analysis)
 
 ---
@@ -1060,7 +1061,7 @@ try {
 
 ### Analysis Overview
 
-After Macroscope reviews a PR, we use Claude (Opus 4.5) to analyze the review comments and identify meaningful bugs. The AI filters out style suggestions, nitpicks, and minor issues to surface the bugs that matter most for developer outreach.
+After Macroscope reviews a PR, we use Claude to analyze the review comments and identify meaningful bugs. The AI filters out style suggestions, nitpicks, and minor issues to surface the bugs that matter most for developer outreach. When Macroscope provides code fix suggestions, the system generates syntax-highlighted diff images showing the original buggy code and the fix.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -1120,7 +1121,11 @@ const analysisId = saveAnalysis(prId, hasBugs, JSON.stringify(result), {
 
 **Key files:**
 - `lib/services/pr-analyzer.ts` - Core analysis logic
-- `lib/services/anthropic.ts` - Claude API wrapper
+- `lib/services/anthropic.ts` - Claude API wrapper (uses streaming to avoid timeouts)
+- `lib/services/code-image.ts` - Code snippet image generation (Shiki + Puppeteer)
+- `lib/services/r2.ts` - Cloudflare R2 storage for generated images
+- `lib/templates/code-diff.html` - GitHub-style diff template (light theme)
+- `lib/templates/code-snippet.html` - Plain code snippet template (dark theme)
 - `app/api/analyze-pr/route.ts` - API endpoint for simulated PRs
 - `app/api/analyze-internal-pr/route.ts` - API endpoint for internal PRs
 
@@ -1185,48 +1190,48 @@ export function isV1AnalysisResult(result: unknown): result is PRAnalysisResultV
 }
 ```
 
-### Dynamic Token Limits
+### Streaming API & Dynamic Token Limits
+
+The Claude API wrapper uses streaming (`client.messages.stream()`) to avoid the 10-minute timeout on long-running analysis requests. This is critical for PRs with many comments where analysis can take several minutes.
 
 Large PRs with many comments can produce responses that exceed Claude's default output limits. We dynamically calculate `max_tokens` based on comment count:
 
 ```typescript
 function calculateMaxTokens(commentCount: number): number {
-  // Estimate ~500 tokens per comment analysis
-  const estimatedTokensPerComment = 500;
-  const baseTokens = 2000;  // For summary and structure
-  const maxTokensCap = 16384;  // Claude's max output
+  const estimatedTokensPerComment = 1500;  // V2 format is verbose
+  const baseTokens = 3000;  // For summary and structure
+  const maxTokensCap = 32768;  // Cap at 32k tokens
+  const minTokens = 4096;  // Minimum for small PRs
 
   const calculated = baseTokens + commentCount * estimatedTokensPerComment;
-  return Math.min(calculated, maxTokensCap);
+  return Math.min(Math.max(calculated, minTokens), maxTokensCap);
 }
 ```
 
-**Truncation detection:**
+**Streaming and truncation detection:**
 
 ```typescript
+// Use streaming to avoid 10-minute timeout on long requests
+const stream = client.messages.stream({
+  model,
+  max_tokens: maxTokens,
+  temperature,
+  messages: [{ role: "user", content: prompt }],
+});
+const response = await stream.finalMessage();
+
+// Truncation is detected by checking JSON structural completeness
+// (balanced braces/brackets) before attempting to parse
 function isCompleteJSON(str: string): boolean {
   const trimmed = str.trim();
-  // Quick check: complete JSON ends with } or ]
   if (!trimmed.endsWith("}") && !trimmed.endsWith("]")) {
     return false;
   }
-  try {
-    JSON.parse(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// In the API call
-const response = await anthropic.messages.create({
-  model: promptModel,
-  max_tokens: calculateMaxTokens(commentCount),
-  // ...
-});
-
-if (!isCompleteJSON(responseText)) {
-  throw new Error("Response was truncated. Try with fewer comments.");
+  // Check balanced braces/brackets (avoids JSON.parse
+  // which fails on control characters in string fields)
+  let braceCount = 0, bracketCount = 0;
+  // ... counts { } [ ] outside of strings
+  return braceCount === 0 && bracketCount === 0;
 }
 ```
 
@@ -1421,6 +1426,45 @@ export async function GET(request: NextRequest) {
 }
 ```
 
+### Code Suggestion Image Generation
+
+When the AI analysis extracts a `code_suggestion` field (a unified diff with `- ` and `+ ` prefixed lines), the system generates a syntax-highlighted image of the diff. This image is displayed in the analysis UI alongside each bug.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    IMAGE GENERATION PIPELINE                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  code_suggestion        Shiki              Puppeteer         R2 Storage  │
+│  (diff text)            Highlighter        + Chromium        (CDN)       │
+│                                                                          │
+│  ┌──────────────┐      ┌──────────────┐   ┌──────────────┐  ┌────────┐ │
+│  │ - old code   │      │ Tokenize &   │   │ Render HTML  │  │ Upload │ │
+│  │ + new code   │─────►│ highlight    │──►│ template to  │─►│ PNG to │ │
+│  │              │      │ per-line     │   │ screenshot   │  │ R2     │ │
+│  └──────────────┘      └──────────────┘   └──────────────┘  └────────┘ │
+│                                                                          │
+│  Key details:                                                            │
+│  • Diff detection: requires both - and + lines (avoids Markdown lists)  │
+│  • Syntax highlighting: Shiki codeToTokens with github-light theme      │
+│  • Dynamic width: container shrink-wraps to content (240px–660px)       │
+│  • Long lines wrap via pre-wrap instead of being clipped                │
+│  • Images optimized with Sharp when > 100KB                             │
+│  • Uploaded to Cloudflare R2 with unique filenames per PR               │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Dependencies (lazy-loaded for serverless):**
+- `shiki` - Syntax highlighting with language-specific tokenization
+- `puppeteer-core` + `@sparticuz/chromium` - Headless browser for HTML-to-PNG rendering
+- `sharp` - PNG compression for large images
+- Cloudflare R2 (S3-compatible) - Image hosting with public CDN URLs
+
+**Templates:**
+- `lib/templates/code-diff.html` - GitHub-style light theme with red/green backgrounds for removed/added lines
+- `lib/templates/code-snippet.html` - Dracula dark theme fallback for non-diff code
+
 ### Q&A: AI Analysis
 
 **Q: Why use Claude to extract the schema instead of parsing the prompt directly?**
@@ -1447,12 +1491,7 @@ A: When displaying old analysis results, we need to know which format to expect.
 
 **Q: What if the AI returns truncated JSON?**
 
-A: We detect truncation before attempting to parse:
-1. Check if the response ends with `}` or `]`
-2. Try to parse as JSON
-3. If either fails, throw an error with a helpful message
-
-The frontend shows "Response was truncated" and suggests retrying with fewer comments.
+A: We detect truncation by checking structural completeness (balanced braces/brackets while tracking string context) before attempting to parse. This avoids false positives from control characters in string fields that would cause `JSON.parse` to fail. The streaming API also prevents the 10-minute timeout that previously caused truncation on large PRs. If truncation is detected, the frontend shows an error with the response length and a preview of where it cut off.
 
 ---
 
@@ -1463,7 +1502,8 @@ The frontend shows "Response was truncated" and suggests retrying with fewer com
 | Discover Mode | Find and batch-simulate high-value PRs | PR scoring algorithm, SSE streaming |
 | PR Simulation | Recreate external PRs for analysis | Git cherry-pick, dual-branch architecture |
 | Repository Caching | Speed up cloning | Git `--reference` flag, auto-caching |
-| AI Analysis | Categorize and filter bugs | Claude API, dynamic token limits |
+| AI Analysis | Categorize and filter bugs | Claude streaming API, dynamic token limits |
+| Code Images | Visualize suggested fixes as diffs | Shiki, Puppeteer, Cloudflare R2 |
 | Schema Validation | Prevent breaking prompt changes | Zod schemas, Claude schema extraction |
 
 All features work together: Discover Mode helps find the best PRs to review, caching makes simulation fast (especially for bulk operations), simulation creates the isolated environment for Macroscope review, and AI analysis extracts actionable bugs from the review comments with schema validation ensuring prompt changes don't break the pipeline.
@@ -1480,7 +1520,9 @@ All features work together: Discover Mode helps find the best PRs to review, cac
 - **Database**: SQLite via better-sqlite3
 - **Git Operations**: simple-git
 - **GitHub API**: @octokit/rest
-- **AI Analysis**: Anthropic SDK (Claude)
+- **AI Analysis**: Anthropic SDK (Claude) with streaming API
+- **Code Images**: Shiki (syntax highlighting), Puppeteer + @sparticuz/chromium (rendering), Sharp (optimization)
+- **Image Storage**: Cloudflare R2 (S3-compatible)
 
 ### Prerequisites
 
@@ -1542,6 +1584,13 @@ ANTHROPIC_API_KEY=sk-ant-your_key_here
 # NextAuth Secret (generate with: openssl rand -base64 32)
 NEXTAUTH_SECRET=your_random_secret
 NEXTAUTH_URL=http://localhost:3000
+
+# Cloudflare R2 (optional - for code suggestion images)
+R2_ACCESS_KEY_ID=your_r2_access_key
+R2_SECRET_ACCESS_KEY=your_r2_secret_key
+R2_BUCKET_NAME=your_bucket_name
+R2_ACCOUNT_ID=your_cloudflare_account_id
+R2_PUBLIC_DOMAIN=pub-xxx.r2.dev
 ```
 
 #### 6. Run Development Server
