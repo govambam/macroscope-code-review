@@ -1,11 +1,12 @@
 /**
  * Code snippet image generation service.
  * Uses Shiki for syntax highlighting and Puppeteer for rendering.
+ * Supports both plain code snippets and diff-style views.
  */
 
 import fs from "fs";
 import path from "path";
-import { createHighlighter, type Highlighter } from "shiki";
+import { createHighlighter, type Highlighter, type BundledLanguage } from "shiki";
 import { uploadToR2, isR2Configured } from "./r2";
 
 // Lazy-loaded modules for serverless environments
@@ -28,6 +29,11 @@ interface GenerateCodeImageResult {
   error?: string;
 }
 
+interface DiffLine {
+  type: "removed" | "added" | "context";
+  code: string;
+}
+
 // Singleton highlighter promise (store promise to prevent race condition)
 let highlighterPromise: Promise<Highlighter> | null = null;
 
@@ -40,7 +46,7 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: ["dracula"],
+      themes: ["dracula", "github-light"],
       langs: [
         "javascript",
         "typescript",
@@ -111,7 +117,7 @@ function normalizeLanguage(language: string): string {
 }
 
 /**
- * Load the HTML template for code snippets.
+ * Load the HTML template for plain code snippets.
  */
 function loadTemplate(): string {
   const templatePath = path.join(
@@ -124,7 +130,123 @@ function loadTemplate(): string {
 }
 
 /**
+ * Load the HTML template for diff views.
+ */
+function loadDiffTemplate(): string {
+  const templatePath = path.join(
+    process.cwd(),
+    "lib",
+    "templates",
+    "code-diff.html"
+  );
+  return fs.readFileSync(templatePath, "utf-8");
+}
+
+/**
+ * Parse code suggestion text into diff lines.
+ * Returns null if the text doesn't contain diff markers.
+ */
+function parseDiffLines(code: string): DiffLine[] | null {
+  const lines = code.split("\n");
+  let hasDiffMarkers = false;
+  const diffLines: DiffLine[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("- ") || line === "-") {
+      diffLines.push({ type: "removed", code: line.startsWith("- ") ? line.slice(2) : "" });
+      hasDiffMarkers = true;
+    } else if (line.startsWith("+ ") || line === "+") {
+      diffLines.push({ type: "added", code: line.startsWith("+ ") ? line.slice(2) : "" });
+      hasDiffMarkers = true;
+    } else {
+      diffLines.push({ type: "context", code: line });
+    }
+  }
+
+  return hasDiffMarkers ? diffLines : null;
+}
+
+/**
+ * Build diff HTML with syntax-highlighted lines and colored backgrounds.
+ * Uses Shiki's codeToTokens for per-token highlighting, then wraps
+ * each line in the appropriate diff row styling.
+ */
+async function buildDiffHtml(
+  diffLines: DiffLine[],
+  language: BundledLanguage,
+  highlighter: Highlighter
+): Promise<string> {
+  // Separate removed and added lines for independent highlighting
+  const removedLines = diffLines.filter((l) => l.type === "removed");
+  const addedLines = diffLines.filter((l) => l.type === "added");
+  const contextLines = diffLines.filter((l) => l.type === "context");
+
+  // Highlight each group separately
+  const highlightGroup = (lines: DiffLine[]) => {
+    if (lines.length === 0) return [];
+    const code = lines.map((l) => l.code).join("\n");
+    const result = highlighter.codeToTokens(code, {
+      lang: language,
+      theme: "github-light",
+    });
+    return result.tokens;
+  };
+
+  const removedTokenLines = highlightGroup(removedLines);
+  const addedTokenLines = highlightGroup(addedLines);
+  const contextTokenLines = highlightGroup(contextLines);
+
+  // Track consumption index for each group
+  let removedIdx = 0;
+  let addedIdx = 0;
+  let contextIdx = 0;
+
+  // Build table rows
+  const rows: string[] = [];
+  for (const diffLine of diffLines) {
+    let tokenLine;
+    let gutterSymbol: string;
+    let lineClass: string;
+
+    if (diffLine.type === "removed") {
+      tokenLine = removedTokenLines[removedIdx++];
+      gutterSymbol = "\u2212"; // minus sign
+      lineClass = "removed";
+    } else if (diffLine.type === "added") {
+      tokenLine = addedTokenLines[addedIdx++];
+      gutterSymbol = "+";
+      lineClass = "added";
+    } else {
+      tokenLine = contextTokenLines[contextIdx++];
+      gutterSymbol = "";
+      lineClass = "context";
+    }
+
+    // Render tokens to HTML spans
+    const codeHtml = tokenLine
+      ? tokenLine
+          .map((token) => {
+            const style = token.color ? ` style="color:${token.color}"` : "";
+            return `<span${style}>${escapeHtml(token.content)}</span>`;
+          })
+          .join("")
+      : escapeHtml(diffLine.code);
+
+    rows.push(
+      `<tr class="diff-line ${lineClass}">` +
+        `<td class="diff-gutter">${gutterSymbol}</td>` +
+        `<td class="diff-code">${codeHtml}</td>` +
+        `</tr>`
+    );
+  }
+
+  return rows.join("\n");
+}
+
+/**
  * Generate a syntax-highlighted image of a code snippet.
+ * Automatically detects diff-formatted code and renders as a
+ * GitHub-style diff view with red/green backgrounds.
  *
  * @param options - Code, language, and PR ID for naming
  * @returns Object with success status and URL (if successful)
@@ -158,23 +280,35 @@ export async function generateCodeImage(
     // Normalize and validate language
     const normalizedLang = normalizeLanguage(language);
     const loadedLangs = highlighter.getLoadedLanguages();
-    const langToUse = loadedLangs.includes(normalizedLang)
+    const langToUse = (loadedLangs.includes(normalizedLang)
       ? normalizedLang
-      : "javascript";
+      : "javascript") as BundledLanguage;
 
-    // Generate syntax-highlighted HTML
-    const highlightedHtml = highlighter.codeToHtml(code, {
-      lang: langToUse,
-      theme: "dracula",
-    });
+    // Detect if code is in diff format and choose rendering path
+    const diffLines = parseDiffLines(code);
+    let html: string;
+    let containerSelector: string;
 
-    // Load and populate the HTML template
-    // Escape language to prevent XSS from user-controlled input
-    // Use callback functions to avoid $ special treatment in replacement strings
-    const template = loadTemplate();
-    const html = template
-      .replace("{{HTML_CONTENT}}", () => highlightedHtml)
-      .replace("{{LANGUAGE}}", () => escapeHtml(language.toUpperCase()));
+    if (diffLines) {
+      // Diff rendering path
+      const diffRowsHtml = await buildDiffHtml(diffLines, langToUse, highlighter);
+      const template = loadDiffTemplate();
+      html = template
+        .replace("{{DIFF_ROWS}}", () => diffRowsHtml)
+        .replace("{{LANGUAGE}}", () => escapeHtml(language.toUpperCase()));
+      containerSelector = ".diff-container";
+    } else {
+      // Plain code rendering path (fallback)
+      const highlightedHtml = highlighter.codeToHtml(code, {
+        lang: langToUse,
+        theme: "dracula",
+      });
+      const template = loadTemplate();
+      html = template
+        .replace("{{HTML_CONTENT}}", () => highlightedHtml)
+        .replace("{{LANGUAGE}}", () => escapeHtml(language.toUpperCase()));
+      containerSelector = ".code-container";
+    }
 
     // Launch Puppeteer with Chromium for serverless
     const browser = await puppeteer.launch({
@@ -187,34 +321,33 @@ export async function generateCodeImage(
     try {
       const page = await browser.newPage();
 
-      // Set viewport width (height will be auto based on content)
       await page.setViewport({
-        width: 650, // Slightly wider to account for padding
+        width: 520,
         height: 800,
-        deviceScaleFactor: 2, // Retina quality
+        deviceScaleFactor: 1.5,
       });
 
       // Load the HTML content
       await page.setContent(html, { waitUntil: "networkidle0" });
 
-      // Get the bounding box of the code container
-      const containerHandle = await page.$(".code-container");
+      // Get the bounding box of the container
+      const containerHandle = await page.$(containerSelector);
       if (!containerHandle) {
-        throw new Error("Could not find code container element");
+        throw new Error(`Could not find ${containerSelector} element`);
       }
 
       const boundingBox = await containerHandle.boundingBox();
       if (!boundingBox) {
-        throw new Error("Could not get bounding box of code container");
+        throw new Error("Could not get bounding box of container");
       }
 
-      // Take screenshot of just the code container
+      // Take screenshot of just the container
       const screenshotResult = await page.screenshot({
         type: "png",
         clip: {
           x: boundingBox.x,
           y: boundingBox.y,
-          width: Math.min(boundingBox.width, 600),
+          width: Math.min(boundingBox.width, 500),
           height: boundingBox.height,
         },
         omitBackground: true,
