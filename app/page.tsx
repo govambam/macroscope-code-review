@@ -140,6 +140,7 @@ function getTotalBugCount(result: PRAnalysisResult): number {
 // Extended BugSnippet with V2 fields for email generation
 interface ExtendedBugSnippet extends BugSnippet {
   explanation_short?: string;
+  impact_scenario?: string;
   code_suggestion?: string;
   code_snippet_image_url?: string;
 }
@@ -157,6 +158,7 @@ function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean 
     title: comment.title,
     explanation: comment.explanation,
     explanation_short: comment.explanation_short || undefined,
+    impact_scenario: comment.impact_scenario || undefined,
     code_suggestion: comment.code_suggestion || undefined,
     code_snippet_image_url: comment.code_snippet_image_url || undefined,
     file_path: comment.file_path,
@@ -383,6 +385,7 @@ export default function Home() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisApiResponse | null>(null);
   const [copiedBugIndex, setCopiedBugIndex] = useState<number | null>(null);
+  const [selectedBugIndex, setSelectedBugIndex] = useState<number | null>(null);
   const [currentAnalysisId, setCurrentAnalysisId] = useState<number | null>(null);
   const [isViewingCached, setIsViewingCached] = useState(false);
   const [expectingCachedResult, setExpectingCachedResult] = useState(false);
@@ -768,6 +771,11 @@ export default function Home() {
 
           // Set up the analysis modal with the result
           setAnalysisResult(data);
+          if (data.result && isV2Result(data.result)) {
+            setSelectedBugIndex(data.result.best_bug_for_outreach_index);
+          } else {
+            setSelectedBugIndex(null);
+          }
           setAnalysisForkedUrl(data.forkedPrUrl || data.prUrl);
           setAnalysisOriginalUrl(data.originalPrUrl || data.prUrl);
           setSelectedPrTitle(data.prTitle || "");
@@ -1445,6 +1453,7 @@ export default function Home() {
     e.preventDefault();
     setAnalysisLoading(true);
     setAnalysisResult(null);
+    setSelectedBugIndex(null);
     setCopiedBugIndex(null);
     setCurrentAnalysisId(null);
     setIsViewingCached(false);
@@ -1478,6 +1487,11 @@ export default function Home() {
       }
 
       setAnalysisResult(data);
+      if (data.result && isV2Result(data.result)) {
+        setSelectedBugIndex(data.result.best_bug_for_outreach_index);
+      } else {
+        setSelectedBugIndex(null);
+      }
 
       // Track analysis ID and cache status
       if (data.analysisId) {
@@ -1543,6 +1557,7 @@ export default function Home() {
     setAnalysisForkedUrl(prUrl);
     setAnalysisOriginalUrl("");
     setAnalysisResult(null);
+    setSelectedBugIndex(null);
     setGeneratedEmail(null);
     setEditedEmail(null);
     setEmailError(null);
@@ -1932,8 +1947,19 @@ export default function Home() {
     // Check if there are meaningful bugs using format-agnostic helper
     if (!resultHasMeaningfulBugs(analysisResult.result)) return;
 
-    // Get the best bug for outreach using format-aware helper
-    const bestBug = getBestBugForEmail(analysisResult.result);
+    // Use user-selected bug if available, otherwise fall back to best bug
+    let bestBug;
+    if (selectedBugIndex !== null && isV2Result(analysisResult.result)) {
+      const selectedComment = analysisResult.result.all_comments.find(
+        c => c.index === selectedBugIndex
+      );
+      if (selectedComment) {
+        bestBug = commentToBugSnippet(selectedComment, true);
+      }
+    }
+    if (!bestBug) {
+      bestBug = getBestBugForEmail(analysisResult.result);
+    }
     if (!bestBug) return;
 
     // Get the original PR URL from the API response (always extracted from forked PR description)
@@ -3398,6 +3424,7 @@ export default function Home() {
                                   {analysisResult.result.all_comments.map((comment, index) => {
                                     const v2Result = analysisResult.result as PRAnalysisResultV2;
                                     const isBestForOutreach = comment.index === v2Result.best_bug_for_outreach_index;
+                                    const isSelected = comment.index === selectedBugIndex;
                                     const categoryColors: Record<CommentCategory, string> = {
                                       bug_critical: "bg-red-100 text-red-800 border-red-200",
                                       bug_high: "bg-orange-100 text-orange-800 border-orange-200",
@@ -3429,9 +3456,10 @@ export default function Home() {
                                     return (
                                       <div
                                         key={index}
-                                        className={`border rounded-lg overflow-hidden ${
-                                          isBestForOutreach ? "border-primary ring-1 ring-primary/20" : "border-border"
-                                        }`}
+                                        onClick={comment.is_meaningful_bug ? () => setSelectedBugIndex(comment.index) : undefined}
+                                        className={`border rounded-lg overflow-hidden transition-colors ${
+                                          isSelected ? "border-primary ring-1 ring-primary/20" : "border-border"
+                                        } ${comment.is_meaningful_bug ? "cursor-pointer hover:border-primary/50" : ""}`}
                                       >
                                         <div className="px-4 py-3 bg-bg-subtle border-b border-border flex items-center justify-between">
                                           <div className="flex items-center gap-2 flex-wrap">
