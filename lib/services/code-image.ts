@@ -28,15 +28,17 @@ interface GenerateCodeImageResult {
   error?: string;
 }
 
-// Singleton highlighter instance
-let highlighterInstance: Highlighter | null = null;
+// Singleton highlighter promise (store promise to prevent race condition)
+let highlighterPromise: Promise<Highlighter> | null = null;
 
 /**
  * Get or create the Shiki highlighter instance.
+ * Stores the promise (not the resolved value) to prevent duplicate initialization
+ * when concurrent calls occur before the first initialization completes.
  */
 async function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterInstance) {
-    highlighterInstance = await createHighlighter({
+  if (!highlighterPromise) {
+    highlighterPromise = createHighlighter({
       themes: ["dracula"],
       langs: [
         "javascript",
@@ -65,7 +67,19 @@ async function getHighlighter(): Promise<Highlighter> {
       ],
     });
   }
-  return highlighterInstance;
+  return highlighterPromise;
+}
+
+/**
+ * Escape HTML special characters to prevent XSS.
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /**
@@ -150,10 +164,11 @@ export async function generateCodeImage(
     });
 
     // Load and populate the HTML template
+    // Escape language to prevent XSS from user-controlled input
     const template = loadTemplate();
     const html = template
       .replace("{{HTML_CONTENT}}", highlightedHtml)
-      .replace("{{LANGUAGE}}", language.toUpperCase());
+      .replace("{{LANGUAGE}}", escapeHtml(language.toUpperCase()));
 
     // Launch Puppeteer with Chromium for serverless
     const browser = await puppeteer.launch({
