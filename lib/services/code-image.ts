@@ -325,9 +325,9 @@ export async function generateCodeImage(
       const page = await browser.newPage();
 
       await page.setViewport({
-        width: 520,
+        width: 440,
         height: 800,
-        deviceScaleFactor: 1.5,
+        deviceScaleFactor: 1,
       });
 
       // Load the HTML content
@@ -350,7 +350,7 @@ export async function generateCodeImage(
         clip: {
           x: boundingBox.x,
           y: boundingBox.y,
-          width: Math.min(boundingBox.width, 500),
+          width: Math.min(boundingBox.width, 420),
           height: boundingBox.height,
         },
         omitBackground: true,
