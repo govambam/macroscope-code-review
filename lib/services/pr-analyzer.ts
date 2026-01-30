@@ -264,28 +264,14 @@ export function extractOriginalPRUrl(prBody: string): string | null {
 }
 
 /**
- * Calculate dynamic max_tokens based on the number of Macroscope comments.
- * More comments = more output tokens needed.
+ * Maximum output tokens for PR analysis.
  *
- * Two-tier output reduces tokens significantly:
- * - Critical/High bugs get full analysis (~800 tokens each)
- * - All other comments get classification only (~100 tokens each)
- * - macroscope_comment_text is NOT in the output (added server-side)
- *
- * Since we don't know the severity split in advance, we estimate
- * conservatively assuming ~30% are critical/high.
+ * Always use the model's maximum (16384 for Sonnet 4 / Opus 4).
+ * There's no cost to setting this high — you only pay for tokens
+ * actually generated. Dynamic calculation was causing truncation
+ * when estimates were wrong.
  */
-function calculateMaxTokens(commentCount: number): number {
-  // Estimate ~30% critical/high (full analysis) + 70% low/other (classification only)
-  const fullAnalysisTokens = Math.ceil(commentCount * 0.3) * 800;
-  const classificationTokens = Math.ceil(commentCount * 0.7) * 100;
-  const baseTokens = 2000; // Structure, summary, recommendation
-  const maxTokensCap = 16384; // Safe cap for model output
-  const minTokens = 4096; // Minimum for small PRs
-
-  const calculated = baseTokens + fullAnalysisTokens + classificationTokens;
-  return Math.min(Math.max(calculated, minTokens), maxTokensCap);
-}
+const MAX_ANALYSIS_TOKENS = 16384;
 
 /**
  * Validates the new format (V2) analysis response.
@@ -434,24 +420,26 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
   const formattedComments = formatCommentsForPrompt(macroscopeComments);
 
   // Load the prompt and interpolate variables
-  const prompt = loadPrompt("pr-analysis", {
+  let prompt = loadPrompt("pr-analysis", {
     FORKED_PR_URL: forkedPrUrl,
     ORIGINAL_PR_URL: originalPrUrl,
     MACROSCOPE_COMMENTS: formattedComments,
     TOTAL_COMMENTS: macroscopeComments.length.toString(),
   });
 
+  // Always append a token-saving directive. This ensures correct behavior
+  // regardless of whether the prompt in the database is the old or new version.
+  // macroscope_comment_text is populated server-side from GitHub API data.
+  prompt += `\n\n---\n**CRITICAL OUTPUT RULES (override any conflicting instructions above):**\n1. Do NOT include "macroscope_comment_text" in your JSON output. It will be populated automatically.\n2. For comments that are NOT bug_critical or bug_high: set explanation, explanation_short, and impact_scenario to null. Still extract code_suggestion if Macroscope provided a fix.\n3. Keep your output as concise as possible to avoid truncation.`;
+
   // Get model from prompt metadata, fallback to default
   const metadata = getPromptMetadata("pr-analysis");
   const model = metadata.model || DEFAULT_MODEL;
 
-  // Calculate dynamic max_tokens based on comment count
-  const maxTokens = calculateMaxTokens(macroscopeComments.length);
-
   // Send to Claude and parse response
   const result = await sendMessageAndParseJSON<PRAnalysisResult>(prompt, {
     model,
-    maxTokens,
+    maxTokens: MAX_ANALYSIS_TOKENS,
     temperature: 0, // Deterministic output for analysis
   });
 
