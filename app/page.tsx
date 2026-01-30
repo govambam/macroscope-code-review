@@ -61,6 +61,7 @@ interface AnalysisComment {
   explanation_short: string | null;
   impact_scenario: string | null;
   code_suggestion: string | null;
+  code_snippet_image_url?: string | null;
   is_meaningful_bug: boolean;
   outreach_ready: boolean;
   outreach_skip_reason: string | null;
@@ -140,6 +141,7 @@ function getTotalBugCount(result: PRAnalysisResult): number {
 interface ExtendedBugSnippet extends BugSnippet {
   explanation_short?: string;
   code_suggestion?: string;
+  code_snippet_image_url?: string;
 }
 
 // Helper to convert V2 comment to extended BugSnippet for email generation
@@ -156,6 +158,7 @@ function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean 
     explanation: comment.explanation,
     explanation_short: comment.explanation_short || undefined,
     code_suggestion: comment.code_suggestion || undefined,
+    code_snippet_image_url: comment.code_snippet_image_url || undefined,
     file_path: comment.file_path,
     severity: severityMap[comment.category] || "medium",
     is_most_impactful: isMostImpactful,
@@ -1854,6 +1857,7 @@ export default function Home() {
   const getBestBugForEmail = (result: PRAnalysisResult): (BugSnippet & {
     impact_scenario?: string;
     code_suggestion?: string;
+    code_snippet_image_url?: string;
     explanation_short?: string;
   }) | null => {
     if (isV2Result(result)) {
@@ -1889,6 +1893,7 @@ export default function Home() {
           // V2-specific fields for richer emails
           impact_scenario: bestComment.impact_scenario || undefined,
           code_suggestion: bestComment.code_suggestion || undefined,
+          code_snippet_image_url: bestComment.code_snippet_image_url || undefined,
         };
       }
       return null;
@@ -3478,10 +3483,22 @@ export default function Home() {
                                               <span className="font-medium">Impact:</span> {comment.impact_scenario}
                                             </p>
                                           )}
-                                          {comment.code_suggestion && (
-                                            <pre className="text-xs bg-gray-100 p-2 rounded mb-3 overflow-x-auto">
-                                              <code>{comment.code_suggestion}</code>
-                                            </pre>
+                                          {comment.code_snippet_image_url ? (
+                                            <div className="mb-3">
+                                              <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
+                                              <img
+                                                src={comment.code_snippet_image_url}
+                                                alt="Code suggestion"
+                                                className="max-w-full rounded shadow-sm"
+                                              />
+                                            </div>
+                                          ) : comment.code_suggestion && (
+                                            <div className="mb-3">
+                                              <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
+                                              <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto">
+                                                <code>{comment.code_suggestion}</code>
+                                              </pre>
+                                            </div>
                                           )}
                                           <div className="flex items-center gap-2 flex-wrap">
                                             <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded">
@@ -3726,10 +3743,22 @@ export default function Home() {
                                             <span className="font-medium">Impact:</span> {comment.impact_scenario}
                                           </p>
                                         )}
-                                        {comment.code_suggestion && (
-                                          <pre className="text-xs bg-gray-100 p-2 rounded mb-3 overflow-x-auto">
-                                            <code>{comment.code_suggestion}</code>
-                                          </pre>
+                                        {comment.code_snippet_image_url ? (
+                                          <div className="mb-3">
+                                            <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
+                                            <img
+                                              src={comment.code_snippet_image_url}
+                                              alt="Code suggestion"
+                                              className="max-w-full rounded shadow-sm"
+                                            />
+                                          </div>
+                                        ) : comment.code_suggestion && (
+                                          <div className="mb-3">
+                                            <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
+                                            <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto">
+                                              <code>{comment.code_suggestion}</code>
+                                            </pre>
+                                          </div>
                                         )}
                                         <div className="flex flex-col gap-2">
                                           <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded w-fit">

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateEmail, EmailGenerationInput, EmailSequence } from "@/lib/services/email-generator";
+import { generateEmail, EmailGenerationInput, EmailSequence, EmailBugInput } from "@/lib/services/email-generator";
 import { BugSnippet } from "@/lib/services/pr-analyzer";
 import { saveGeneratedEmail } from "@/lib/services/database";
 
@@ -9,7 +9,7 @@ interface GenerateEmailRequest {
   prStatus?: "open" | "merged" | "closed"; // Status of the original PR
   prMergedAt?: string | null; // ISO timestamp if merged
   forkedPrUrl: string; // URL to our fork with Macroscope review
-  bug: BugSnippet;
+  bug: BugSnippet | EmailBugInput; // May include code_snippet_image_url from analysis
   totalBugs: number;
   analysisId?: number; // Database ID of the analysis to link this email to
 }
@@ -71,6 +71,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // Generate the email sequence (with Apollo merge fields for personalization)
+    // Note: code_snippet_image_url is generated during PR analysis, not here
     const input: EmailGenerationInput = {
       originalPrUrl: body.originalPrUrl,
       prTitle: body.prTitle,

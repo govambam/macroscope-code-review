@@ -85,6 +85,7 @@ export interface AnalysisComment {
   explanation_short: string | null; // Only for meaningful bugs
   impact_scenario: string | null; // Only for meaningful bugs
   code_suggestion: string | null;
+  code_snippet_image_url?: string | null; // URL to syntax-highlighted code image
   is_meaningful_bug: boolean;
   outreach_ready: boolean;
   outreach_skip_reason: string | null; // Required when outreach_ready is false

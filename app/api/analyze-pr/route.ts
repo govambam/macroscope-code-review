@@ -10,7 +10,9 @@ import {
   isV2AnalysisResult,
   hasMeaningfulBugs,
   PRAnalysisResultV2,
+  AnalysisComment,
 } from "@/lib/services/pr-analyzer";
+import { generateCodeImage, isCodeImageGenerationAvailable } from "@/lib/services/code-image";
 import {
   getAnalysisByPRUrl,
   saveAnalysis,
@@ -270,6 +272,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       forkedPrUrl,
       originalPrUrl,
     });
+
+    // Generate code snippet images for V2 results with code suggestions
+    if (isV2AnalysisResult(result) && isCodeImageGenerationAvailable()) {
+      const prIdForImage = parsedForkedPr.prNumber.toString();
+
+      for (const comment of result.all_comments) {
+        if (comment.code_suggestion && comment.is_meaningful_bug) {
+          try {
+            // Detect language from file path
+            const ext = comment.file_path.split(".").pop()?.toLowerCase() || "js";
+            const langMap: Record<string, string> = {
+              ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+              py: "python", rb: "ruby", go: "go", rs: "rust", java: "java",
+              cs: "csharp", cpp: "cpp", c: "c", php: "php", swift: "swift",
+            };
+            const language = langMap[ext] || ext;
+
+            const imageResult = await generateCodeImage({
+              code: comment.code_suggestion,
+              language,
+              prId: `${prIdForImage}-${comment.index}`,
+            });
+
+            if (imageResult.success) {
+              (comment as AnalysisComment).code_snippet_image_url = imageResult.url;
+              console.log(`Generated code image for comment ${comment.index}:`, imageResult.url);
+            }
+          } catch (imageError) {
+            console.error(`Failed to generate image for comment ${comment.index}:`, imageError);
+            // Continue without the image
+          }
+        }
+      }
+    }
 
     // Save the analysis to the database
     let analysisId: number | undefined;

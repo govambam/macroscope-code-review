@@ -36,6 +36,7 @@ The following data will be interpolated into this prompt. Use it to generate the
 - **TOTAL_BUGS**: {TOTAL_BUGS}
 - **IMPACT_SCENARIO**: {IMPACT_SCENARIO}
 - **CODE_SNIPPET**: {CODE_SNIPPET}
+- **CODE_SNIPPET_IMAGE_URL**: {CODE_SNIPPET_IMAGE_URL}
 
 ---
 
@@ -65,7 +66,8 @@ Using the data provided above, generate the following for each email:
   - If open: mention it's still open/pending
 - Use BUG_EXPLANATION as the main bug description (keep it as provided, don't truncate)
 - Use IMPACT_SCENARIO for the impact line
-- If CODE_SNIPPET exists, mention that a fix suggestion is available in the review link (describe it in plain English, don't include actual code)
+- If CODE_SNIPPET exists, mention that a fix suggestion is available in the review link (describe it in plain English, don't include actual code in the email body)
+- If CODE_SNIPPET_IMAGE_URL exists, include it as an embedded image showing the suggested fix. Use this format in the email body: [Code snippet image: CODE_SNIPPET_IMAGE_URL]
 - Derive a short bug type descriptor from BUG_TITLE (e.g., "race condition", "null pointer risk")
 
 **For Emails 2-4:**
