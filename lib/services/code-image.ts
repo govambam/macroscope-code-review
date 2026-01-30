@@ -148,22 +148,25 @@ function loadDiffTemplate(): string {
  */
 function parseDiffLines(code: string): DiffLine[] | null {
   const lines = code.split("\n");
-  let hasDiffMarkers = false;
+  let hasRemovals = false;
+  let hasAdditions = false;
   const diffLines: DiffLine[] = [];
 
   for (const line of lines) {
     if (line.startsWith("- ") || line === "-") {
       diffLines.push({ type: "removed", code: line.startsWith("- ") ? line.slice(2) : "" });
-      hasDiffMarkers = true;
+      hasRemovals = true;
     } else if (line.startsWith("+ ") || line === "+") {
       diffLines.push({ type: "added", code: line.startsWith("+ ") ? line.slice(2) : "" });
-      hasDiffMarkers = true;
+      hasAdditions = true;
     } else {
       diffLines.push({ type: "context", code: line });
     }
   }
 
-  return hasDiffMarkers ? diffLines : null;
+  // Require both + and - markers to avoid false positives from
+  // Markdown/YAML lists that use "- " as bullet points
+  return (hasRemovals && hasAdditions) ? diffLines : null;
 }
 
 /**
