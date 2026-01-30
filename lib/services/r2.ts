@@ -71,7 +71,12 @@ export async function uploadToR2(options: UploadImageOptions): Promise<string> {
     CacheControl: "public, max-age=31536000, immutable", // Cache for 1 year
   });
 
-  await client.send(command);
+  try {
+    await client.send(command);
+  } finally {
+    // Release internal resources to avoid memory leaks or socket exhaustion
+    client.destroy();
+  }
 
   // Construct the public URL
   // Remove trailing slash from domain if present

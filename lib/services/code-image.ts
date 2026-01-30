@@ -35,6 +35,7 @@ let highlighterPromise: Promise<Highlighter> | null = null;
  * Get or create the Shiki highlighter instance.
  * Stores the promise (not the resolved value) to prevent duplicate initialization
  * when concurrent calls occur before the first initialization completes.
+ * Clears the cached promise on rejection to allow retries.
  */
 async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
@@ -65,6 +66,10 @@ async function getHighlighter(): Promise<Highlighter> {
         "bash",
         "dockerfile",
       ],
+    }).catch((error) => {
+      // Clear the cached promise on rejection to allow retries
+      highlighterPromise = null;
+      throw error;
     });
   }
   return highlighterPromise;
