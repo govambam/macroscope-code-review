@@ -76,14 +76,14 @@ export type CommentCategory =
  */
 export interface AnalysisComment {
   index: number;
-  macroscope_comment_text: string;
+  macroscope_comment_text: string; // Populated server-side from GitHub API, not from Claude
   file_path: string;
   line_number: number | null;
   category: CommentCategory;
   title: string;
-  explanation: string;
-  explanation_short: string | null; // Only for meaningful bugs
-  impact_scenario: string | null; // Only for meaningful bugs
+  explanation: string | null; // Full analysis for critical/high, null for others
+  explanation_short: string | null; // Only for critical/high bugs
+  impact_scenario: string | null; // Only for critical/high bugs
   code_suggestion: string | null;
   code_snippet_image_url?: string | null; // URL to syntax-highlighted code image
   is_meaningful_bug: boolean;
@@ -267,21 +267,23 @@ export function extractOriginalPRUrl(prBody: string): string | null {
  * Calculate dynamic max_tokens based on the number of Macroscope comments.
  * More comments = more output tokens needed.
  *
- * V2 format requires significantly more tokens per comment than V1:
- * - macroscope_comment_text (quoted, can be long)
- * - explanation (3-5 sentences)
- * - explanation_short (1-2 sentences)
- * - impact_scenario (concrete example)
- * - code_suggestion (diff format, can be long)
- * - Plus fixed fields: title, category, file_path, etc.
+ * Two-tier output reduces tokens significantly:
+ * - Critical/High bugs get full analysis (~800 tokens each)
+ * - All other comments get classification only (~100 tokens each)
+ * - macroscope_comment_text is NOT in the output (added server-side)
+ *
+ * Since we don't know the severity split in advance, we estimate
+ * conservatively assuming ~30% are critical/high.
  */
 function calculateMaxTokens(commentCount: number): number {
-  const estimatedTokensPerComment = 1500; // V2 format needs ~1500 tokens per comment (verbose fields)
-  const baseTokens = 3000; // Base tokens for structure, summary, recommendation
-  const maxTokensCap = 32768; // Cap at 32k tokens (model supports up to this)
-  const minTokens = 4096; // Minimum to ensure small PRs don't get truncated
+  // Estimate ~30% critical/high (full analysis) + 70% low/other (classification only)
+  const fullAnalysisTokens = Math.ceil(commentCount * 0.3) * 800;
+  const classificationTokens = Math.ceil(commentCount * 0.7) * 100;
+  const baseTokens = 2000; // Structure, summary, recommendation
+  const maxTokensCap = 16384; // Safe cap for model output
+  const minTokens = 4096; // Minimum for small PRs
 
-  const calculated = baseTokens + commentCount * estimatedTokensPerComment;
+  const calculated = baseTokens + fullAnalysisTokens + classificationTokens;
   return Math.min(Math.max(calculated, minTokens), maxTokensCap);
 }
 
@@ -316,15 +318,15 @@ function validateV2Response(data: unknown): PRAnalysisResultV2 {
   }
 
   // Validate each comment has required fields
+  // Note: macroscope_comment_text and explanation are NOT required from Claude
+  // (macroscope_comment_text is added server-side, explanation is null for Tier 2 comments)
   for (let i = 0; i < response.all_comments.length; i++) {
     const comment = response.all_comments[i] as Record<string, unknown>;
     const commentRequiredFields = [
       "index",
-      "macroscope_comment_text",
       "file_path",
       "category",
       "title",
-      "explanation",
       "is_meaningful_bug",
       "outreach_ready",
     ];
@@ -457,6 +459,35 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
   if (isV2AnalysisResult(result)) {
     // New format - validate V2 structure
     validateV2Response(result);
+
+    // Post-process: merge original Macroscope comment text and fill defaults
+    // Claude doesn't output macroscope_comment_text (to save tokens),
+    // so we populate it from the GitHub API data we already fetched.
+    for (const comment of result.all_comments) {
+      const originalComment = macroscopeComments[comment.index];
+      if (originalComment) {
+        comment.macroscope_comment_text = originalComment.body;
+      } else {
+        comment.macroscope_comment_text = "";
+      }
+
+      // Ensure nullable fields have defaults for Tier 2 comments
+      if (!("explanation" in comment) || comment.explanation === undefined) {
+        comment.explanation = null;
+      }
+      if (!("explanation_short" in comment) || comment.explanation_short === undefined) {
+        comment.explanation_short = null;
+      }
+      if (!("impact_scenario" in comment) || comment.impact_scenario === undefined) {
+        comment.impact_scenario = null;
+      }
+      if (!("code_suggestion" in comment) || comment.code_suggestion === undefined) {
+        comment.code_suggestion = null;
+      }
+      if (!("outreach_skip_reason" in comment) || comment.outreach_skip_reason === undefined) {
+        comment.outreach_skip_reason = null;
+      }
+    }
   } else if (isV1AnalysisResult(result)) {
     // Old format - validate V1 structure
     validateV1Response(result);
@@ -537,7 +568,7 @@ export function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: b
 
   return {
     title: comment.title,
-    explanation: comment.explanation,
+    explanation: comment.explanation || comment.macroscope_comment_text || "",
     file_path: comment.file_path,
     severity: Object.hasOwn(severityMap, comment.category) ? severityMap[comment.category] : "medium",
     is_most_impactful: isMostImpactful,
