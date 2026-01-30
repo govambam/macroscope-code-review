@@ -46,22 +46,31 @@ If no severity indicator is present, classify based on the content:
 
 ## Code Suggestion Extraction
 
-**IMPORTANT:** When Macroscope suggests a fix, extract it as a code diff.
+**IMPORTANT:** When Macroscope suggests a fix, extract BOTH the original buggy code AND the fix as a unified diff.
 
-Look for:
-- Code blocks in Macroscope's comment
-- Phrases like "Consider...", "Suggest...", "Change X to Y"
-- The diff_hunk context showing the problematic code
+Each comment has two data sources:
+1. **Code context** (diff_hunk): Shows the PR's code. The lines at the commented location are the **original buggy code**.
+2. **Macroscope's finding** (body): May contain a ` ```suggestion ` block with the **fix code**.
 
-Format code suggestions as unified diff when possible:
+**How to build the diff:**
+1. From the Code context, extract the lines being commented on (the buggy code). These become the `- ` (removal) lines.
+2. From the ` ```suggestion ` block in Macroscope's body, extract the fix. These become the `+ ` (addition) lines.
+3. Combine them: all `- ` lines first, then all `+ ` lines.
+
+**Every line MUST start with `- ` or `+ ` prefix.** Do not include any lines without a prefix.
+
+Format:
 ```
-- old code line
-+ new code line
+- original buggy line 1
+- original buggy line 2
++ fixed line 1
++ fixed line 2
++ fixed line 3
 ```
 
-If Macroscope doesn't provide a specific fix, set `code_suggestion` to `null`.                                              
-                                                                                                                              
-Do NOT generate or invent code fixes yourself - only extract what Macroscope explicitly provides. 
+If Macroscope doesn't provide a ` ```suggestion ` block or specific fix code, set `code_suggestion` to `null`.
+
+Do NOT generate or invent code fixes yourself - only extract what Macroscope explicitly provides.
 
 ---
 
@@ -141,19 +150,19 @@ A concrete, realistic scenario. Example:
 "If two users update the same document simultaneously, one user's changes will be silently lost."
 
 ### code_suggestion
-Provide a diff showing the fix:
+A unified diff showing the original buggy code (from Code context) and the fix (from Macroscope's ```suggestion block). Every line must have a `- ` or `+ ` prefix:
 ```
 - const data = response.body
 + const data = await response.json()
 ```
 
-Or if showing replacement:
+Multi-line example:
 ```
-// Before:
-if (user = null) { ... }
-
-// After:
-if (user === null) { ... }
+- await this.getProfile()
+- const { username, website, avatar_url } = this.profile;
++ await this.getProfile()
++ if (!this.profile) return
++ const { username, website, avatar_url } = this.profile
 ```
 
 ### best_bug_for_outreach_index
