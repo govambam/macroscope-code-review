@@ -70,7 +70,8 @@ export async function sendMessage(
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const response = await client.messages.create({
+      // Use streaming to avoid the 10-minute timeout on long requests
+      const stream = client.messages.stream({
         model,
         max_tokens: maxTokens,
         temperature,
@@ -81,6 +82,7 @@ export async function sendMessage(
           },
         ],
       });
+      const response = await stream.finalMessage();
 
       // Extract text from response
       const textContent = response.content.find(

@@ -276,10 +276,10 @@ export function extractOriginalPRUrl(prBody: string): string | null {
  * - Plus fixed fields: title, category, file_path, etc.
  */
 function calculateMaxTokens(commentCount: number): number {
-  const estimatedTokensPerComment = 1000; // V2 format needs ~1000 tokens per comment
+  const estimatedTokensPerComment = 1500; // V2 format needs ~1500 tokens per comment (verbose fields)
   const baseTokens = 3000; // Base tokens for structure, summary, recommendation
-  const maxTokensCap = 16384; // Cap at 16k tokens
-  const minTokens = 4000; // Minimum to ensure small PRs don't get truncated
+  const maxTokensCap = 32768; // Cap at 32k tokens (model supports up to this)
+  const minTokens = 4096; // Minimum to ensure small PRs don't get truncated
 
   const calculated = baseTokens + commentCount * estimatedTokensPerComment;
   return Math.min(Math.max(calculated, minTokens), maxTokensCap);
