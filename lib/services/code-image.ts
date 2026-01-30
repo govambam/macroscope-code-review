@@ -170,10 +170,11 @@ export async function generateCodeImage(
 
     // Load and populate the HTML template
     // Escape language to prevent XSS from user-controlled input
+    // Use callback functions to avoid $ special treatment in replacement strings
     const template = loadTemplate();
     const html = template
-      .replace("{{HTML_CONTENT}}", highlightedHtml)
-      .replace("{{LANGUAGE}}", escapeHtml(language.toUpperCase()));
+      .replace("{{HTML_CONTENT}}", () => highlightedHtml)
+      .replace("{{LANGUAGE}}", () => escapeHtml(language.toUpperCase()));
 
     // Launch Puppeteer with Chromium for serverless
     const browser = await puppeteer.launch({

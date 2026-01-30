@@ -59,12 +59,9 @@ Format code suggestions as unified diff when possible:
 + new code line
 ```
 
-If Macroscope doesn't provide a specific fix, generate one based on:
-1. The diff_hunk (shows the problematic code)
-2. Macroscope's description of the issue
-3. Your understanding of the fix
-
-Always try to provide a `code_suggestion` for bugs - this is used to generate visual code snippets for emails.
+If Macroscope doesn't provide a specific fix, set `code_suggestion` to `null`.                                              
+                                                                                                                              
+Do NOT generate or invent code fixes yourself - only extract what Macroscope explicitly provides. 
 
 ---
 
@@ -72,6 +69,7 @@ Always try to provide a `code_suggestion` for bugs - this is used to generate vi
 
 A bug is **outreach_ready** if:
 - It's a meaningful bug (not style/nitpick)
+- Has a code_suggestion (Macroscope provided a fix)
 - Easy to explain in 2-3 sentences
 - Impact is clear and concrete
 - Would make an engineering leader say "glad we caught that"
