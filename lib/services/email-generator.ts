@@ -34,6 +34,7 @@ export interface EmailBugInput {
   code_suggestion?: string; // V2: Suggested fix
   impact_scenario?: string; // V2: Real-world impact scenario
   macroscope_comment_text?: string; // Original Macroscope comment (may contain code snippet)
+  code_snippet_image_url?: string; // URL to syntax-highlighted code image
 }
 
 /**
@@ -152,6 +153,7 @@ export async function generateEmail(input: EmailGenerationInput): Promise<EmailS
     ...(bugInput.code_suggestion && { CODE_SNIPPET: bugInput.code_suggestion }),
     ...(bugInput.impact_scenario && { IMPACT_SCENARIO: bugInput.impact_scenario }),
     ...(bugInput.macroscope_comment_text && { MACROSCOPE_COMMENT: bugInput.macroscope_comment_text }),
+    ...(bugInput.code_snippet_image_url && { CODE_SNIPPET_IMAGE_URL: bugInput.code_snippet_image_url }),
   });
 
   // Get model from prompt metadata, fallback to Sonnet

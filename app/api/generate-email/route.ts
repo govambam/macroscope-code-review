@@ -1,7 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateEmail, EmailGenerationInput, EmailSequence } from "@/lib/services/email-generator";
+import { generateEmail, EmailGenerationInput, EmailSequence, EmailBugInput } from "@/lib/services/email-generator";
 import { BugSnippet } from "@/lib/services/pr-analyzer";
 import { saveGeneratedEmail } from "@/lib/services/database";
+import { generateCodeImage, isCodeImageGenerationAvailable } from "@/lib/services/code-image";
+
+/**
+ * Detect programming language from file path extension.
+ */
+function detectLanguageFromPath(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  const extToLang: Record<string, string> = {
+    js: "javascript",
+    jsx: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    py: "python",
+    rb: "ruby",
+    java: "java",
+    go: "go",
+    rs: "rust",
+    c: "c",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    h: "c",
+    hpp: "cpp",
+    cs: "csharp",
+    php: "php",
+    swift: "swift",
+    kt: "kotlin",
+    scala: "scala",
+    html: "html",
+    css: "css",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    md: "markdown",
+    sql: "sql",
+    sh: "shell",
+    bash: "bash",
+    dockerfile: "dockerfile",
+  };
+  return extToLang[ext] || "javascript";
+}
 
 interface GenerateEmailRequest {
   originalPrUrl: string; // URL to their original PR in their repo
@@ -9,9 +50,10 @@ interface GenerateEmailRequest {
   prStatus?: "open" | "merged" | "closed"; // Status of the original PR
   prMergedAt?: string | null; // ISO timestamp if merged
   forkedPrUrl: string; // URL to our fork with Macroscope review
-  bug: BugSnippet;
+  bug: BugSnippet | EmailBugInput;
   totalBugs: number;
   analysisId?: number; // Database ID of the analysis to link this email to
+  language?: string; // Programming language for code snippet image generation
 }
 
 interface GenerateEmailResponse {
@@ -70,6 +112,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.warn("Generating email for a closed (not merged) PR - outreach may not be relevant");
     }
 
+    // Prepare bug input, potentially with code snippet image
+    let bugWithImage: BugSnippet | EmailBugInput = body.bug;
+
+    // Check if code_suggestion exists and generate image if R2 is configured
+    const bugInput = body.bug as EmailBugInput;
+    if (bugInput.code_suggestion && isCodeImageGenerationAvailable()) {
+      try {
+        // Extract PR ID from the forked PR URL for unique naming
+        const prIdMatch = body.forkedPrUrl.match(/\/pull\/(\d+)/);
+        const prId = prIdMatch ? prIdMatch[1] : String(Date.now());
+
+        // Detect language from file path or use provided language
+        const language = body.language || detectLanguageFromPath(bugInput.file_path);
+
+        const imageResult = await generateCodeImage({
+          code: bugInput.code_suggestion,
+          language,
+          prId,
+        });
+
+        if (imageResult.success) {
+          bugWithImage = {
+            ...bugInput,
+            code_snippet_image_url: imageResult.url,
+          };
+          console.log("Generated code snippet image:", imageResult.url);
+        } else {
+          console.warn("Code image generation failed:", imageResult.error);
+          // Continue without the image
+        }
+      } catch (imageError) {
+        console.error("Error generating code image:", imageError);
+        // Continue without the image
+      }
+    }
+
     // Generate the email sequence (with Apollo merge fields for personalization)
     const input: EmailGenerationInput = {
       originalPrUrl: body.originalPrUrl,
@@ -77,7 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       prStatus: body.prStatus,
       prMergedAt: body.prMergedAt,
       forkedPrUrl: body.forkedPrUrl,
-      bug: body.bug,
+      bug: bugWithImage,
       totalBugs: body.totalBugs || 1,
     };
 

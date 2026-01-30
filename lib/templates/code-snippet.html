@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Fira Code', 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+      background: transparent;
+      padding: 0;
+    }
+
+    .code-container {
+      background: #282a36;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      display: inline-block;
+      max-width: 600px;
+      min-width: 300px;
+    }
+
+    .code-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .window-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .window-control {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .window-control.close {
+      background: #ff5f56;
+    }
+
+    .window-control.minimize {
+      background: #ffbd2e;
+    }
+
+    .window-control.maximize {
+      background: #27c93f;
+    }
+
+    .language-badge {
+      margin-left: auto;
+      font-size: 11px;
+      color: #6272a4;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .code-content {
+      font-size: 14px;
+      line-height: 1.6;
+      overflow-x: auto;
+    }
+
+    /* Shiki pre/code styling */
+    .code-content pre {
+      margin: 0;
+      padding: 0;
+      background: transparent !important;
+    }
+
+    .code-content code {
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+    }
+
+    /* Line numbers styling if present */
+    .code-content .line {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="code-container">
+    <div class="code-header">
+      <div class="window-controls">
+        <div class="window-control close"></div>
+        <div class="window-control minimize"></div>
+        <div class="window-control maximize"></div>
+      </div>
+      <span class="language-badge">{{LANGUAGE}}</span>
+    </div>
+    <div class="code-content">
+      {{HTML_CONTENT}}
+    </div>
+  </div>
+</body>
+</html>
