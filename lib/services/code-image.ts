@@ -149,7 +149,7 @@ export async function generateCodeImage(
       puppeteer = await import("puppeteer-core");
     }
     if (!chromium) {
-      chromium = await import("@sparticuz/chromium");
+      chromium = (await import("@sparticuz/chromium")).default;
     }
 
     // Get the Shiki highlighter
