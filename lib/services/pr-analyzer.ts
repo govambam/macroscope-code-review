@@ -266,14 +266,23 @@ export function extractOriginalPRUrl(prBody: string): string | null {
 /**
  * Calculate dynamic max_tokens based on the number of Macroscope comments.
  * More comments = more output tokens needed.
+ *
+ * V2 format requires significantly more tokens per comment than V1:
+ * - macroscope_comment_text (quoted, can be long)
+ * - explanation (3-5 sentences)
+ * - explanation_short (1-2 sentences)
+ * - impact_scenario (concrete example)
+ * - code_suggestion (diff format, can be long)
+ * - Plus fixed fields: title, category, file_path, etc.
  */
 function calculateMaxTokens(commentCount: number): number {
-  const estimatedTokensPerComment = 500; // Each comment analysis needs ~500 tokens
-  const baseTokens = 2000; // Base tokens for structure, summary, etc.
+  const estimatedTokensPerComment = 1000; // V2 format needs ~1000 tokens per comment
+  const baseTokens = 3000; // Base tokens for structure, summary, recommendation
   const maxTokensCap = 16384; // Cap at 16k tokens
+  const minTokens = 4000; // Minimum to ensure small PRs don't get truncated
 
   const calculated = baseTokens + commentCount * estimatedTokensPerComment;
-  return Math.min(calculated, maxTokensCap);
+  return Math.min(Math.max(calculated, minTokens), maxTokensCap);
 }
 
 /**
