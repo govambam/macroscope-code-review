@@ -140,6 +140,8 @@ export async function GET(): Promise<NextResponse> {
     }
 
     // Get the best bug for outreach
+    // Best bug is always critical/high severity, so explanation should be present
+    // but we handle null defensively
     let bestBug: {
       title: string;
       explanation: string;
@@ -156,7 +158,7 @@ export async function GET(): Promise<NextResponse> {
       if (best) {
         bestBug = {
           title: best.title,
-          explanation: best.explanation,
+          explanation: best.explanation || "",
           explanationShort: best.explanation_short,
           filePath: best.file_path,
           severity: best.category.replace("bug_", ""),
@@ -231,7 +233,7 @@ ${comment.macroscope_comment_text}
             PR_MERGED_DATE: formatMergedDate(pr.original_pr_merged_at),
             FORKED_PR_URL: pr.forked_pr_url,
             BUG_TITLE: bestBug.title,
-            BUG_EXPLANATION: bestBug.explanationShort || bestBug.explanation,
+            BUG_EXPLANATION: bestBug.explanationShort || bestBug.explanation || "",
             BUG_SEVERITY: bestBug.severity,
             TOTAL_BUGS: meaningfulBugsCount.toString(),
           }
