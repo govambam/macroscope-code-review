@@ -186,10 +186,12 @@ function extractAndParseJSON<T>(response: string): T {
   let jsonStr = response.trim();
 
   // Step 1: Extract JSON from markdown code fences if present
-  // Only do this if the response is NOT already raw JSON (starts with { or [).
+  // Only do this if the response is NOT already raw JSON.
   // Raw JSON responses may contain code fences inside string values (e.g., ```suggestion blocks)
   // which would be incorrectly matched by the regex.
-  if (!jsonStr.startsWith("{") && !jsonStr.startsWith("[")) {
+  // Check for { or for [ followed by a valid JSON array element start (not e.g. "[Analysis]").
+  const looksLikeRawJSON = jsonStr.startsWith("{") || /^\[[\s\[{"\-\dnft]/.test(jsonStr);
+  if (!looksLikeRawJSON) {
     const codeFenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (codeFenceMatch) {
       jsonStr = codeFenceMatch[1].trim();
