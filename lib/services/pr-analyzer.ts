@@ -76,14 +76,14 @@ export type CommentCategory =
  */
 export interface AnalysisComment {
   index: number;
-  macroscope_comment_text: string; // Populated server-side from GitHub API, not from Claude
+  macroscope_comment_text: string;
   file_path: string;
   line_number: number | null;
   category: CommentCategory;
   title: string;
-  explanation: string | null; // Full analysis for critical/high, null for others
-  explanation_short: string | null; // Only for critical/high bugs
-  impact_scenario: string | null; // Only for critical/high bugs
+  explanation: string;
+  explanation_short: string | null; // Only for meaningful bugs
+  impact_scenario: string | null; // Only for meaningful bugs
   code_suggestion: string | null;
   code_snippet_image_url?: string | null; // URL to syntax-highlighted code image
   is_meaningful_bug: boolean;
@@ -304,15 +304,15 @@ function validateV2Response(data: unknown): PRAnalysisResultV2 {
   }
 
   // Validate each comment has required fields
-  // Note: macroscope_comment_text and explanation are NOT required from Claude
-  // (macroscope_comment_text is added server-side, explanation is null for Tier 2 comments)
   for (let i = 0; i < response.all_comments.length; i++) {
     const comment = response.all_comments[i] as Record<string, unknown>;
     const commentRequiredFields = [
       "index",
+      "macroscope_comment_text",
       "file_path",
       "category",
       "title",
+      "explanation",
       "is_meaningful_bug",
       "outreach_ready",
     ];
@@ -420,17 +420,12 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
   const formattedComments = formatCommentsForPrompt(macroscopeComments);
 
   // Load the prompt and interpolate variables
-  let prompt = loadPrompt("pr-analysis", {
+  const prompt = loadPrompt("pr-analysis", {
     FORKED_PR_URL: forkedPrUrl,
     ORIGINAL_PR_URL: originalPrUrl,
     MACROSCOPE_COMMENTS: formattedComments,
     TOTAL_COMMENTS: macroscopeComments.length.toString(),
   });
-
-  // Always append a token-saving directive. This ensures correct behavior
-  // regardless of whether the prompt in the database is the old or new version.
-  // macroscope_comment_text is populated server-side from GitHub API data.
-  prompt += `\n\n---\n**CRITICAL OUTPUT RULES (override any conflicting instructions above):**\n1. Do NOT include "macroscope_comment_text" in your JSON output. It will be populated automatically.\n2. For comments that are NOT bug_critical or bug_high: set explanation, explanation_short, and impact_scenario to null. Still extract code_suggestion if Macroscope provided a fix.\n3. Keep your output as concise as possible to avoid truncation.`;
 
   // Get model from prompt metadata, fallback to default
   const metadata = getPromptMetadata("pr-analysis");
@@ -447,35 +442,6 @@ export async function analyzePR(input: PRAnalysisInput): Promise<PRAnalysisResul
   if (isV2AnalysisResult(result)) {
     // New format - validate V2 structure
     validateV2Response(result);
-
-    // Post-process: merge original Macroscope comment text and fill defaults
-    // Claude doesn't output macroscope_comment_text (to save tokens),
-    // so we populate it from the GitHub API data we already fetched.
-    for (const comment of result.all_comments) {
-      const originalComment = macroscopeComments[comment.index];
-      if (originalComment) {
-        comment.macroscope_comment_text = originalComment.body;
-      } else {
-        comment.macroscope_comment_text = "";
-      }
-
-      // Ensure nullable fields have defaults for Tier 2 comments
-      if (!("explanation" in comment) || comment.explanation === undefined) {
-        comment.explanation = null;
-      }
-      if (!("explanation_short" in comment) || comment.explanation_short === undefined) {
-        comment.explanation_short = null;
-      }
-      if (!("impact_scenario" in comment) || comment.impact_scenario === undefined) {
-        comment.impact_scenario = null;
-      }
-      if (!("code_suggestion" in comment) || comment.code_suggestion === undefined) {
-        comment.code_suggestion = null;
-      }
-      if (!("outreach_skip_reason" in comment) || comment.outreach_skip_reason === undefined) {
-        comment.outreach_skip_reason = null;
-      }
-    }
   } else if (isV1AnalysisResult(result)) {
     // Old format - validate V1 structure
     validateV1Response(result);
@@ -556,7 +522,7 @@ export function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: b
 
   return {
     title: comment.title,
-    explanation: comment.explanation || comment.macroscope_comment_text || "",
+    explanation: comment.explanation,
     file_path: comment.file_path,
     severity: Object.hasOwn(severityMap, comment.category) ? severityMap[comment.category] : "medium",
     is_most_impactful: isMostImpactful,

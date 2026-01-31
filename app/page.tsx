@@ -57,7 +57,7 @@ interface AnalysisComment {
   line_number: number | null;
   category: CommentCategory;
   title: string;
-  explanation: string | null;
+  explanation: string;
   explanation_short: string | null;
   impact_scenario: string | null;
   code_suggestion: string | null;
@@ -156,7 +156,7 @@ function commentToBugSnippet(comment: AnalysisComment, isMostImpactful: boolean 
 
   return {
     title: comment.title,
-    explanation: comment.explanation || comment.macroscope_comment_text || "",
+    explanation: comment.explanation,
     explanation_short: comment.explanation_short || undefined,
     impact_scenario: comment.impact_scenario || undefined,
     code_suggestion: comment.code_suggestion || undefined,
@@ -1899,7 +1899,7 @@ export default function Home() {
 
         return {
           title: bestComment.title,
-          explanation: bestComment.explanation || bestComment.macroscope_comment_text || "",
+          explanation: bestComment.explanation,
           explanation_short: bestComment.explanation_short || undefined,
           file_path: bestComment.file_path,
           severity: severityMap[bestComment.category] || "medium",
@@ -3483,7 +3483,7 @@ export default function Home() {
                                             )}
                                           </div>
                                           <button
-                                            onClick={() => copyBugExplanation(comment.explanation || comment.macroscope_comment_text, index)}
+                                            onClick={() => copyBugExplanation(comment.explanation, index)}
                                             className="text-xs text-text-secondary hover:text-accent flex items-center gap-1"
                                           >
                                             {copiedBugIndex === index ? (
@@ -3505,14 +3505,7 @@ export default function Home() {
                                         </div>
                                         <div className="p-4">
                                           <h4 className="font-medium text-accent mb-2">{comment.title}</h4>
-                                          {comment.explanation ? (
-                                            <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
-                                          ) : (
-                                            <div className="mb-3">
-                                              <p className="text-xs text-text-muted italic mb-2">Detailed analysis skipped — below severity threshold</p>
-                                              <p className="text-sm text-text-secondary">{comment.macroscope_comment_text}</p>
-                                            </div>
-                                          )}
+                                          <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
                                           {comment.impact_scenario && (
                                             <p className="text-sm text-amber-700 bg-amber-50 p-2 rounded mb-3">
                                               <span className="font-medium">Impact:</span> {comment.impact_scenario}
@@ -3750,7 +3743,7 @@ export default function Home() {
                                           )}
                                         </div>
                                         <button
-                                          onClick={() => copyBugExplanation(comment.explanation || comment.macroscope_comment_text, index)}
+                                          onClick={() => copyBugExplanation(comment.explanation, index)}
                                           className="text-xs text-text-secondary hover:text-accent flex items-center gap-1"
                                         >
                                           {copiedBugIndex === index ? (
@@ -3772,14 +3765,7 @@ export default function Home() {
                                       </div>
                                       <div className="p-4">
                                         <h4 className="font-medium text-accent mb-2">{comment.title}</h4>
-                                        {comment.explanation ? (
-                                          <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
-                                        ) : (
-                                          <div className="mb-3">
-                                            <p className="text-xs text-text-muted italic mb-2">Detailed analysis skipped — below severity threshold</p>
-                                            <p className="text-sm text-text-secondary">{comment.macroscope_comment_text}</p>
-                                          </div>
-                                        )}
+                                        <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
                                         {comment.impact_scenario && (
                                           <p className="text-sm text-amber-700 bg-amber-50 p-2 rounded mb-3">
                                             <span className="font-medium">Impact:</span> {comment.impact_scenario}
