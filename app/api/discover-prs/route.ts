@@ -4,23 +4,34 @@ import {
   fetchPRDetails,
   fetchPRFiles,
   parseRepoUrl,
+  areAllCommitsAfterCutoff,
+  fetchOrgRecentPRs,
+  calculateOrgMonthlyMetrics,
 } from "@/lib/services/github-discover";
 import { scorePRCandidate, filterAndSortCandidates } from "@/lib/services/pr-scoring";
 import { batchScorePRsForBugLikelihood } from "@/lib/services/pr-risk-assessment";
 import { loadPrompt } from "@/lib/services/prompt-loader";
 import { DiscoverRequest, DiscoverResponse, PRCandidate } from "@/lib/types/discover";
+import { saveOrgMetrics, deleteOrgMetrics } from "@/lib/services/database";
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
 
   try {
     const body: DiscoverRequest = await request.json();
-    const { repo_url, mode = "fast", filters = {} } = body;
+    const { repo_url, org, mode = "fast", filters = {} } = body;
 
-    // Validate required fields
-    if (!repo_url || typeof repo_url !== "string") {
+    // Validate: must have either repo_url or org, but not both
+    if (!repo_url && !org) {
       return NextResponse.json(
-        { error: "repo_url is required and must be a string" },
+        { error: "Either repo_url or org is required" },
+        { status: 400 }
+      );
+    }
+
+    if (repo_url && org) {
+      return NextResponse.json(
+        { error: "Cannot specify both repo_url and org. Choose one." },
         { status: 400 }
       );
     }
@@ -33,19 +44,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse repo URL
-    const parsed = parseRepoUrl(repo_url);
-    if (!parsed) {
-      return NextResponse.json(
-        { error: "Invalid repository URL. Use format: owner/repo or https://github.com/owner/repo" },
-        { status: 400 }
-      );
+    let owner: string;
+    let repo: string | undefined;
+    let prs: Array<Awaited<ReturnType<typeof fetchRecentPRs>>[number] & { repo_owner?: string; repo_name?: string }>;
+    let isOrgSearch = false;
+
+    if (org) {
+      // Org-level search
+      isOrgSearch = true;
+      owner = org;
+      prs = await fetchOrgRecentPRs(org, 100);
+    } else {
+      // Repo-level search
+      const parsed = parseRepoUrl(repo_url!);
+      if (!parsed) {
+        return NextResponse.json(
+          { error: "Invalid repository URL. Use format: owner/repo or https://github.com/owner/repo" },
+          { status: 400 }
+        );
+      }
+      owner = parsed.owner;
+      repo = parsed.repo;
+      prs = await fetchRecentPRs(owner, repo, 100);
     }
-
-    const { owner, repo } = parsed;
-
-    // Fetch recent PRs (basic info)
-    const prs = await fetchRecentPRs(owner, repo, 100);
 
     // Fetch detailed info for each PR (need additions/deletions)
     // Batch in parallel but limit concurrency
@@ -55,11 +76,31 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < Math.min(prs.length, 50); i += batchSize) {
       const batch = prs.slice(i, i + batchSize);
       const details = await Promise.all(
-        batch.map((pr) =>
-          fetchPRDetails(owner, repo, pr.number)
-            .then((detail) => scorePRCandidate(detail))
-            .catch(() => null)
-        )
+        batch.map(async (pr) => {
+          try {
+            const prOwner = isOrgSearch && pr.repo_owner ? pr.repo_owner : owner;
+            const prRepo = isOrgSearch && pr.repo_name ? pr.repo_name : repo!;
+
+            // Check if all commits are after the cutoff date (Jan 1, 2026)
+            const commitsValid = await areAllCommitsAfterCutoff(prOwner, prRepo, pr.number);
+            if (!commitsValid) {
+              return null; // Skip PRs with commits before cutoff
+            }
+
+            const detail = await fetchPRDetails(prOwner, prRepo, pr.number);
+            const candidate = scorePRCandidate(detail);
+
+            // Add repo info for org-level searches
+            if (isOrgSearch) {
+              candidate.repo_owner = prOwner;
+              candidate.repo_name = prRepo;
+            }
+
+            return candidate;
+          } catch {
+            return null;
+          }
+        })
       );
       detailedPRs.push(...details.filter((d): d is PRCandidate => d !== null));
     }
@@ -99,7 +140,9 @@ export async function POST(request: NextRequest) {
           const prsWithFiles = await Promise.all(
             eligibleForLLM.map(async (pr) => {
               try {
-                const files = await fetchPRFiles(owner, repo, pr.number);
+                const prOwner = isOrgSearch && pr.repo_owner ? pr.repo_owner : owner;
+                const prRepo = isOrgSearch && pr.repo_name ? pr.repo_name : repo!;
+                const files = await fetchPRFiles(prOwner, prRepo, pr.number);
                 return {
                   number: pr.number,
                   title: pr.title,
@@ -174,13 +217,43 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // For org-level searches, calculate and store monthly metrics
+    let monthlyMetrics = undefined;
+    if (isOrgSearch) {
+      try {
+        monthlyMetrics = await calculateOrgMonthlyMetrics(org!);
+
+        // Store metrics in the database (will be deleted if user doesn't simulate any PRs)
+        saveOrgMetrics(
+          monthlyMetrics.org,
+          monthlyMetrics.monthly_prs,
+          monthlyMetrics.monthly_commits,
+          monthlyMetrics.monthly_lines_changed,
+          monthlyMetrics.period_start,
+          monthlyMetrics.period_end,
+          monthlyMetrics.calculated_at
+        );
+      } catch (error) {
+        console.error('Failed to calculate org metrics:', error);
+        // Continue without metrics
+      }
+    }
+
+    // If no usable candidates found, delete the stored metrics
+    if (isOrgSearch && candidates.length === 0) {
+      deleteOrgMetrics(org!);
+      monthlyMetrics = undefined;
+    }
+
     const response: DiscoverResponse = {
       owner,
-      repo,
+      ...(repo ? { repo } : {}),
+      ...(isOrgSearch ? { org: org! } : {}),
       mode,
       total_prs_analyzed: detailedPRs.length,
       candidates,
       analysis_time_ms: Date.now() - startTime,
+      ...(monthlyMetrics ? { monthly_metrics: monthlyMetrics } : {}),
     };
 
     return NextResponse.json(response);

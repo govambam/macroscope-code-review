@@ -24,6 +24,10 @@ export interface PRCandidate {
   is_bot: boolean;
   labels: string[];
 
+  // For org-level searches
+  repo_owner?: string;
+  repo_name?: string;
+
   // Computed scores (0-100 scale)
   total_lines_changed: number;
   complexity_score: number;
@@ -42,7 +46,8 @@ export interface PRCandidate {
 }
 
 export interface DiscoverRequest {
-  repo_url: string; // e.g., "https://github.com/owner/repo" or "owner/repo"
+  repo_url?: string; // e.g., "https://github.com/owner/repo" or "owner/repo"
+  org?: string;      // GitHub organization name for org-level search
   mode: 'fast' | 'advanced';
   filters?: {
     include_open?: boolean;      // default: true
@@ -55,9 +60,22 @@ export interface DiscoverRequest {
 
 export interface DiscoverResponse {
   owner: string;
-  repo: string;
+  repo?: string;    // Not present for org-level searches
+  org?: string;     // Present for org-level searches
   mode: 'fast' | 'advanced';
   total_prs_analyzed: number;
   candidates: PRCandidate[];
   analysis_time_ms: number;
+  monthly_metrics?: OrgMonthlyMetrics;
+}
+
+// Monthly metrics for a GitHub organization
+export interface OrgMonthlyMetrics {
+  org: string;
+  monthly_prs: number;
+  monthly_commits: number;
+  monthly_lines_changed: number;
+  period_start: string;  // ISO date string
+  period_end: string;    // ISO date string
+  calculated_at: string; // ISO timestamp
 }

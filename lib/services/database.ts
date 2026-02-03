@@ -89,6 +89,18 @@ export interface CachedRepoRecord {
   notes: string | null;
 }
 
+export interface OrgMetricsRecord {
+  id: number;
+  org: string;
+  monthly_prs: number;
+  monthly_commits: number;
+  monthly_lines_changed: number;
+  period_start: string;
+  period_end: string;
+  calculated_at: string;
+  created_at: string;
+}
+
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -328,6 +340,21 @@ function initializeSchema(db: Database.Database): void {
       cached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       notes TEXT,
       UNIQUE(repo_owner, repo_name)
+    )
+  `);
+
+  // Create org_metrics table for storing monthly metrics during PR discovery
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS org_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org TEXT NOT NULL UNIQUE,
+      monthly_prs INTEGER NOT NULL,
+      monthly_commits INTEGER NOT NULL,
+      monthly_lines_changed INTEGER NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      calculated_at TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -1157,6 +1184,81 @@ export function getRecentPRWithAnalysisAndEmail(): {
   }
 
   return { pr, analysis, email };
+}
+
+/**
+ * Save or update org monthly metrics.
+ * Returns the metrics ID.
+ */
+export function saveOrgMetrics(
+  org: string,
+  monthlyPRs: number,
+  monthlyCommits: number,
+  monthlyLinesChanged: number,
+  periodStart: string,
+  periodEnd: string,
+  calculatedAt: string
+): number {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    INSERT INTO org_metrics (org, monthly_prs, monthly_commits, monthly_lines_changed, period_start, period_end, calculated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(org)
+    DO UPDATE SET
+      monthly_prs = excluded.monthly_prs,
+      monthly_commits = excluded.monthly_commits,
+      monthly_lines_changed = excluded.monthly_lines_changed,
+      period_start = excluded.period_start,
+      period_end = excluded.period_end,
+      calculated_at = excluded.calculated_at
+    RETURNING id
+  `);
+
+  const result = stmt.get(org, monthlyPRs, monthlyCommits, monthlyLinesChanged, periodStart, periodEnd, calculatedAt) as { id: number };
+  return result.id;
+}
+
+/**
+ * Get org metrics by organization name.
+ * Returns null if not found.
+ */
+export function getOrgMetrics(org: string): OrgMetricsRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM org_metrics WHERE org = ?
+  `);
+
+  return (stmt.get(org) as OrgMetricsRecord | undefined) ?? null;
+}
+
+/**
+ * Delete org metrics by organization name.
+ * Returns true if a record was deleted.
+ */
+export function deleteOrgMetrics(org: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    DELETE FROM org_metrics WHERE org = ?
+  `);
+
+  const result = stmt.run(org);
+  return result.changes > 0;
+}
+
+/**
+ * Get all org metrics.
+ */
+export function getAllOrgMetrics(): OrgMetricsRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM org_metrics ORDER BY created_at DESC
+  `);
+
+  return stmt.all() as OrgMetricsRecord[];
 }
 
 /**
