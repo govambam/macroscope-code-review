@@ -1,9 +1,20 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { PRCandidate, DiscoverResponse } from "@/lib/types/discover";
+import { PRCandidate, DiscoverResponse, OrgMonthlyMetrics } from "@/lib/types/discover";
 
 const MAX_SELECTIONS = 10;
+
+// Format large numbers with K/M suffix
+function formatNumber(num: number): string {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  }
+  return num.toString();
+}
 
 interface PRScoreDisplayProps {
   overall: number;
@@ -122,7 +133,9 @@ interface DiscoverPRsProps {
 }
 
 export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsProps) {
+  const [searchType, setSearchType] = useState<"repo" | "org">("repo");
   const [repoUrl, setRepoUrl] = useState("");
+  const [orgName, setOrgName] = useState("");
   const [mode, setMode] = useState<"fast" | "advanced">("fast");
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<DiscoverResponse | null>(null);
@@ -164,8 +177,12 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
   }, []);
 
   async function handleDiscover() {
-    if (!repoUrl.trim()) {
+    if (searchType === "repo" && !repoUrl.trim()) {
       setValidationError("Please enter a repository name");
+      return;
+    }
+    if (searchType === "org" && !orgName.trim()) {
+      setValidationError("Please enter an organization name");
       return;
     }
 
@@ -176,20 +193,34 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
     setSelectedPRs(new Set());
 
     try {
+      const requestBody = searchType === "repo"
+        ? {
+            repo_url: repoUrl,
+            mode,
+            filters: {
+              include_open: includeOpen,
+              include_merged: includeMerged,
+              merged_within_days: mergedWithinDays,
+              min_lines_changed: minLinesChanged,
+              max_results: 10,
+            },
+          }
+        : {
+            org: orgName,
+            mode,
+            filters: {
+              include_open: includeOpen,
+              include_merged: includeMerged,
+              merged_within_days: mergedWithinDays,
+              min_lines_changed: minLinesChanged,
+              max_results: 10,
+            },
+          };
+
       const response = await fetch("/api/discover-prs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repo_url: repoUrl,
-          mode,
-          filters: {
-            include_open: includeOpen,
-            include_merged: includeMerged,
-            merged_within_days: mergedWithinDays,
-            min_lines_changed: minLinesChanged,
-            max_results: 10,
-          },
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -539,23 +570,76 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
       {!isSimulating && !simulationComplete && (
         <>
           <div className="space-y-4">
+            {/* Search Type Toggle */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-sm font-medium text-gray-700">Search in:</span>
+              <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+                <button
+                  onClick={() => {
+                    setSearchType("repo");
+                    setValidationError(null);
+                  }}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    searchType === "repo"
+                      ? "bg-primary text-white"
+                      : "bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  Repository
+                </button>
+                <button
+                  onClick={() => {
+                    setSearchType("org");
+                    setValidationError(null);
+                  }}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    searchType === "org"
+                      ? "bg-primary text-white"
+                      : "bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  Organization
+                </button>
+              </div>
+              <span className="text-xs text-gray-500">
+                {searchType === "repo" ? "Search within a single repository" : "Search across all repos in an org"}
+              </span>
+            </div>
+
+            {/* Input Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                GitHub Repository
+                {searchType === "repo" ? "GitHub Repository" : "GitHub Organization"}
               </label>
-              <input
-                type="text"
-                value={repoUrl}
-                onChange={(e) => {
-                  setRepoUrl(e.target.value);
-                  if (validationError) setValidationError(null);
-                }}
-                placeholder="owner/repo or https://github.com/owner/repo"
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary ${
-                  validationError ? "border-red-300" : "border-gray-300"
-                }`}
-                onKeyDown={(e) => e.key === "Enter" && handleDiscover()}
-              />
+              {searchType === "repo" ? (
+                <input
+                  type="text"
+                  value={repoUrl}
+                  onChange={(e) => {
+                    setRepoUrl(e.target.value);
+                    if (validationError) setValidationError(null);
+                  }}
+                  placeholder="owner/repo or https://github.com/owner/repo"
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary ${
+                    validationError ? "border-red-300" : "border-gray-300"
+                  }`}
+                  onKeyDown={(e) => e.key === "Enter" && handleDiscover()}
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={orgName}
+                  onChange={(e) => {
+                    setOrgName(e.target.value);
+                    if (validationError) setValidationError(null);
+                  }}
+                  placeholder="organization-name (e.g., facebook, vercel, microsoft)"
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary ${
+                    validationError ? "border-red-300" : "border-gray-300"
+                  }`}
+                  onKeyDown={(e) => e.key === "Enter" && handleDiscover()}
+                />
+              )}
             </div>
 
             {/* Search Mode Toggle */}
@@ -698,12 +782,42 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
           {/* Results */}
           {results && (
             <div className="space-y-4">
+              {/* Org Metrics Banner (for org searches) */}
+              {results.monthly_metrics && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                      <span className="font-semibold text-blue-900">{results.monthly_metrics.org}</span>
+                      <span className="text-sm text-blue-700">- Last 30 days activity</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-blue-900">{formatNumber(results.monthly_metrics.monthly_prs)}</div>
+                        <div className="text-xs text-blue-600">PRs</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-green-700">{formatNumber(results.monthly_metrics.monthly_commits)}</div>
+                        <div className="text-xs text-green-600">Commits</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-purple-700">{formatNumber(results.monthly_metrics.monthly_lines_changed)}</div>
+                        <div className="text-xs text-purple-600">Lines Changed</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Results Header with Selection Controls */}
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-gray-600">
                     Found {results.candidates.length} candidate{results.candidates.length !== 1 ? "s" : ""}{" "}
                     from {results.total_prs_analyzed} PRs analyzed
+                    {results.org && ` across ${results.org}`}
                   </span>
                   {results.candidates.length > 0 && (
                     <button
@@ -828,6 +942,17 @@ function PRCandidateCard({
                   >
                     {pr.state === "open" ? "Open" : "Merged"}
                   </span>
+                  {/* Show repo info for org-level searches */}
+                  {pr.repo_owner && pr.repo_name && (
+                    <a
+                      href={`https://github.com/${pr.repo_owner}/${pr.repo_name}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      {pr.repo_owner}/{pr.repo_name}
+                    </a>
+                  )}
                   <span className="text-sm text-gray-500">PR #{pr.number}</span>
                 </div>
 
