@@ -12,6 +12,9 @@ import { SectionHeader } from "@/components/prospector/SectionHeader";
 import { InfoTooltip } from "@/components/prospector/InfoTooltip";
 import { DiscoverGuidance } from "@/components/prospector/DiscoverGuidance";
 import { DiscoverResults, type DiscoveredPR } from "@/components/prospector/DiscoverResults";
+import { ExistingPRsList, type ExistingPR } from "@/components/prospector/ExistingPRsList";
+import { SimulationStatus, type SimulationStep } from "@/components/prospector/SimulationStatus";
+import { SimulationQueue, type CompletedSimulation } from "@/components/prospector/SimulationQueue";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
 
@@ -106,6 +109,23 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   // Multi-PR confirmation
   const [confirmMulti, setConfirmMulti] = useState<SelectedPR[] | null>(null);
+
+  // Section 2: Fork & Simulation state
+  type ForkStatus = "idle" | "checking" | "not-found" | "found";
+  const [forkStatus, setForkStatus] = useState<ForkStatus>("idle");
+  const [forkOwner, setForkOwner] = useState<string>("");
+  const [forkRepo, setForkRepo] = useState<string>("");
+  const [forkUrl, setForkUrl] = useState<string>("");
+  const [existingPRs, setExistingPRs] = useState<ExistingPR[]>([]);
+  const [forkError, setForkError] = useState<string | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [singleSimSteps, setSingleSimSteps] = useState<SimulationStep[]>([]);
+  const [singleSimError, setSingleSimError] = useState<string | null>(null);
+  const [singleSimPR, setSingleSimPR] = useState<SelectedPR | null>(null);
+  const [simulationComplete, setSimulationComplete] = useState(false);
+  const [completedSims, setCompletedSims] = useState<CompletedSimulation[]>([]);
+  const forkCheckDoneForRef = React.useRef<string>("");
+  const simAbortRef = React.useRef<AbortController | null>(null);
 
   const {
     data,
@@ -250,6 +270,215 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.markStepComplete(1);
     workflow.advanceToStep(2);
     setConfirmMulti(null);
+  }
+
+  // ── Section 2: Fork detection & simulation ──────────────────
+
+  const checkForkStatus = React.useCallback(async () => {
+    if (workflow.selectedPRs.length === 0) return;
+    const firstPR = workflow.selectedPRs[0];
+    const key = `${firstPR.owner}/${firstPR.repo}`;
+
+    // Don't re-check if we already checked for this repo
+    if (forkCheckDoneForRef.current === key) return;
+
+    setForkStatus("checking");
+    setForkError(null);
+
+    try {
+      const res = await fetch("/api/prospector/check-fork", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner: firstPR.owner, repo: firstPR.repo }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to check fork status");
+      }
+
+      forkCheckDoneForRef.current = key;
+
+      if (data.hasFork) {
+        setForkStatus("found");
+        setForkOwner(data.forkOwner);
+        setForkRepo(data.forkRepo);
+        setForkUrl(data.forkUrl);
+        setExistingPRs(data.existingPRs ?? []);
+      } else {
+        setForkStatus("not-found");
+      }
+    } catch (err) {
+      setForkError(err instanceof Error ? err.message : "Failed to check fork");
+      setForkStatus("not-found");
+    }
+  }, [workflow.selectedPRs]);
+
+  // Auto-check fork when entering Section 2
+  React.useEffect(() => {
+    if (
+      workflow.currentStep === 2 &&
+      workflow.selectedPRs.length > 0 &&
+      forkStatus === "idle" &&
+      !isSimulating &&
+      !simulationComplete
+    ) {
+      checkForkStatus();
+    }
+  }, [workflow.currentStep, workflow.selectedPRs, forkStatus, isSimulating, simulationComplete, checkForkStatus]);
+
+  function stepIndexFromApiStep(apiStep: number): number {
+    if (apiStep <= 1) return 0;
+    if (apiStep <= 2) return 1;
+    if (apiStep <= 4) return 2;
+    if (apiStep <= 6) return 3;
+    if (apiStep <= 7) return 4;
+    if (apiStep <= 8) return 5;
+    if (apiStep <= 9) return 6;
+    return 7;
+  }
+
+  function makeSimSteps(): SimulationStep[] {
+    return [
+      { id: "config", label: "Checking configuration", state: "pending" },
+      { id: "fetch-pr", label: "Fetching PR details", state: "pending" },
+      { id: "analyze", label: "Analyzing merge strategy", state: "pending" },
+      { id: "fork", label: "Checking fork", state: "pending" },
+      { id: "clone", label: "Cloning repository", state: "pending" },
+      { id: "branches", label: "Creating branches", state: "pending" },
+      { id: "apply", label: "Applying commits", state: "pending" },
+      { id: "push", label: "Pushing & creating PR", state: "pending" },
+    ];
+  }
+
+  async function startSingleSimulation(pr: SelectedPR) {
+    setIsSimulating(true);
+    setSingleSimPR(pr);
+    const steps = makeSimSteps();
+    setSingleSimSteps(steps);
+    setSingleSimError(null);
+
+    const controller = new AbortController();
+    simAbortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/create-pr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prUrl: pr.url }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            if (event.eventType === "status") {
+              const stepIdx = stepIndexFromApiStep(event.step);
+              setSingleSimSteps((prev) => {
+                const next = [...prev];
+                for (let i = 0; i < next.length; i++) {
+                  if (i < stepIdx) {
+                    next[i] = { ...next[i], state: "done" };
+                  } else if (i === stepIdx) {
+                    next[i] = {
+                      ...next[i],
+                      state: event.statusType === "error" ? "error" : "active",
+                      message: event.message,
+                    };
+                  }
+                }
+                return next;
+              });
+
+              if (event.statusType === "error") {
+                setSingleSimError(event.message);
+              }
+            }
+
+            if (event.eventType === "result") {
+              if (event.success) {
+                setSingleSimSteps((prev) =>
+                  prev.map((s) => ({ ...s, state: "done" as const }))
+                );
+                setCompletedSims([{
+                  pr,
+                  success: true,
+                  forkedPrUrl: event.prUrl,
+                  prTitle: event.prTitle,
+                }]);
+                setSimulationComplete(true);
+                setIsSimulating(false);
+                workflow.markStepComplete(2);
+                workflow.advanceToStep(3);
+              } else {
+                setSingleSimError(event.error || event.message || "Simulation failed");
+              }
+            }
+          } catch {
+            // Ignore malformed SSE lines
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      const msg = err instanceof Error ? err.message : "Simulation failed";
+      setSingleSimError(msg);
+    } finally {
+      simAbortRef.current = null;
+    }
+  }
+
+  function handleStartSimulation() {
+    if (workflow.selectedPRs.length === 1) {
+      startSingleSimulation(workflow.selectedPRs[0]);
+    } else {
+      setIsSimulating(true);
+    }
+  }
+
+  function handleRetrySimulation() {
+    if (singleSimPR) {
+      startSingleSimulation(singleSimPR);
+    }
+  }
+
+  function handleQueueComplete(completed: CompletedSimulation[]) {
+    setCompletedSims(completed);
+    setSimulationComplete(true);
+    setIsSimulating(false);
+    const anySuccess = completed.some((s) => s.success);
+    if (anySuccess) {
+      workflow.markStepComplete(2);
+      workflow.advanceToStep(3);
+    }
+  }
+
+  function handleRecheckFork() {
+    forkCheckDoneForRef.current = "";
+    setForkStatus("idle");
+    checkForkStatus();
   }
 
   // ── Session helpers ──────────────────────────────────────────
@@ -529,14 +758,179 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           />
           {!sectionStates[1].isCollapsed && (
             <div className="p-5">
-              {workflow.selectedPRs.length > 0 && (sectionStates[1].isActive || sectionStates[1].isCompleted) ? (
-                <div>
-                  <p className="text-sm text-text-secondary mb-3">
-                    {workflow.selectedPRs.length} PR{workflow.selectedPRs.length !== 1 ? "s" : ""} ready for simulation.
-                  </p>
-                  <p className="text-sm text-text-muted italic">Simulation will be implemented in Phase 4.</p>
+              {!(sectionStates[1].isActive || sectionStates[1].isCompleted) ? (
+                <p className="text-sm text-text-muted italic">Select a PR above to begin simulation.</p>
+              ) : simulationComplete ? (
+                /* 2F: Simulation complete summary */
+                <div className="space-y-4">
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm font-medium text-green-800">
+                      Simulation complete &mdash; {completedSims.filter((s) => s.success).length} of {completedSims.length} PR{completedSims.length !== 1 ? "s" : ""} created successfully
+                    </p>
+                  </div>
+                  {completedSims.length > 0 && (
+                    <div className="border border-border rounded-lg divide-y divide-border">
+                      {completedSims.map((sim) => (
+                        <div key={sim.pr.prNumber} className="px-4 py-2.5 flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {sim.success ? (
+                              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-green-500 text-white shrink-0">
+                                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              </span>
+                            ) : (
+                              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white shrink-0">
+                                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </span>
+                            )}
+                            <span className="text-xs font-mono text-text-muted">#{sim.pr.prNumber}</span>
+                            <span className="text-sm text-accent truncate">
+                              {sim.prTitle || sim.pr.title || `${sim.pr.owner}/${sim.pr.repo}`}
+                            </span>
+                          </div>
+                          {sim.success && sim.forkedPrUrl && (
+                            <a
+                              href={sim.forkedPrUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-medium text-primary hover:text-primary-hover shrink-0"
+                            >
+                              View PR
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : isSimulating && workflow.selectedPRs.length > 1 ? (
+                /* 2E: Multiple PRs queued */
+                <SimulationQueue
+                  selectedPRs={workflow.selectedPRs}
+                  sessionId={sessionId}
+                  onAllComplete={handleQueueComplete}
+                />
+              ) : isSimulating && singleSimPR ? (
+                /* 2D: Single PR simulation in progress */
+                <SimulationStatus
+                  prNumber={singleSimPR.prNumber}
+                  prTitle={singleSimPR.title || `PR #${singleSimPR.prNumber}`}
+                  repo={`${singleSimPR.owner}/${singleSimPR.repo}`}
+                  steps={singleSimSteps}
+                  errorMessage={singleSimError}
+                  onRetry={singleSimError ? handleRetrySimulation : undefined}
+                />
+              ) : forkStatus === "checking" ? (
+                /* 2A: Checking fork status */
+                <div className="flex items-center gap-3 p-4 bg-gray-50 border border-border rounded-lg">
+                  <svg className="animate-spin h-5 w-5 text-primary shrink-0" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-accent">Checking fork status...</p>
+                    <p className="text-xs text-text-muted mt-0.5">
+                      Looking for an existing fork of {workflow.selectedPRs[0]?.owner}/{workflow.selectedPRs[0]?.repo} in macroscope-gtm
+                    </p>
+                  </div>
+                </div>
+              ) : forkStatus === "not-found" ? (
+                /* 2B: Fork not found - manual instructions */
+                <div className="space-y-4">
+                  {forkError && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800">{forkError}</p>
+                    </div>
+                  )}
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm font-medium text-accent mb-2">
+                      No fork found in macroscope-gtm
+                    </p>
+                    <p className="text-sm text-text-secondary mb-3">
+                      A fork is needed to simulate PRs. You can either start the simulation (which will create a fork automatically) or create one manually.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleStartSimulation}
+                        className="px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary-hover rounded-lg transition-colors"
+                      >
+                        Start Simulation
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRecheckFork}
+                        className="px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Re-check Fork
+                      </button>
+                    </div>
+                  </div>
+                  <details className="text-sm">
+                    <summary className="cursor-pointer text-text-secondary hover:text-accent font-medium">
+                      Manual fork instructions
+                    </summary>
+                    <div className="mt-2 p-4 bg-gray-50 border border-border rounded-lg space-y-2 text-text-secondary">
+                      <p>1. Go to <span className="font-mono text-xs bg-white px-1.5 py-0.5 rounded border border-border">https://github.com/{workflow.selectedPRs[0]?.owner}/{workflow.selectedPRs[0]?.repo}</span></p>
+                      <p>2. Click <strong>Fork</strong> in the top right</p>
+                      <p>3. Change the owner to <strong>macroscope-gtm</strong></p>
+                      <p>4. Click <strong>Create fork</strong></p>
+                      <p>5. Come back here and click <strong>Re-check Fork</strong></p>
+                    </div>
+                  </details>
+                </div>
+              ) : forkStatus === "found" ? (
+                /* 2C: Fork exists */
+                <div className="space-y-4">
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-green-800">
+                        Fork found: {forkOwner}/{forkRepo}
+                      </p>
+                      <p className="text-xs text-green-600 mt-0.5">Ready to simulate PRs</p>
+                    </div>
+                    {forkUrl && (
+                      <a
+                        href={forkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium text-green-700 hover:text-green-900 shrink-0"
+                      >
+                        View on GitHub
+                      </a>
+                    )}
+                  </div>
+
+                  {existingPRs.length > 0 && (
+                    <ExistingPRsList
+                      forkOwner={forkOwner}
+                      forkRepo={forkRepo}
+                      existingPRs={existingPRs}
+                      onRunAnalysis={() => {}}
+                      onViewAnalysis={() => {}}
+                    />
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleStartSimulation}
+                      className="px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary-hover rounded-lg transition-colors"
+                    >
+                      {workflow.selectedPRs.length > 1
+                        ? `Simulate ${workflow.selectedPRs.length} PRs`
+                        : "Start Simulation"}
+                    </button>
+                    <p className="text-xs text-text-muted">
+                      {workflow.selectedPRs.length} PR{workflow.selectedPRs.length !== 1 ? "s" : ""} selected from Step 1
+                    </p>
+                  </div>
                 </div>
               ) : (
+                /* idle / waiting for step 1 */
                 <p className="text-sm text-text-muted italic">Select a PR above to begin simulation.</p>
               )}
             </div>
