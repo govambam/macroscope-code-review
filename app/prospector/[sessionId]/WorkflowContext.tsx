@@ -7,7 +7,7 @@ export interface SelectedPR {
   owner: string;
   repo: string;
   prNumber: number;
-  source: "direct-url" | "discover";
+  source: "direct-url" | "discover" | "existing";
   score?: number;
   title?: string;
   additions?: number;

@@ -18,6 +18,7 @@ import { SimulationQueue, type CompletedSimulation } from "@/components/prospect
 import { AnalysisSection } from "@/components/prospector/AnalysisSection";
 import { EmailSection } from "@/components/prospector/EmailSection";
 import { AttioSection } from "@/components/prospector/AttioSection";
+import { ExistingPRsSelector, type OrgPR } from "@/components/prospector/ExistingPRsSelector";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
 import type { AnalysisApiResponse, EmailSequence } from "@/lib/types/prospector-analysis";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
@@ -143,6 +144,9 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   } | null>(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
 
+  // Existing PRs for org (Step 1 option)
+  const [existingOrgPRsAvailable, setExistingOrgPRsAvailable] = useState<boolean | null>(null);
+
   const {
     data,
     isLoading,
@@ -165,6 +169,20 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   function handleEditSaved() {
     refetch();
   }
+
+  // Check if org has existing simulated PRs
+  React.useEffect(() => {
+    if (!session?.github_org) {
+      setExistingOrgPRsAvailable(false);
+      return;
+    }
+    fetch(`/api/orgs/${encodeURIComponent(session.github_org)}/prs`)
+      .then((r) => r.json())
+      .then((d) => {
+        setExistingOrgPRsAvailable(!!(d.success && d.totalPRs > 0));
+      })
+      .catch(() => setExistingOrgPRsAvailable(false));
+  }, [session?.github_org]);
 
   // ── Option A: Direct URL ─────────────────────────────────────
 
@@ -515,6 +533,32 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     checkForkStatus();
   }
 
+  // ── Existing PR selection handler ──────────────────────────────
+
+  function handleSelectExistingPR(pr: OrgPR) {
+    const selectedPR: SelectedPR = {
+      url: pr.originalPrUrl || pr.forkedPrUrl,
+      owner: pr.forkOwner,
+      repo: pr.repoName,
+      prNumber: pr.prNumber,
+      source: "existing",
+      title: pr.originalPrTitle || pr.title || undefined,
+    };
+    workflow.setSelectedPRs([selectedPR]);
+    setCompletedSims([
+      {
+        pr: selectedPR,
+        success: true,
+        forkedPrUrl: pr.forkedPrUrl,
+        prTitle: pr.originalPrTitle || pr.title || undefined,
+      },
+    ]);
+    setSimulationComplete(true);
+    workflow.markStepComplete(1);
+    workflow.markStepComplete(2);
+    workflow.advanceToStep(3);
+  }
+
   // ── Section 3-5 handlers ────────────────────────────────────
 
   function handleAnalysisComplete(data: {
@@ -694,12 +738,39 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                 </div>
               )}
 
-              <p className="text-sm text-text-secondary mb-5">Two ways to get started:</p>
+              {/* Existing PRs section (when org has simulated PRs) */}
+              {existingOrgPRsAvailable && session?.github_org && (
+                <>
+                  <ExistingPRsSelector
+                    orgName={session.github_org}
+                    onSelectPR={handleSelectExistingPR}
+                  />
+                  <div className="flex items-center gap-3 my-5">
+                    <div className="flex-1 border-t border-border" />
+                    <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Or simulate a new PR</span>
+                    <div className="flex-1 border-t border-border" />
+                  </div>
+                </>
+              )}
+
+              {/* Info banner when org exists but has no PRs */}
+              {existingOrgPRsAvailable === false && session?.github_org && (
+                <div className="mb-5 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    No existing simulated PRs for <span className="font-medium">{session.github_org}</span>.
+                    Simulate your first PR using one of the options below.
+                  </p>
+                </div>
+              )}
+
+              {!existingOrgPRsAvailable && (
+                <p className="text-sm text-text-secondary mb-5">Two ways to get started:</p>
+              )}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {/* Option A: PR URL */}
                 <div className="border border-border rounded-lg p-5">
                   <h3 className="text-sm font-semibold text-accent mb-3">
-                    Option A: Already have a PR URL?
+                    {existingOrgPRsAvailable ? "Enter PR URL" : "Option A: Already have a PR URL?"}
                   </h3>
                   <label htmlFor="pr-url" className="block text-sm text-text-secondary mb-1.5">
                     Paste the GitHub PR URL:
@@ -736,7 +807,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                 {/* Option B: Discover */}
                 <div className="border border-border rounded-lg p-5">
                   <h3 className="text-sm font-semibold text-accent mb-3">
-                    Option B: Discover PRs in a Repository
+                    {existingOrgPRsAvailable ? "Discover PRs" : "Option B: Discover PRs in a Repository"}
                   </h3>
                   <DiscoverGuidance />
                   <label htmlFor="discover-repo" className="block text-sm text-text-secondary mb-1.5">
