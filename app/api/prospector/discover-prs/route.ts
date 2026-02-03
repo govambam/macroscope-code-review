@@ -46,6 +46,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
     const { owner, repo } = body;
 
     if (!owner || !repo) {
