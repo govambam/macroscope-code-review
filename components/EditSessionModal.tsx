@@ -33,7 +33,7 @@ export function EditSessionModal({ session, open, onClose, onSaved }: EditSessio
     setNotes(session.notes ?? "");
     setStatus(session.status);
     setError(null);
-  }, [session]);
+  }, [session, open]);
 
   // Close on escape
   useEffect(() => {
