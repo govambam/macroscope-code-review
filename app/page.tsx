@@ -233,7 +233,26 @@ interface ForkRecord {
   createdAt: string;
   isInternal?: boolean;
   isCached?: boolean;
+  originalOrg?: string | null; // The GitHub org of the original repo
   prs: PRRecord[];
+}
+
+interface OrgMetricsRecord {
+  id: number;
+  org: string;
+  monthly_prs: number;
+  monthly_commits: number;
+  monthly_lines_changed: number;
+  period_start: string;
+  period_end: string;
+  calculated_at: string;
+  created_at: string;
+}
+
+interface OrgGroup {
+  org: string;
+  forks: ForkRecord[];
+  metrics?: OrgMetricsRecord;
 }
 
 interface OrgUser {
@@ -282,6 +301,9 @@ export default function Home() {
   // React Query client for cache manipulation
   const queryClient = useQueryClient();
 
+  // State for org metrics
+  const [orgMetrics, setOrgMetrics] = useState<OrgMetricsRecord[]>([]);
+
   // Fetch forks from API
   const fetchForks = async (source: "db" | "github" = "db"): Promise<ForkRecord[]> => {
     const url = source === "db" ? "/api/forks?source=db" : "/api/forks";
@@ -295,6 +317,11 @@ export default function Home() {
     // Cache in localStorage as backup
     if (data.forks) {
       localStorage.setItem("macroscope-forks", JSON.stringify(data.forks));
+    }
+
+    // Store org metrics
+    if (data.orgMetrics) {
+      setOrgMetrics(data.orgMetrics);
     }
 
     return data.forks || [];
@@ -374,9 +401,11 @@ export default function Home() {
   const [deleteResult, setDeleteResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showOnlyWithIssues, setShowOnlyWithIssues] = useState(false);
   const [checkingPR, setCheckingPR] = useState<{ repo: string; pr: number } | null>(null);
+  const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
   const forksLoadedRef = useRef(false);
   const checkedPRsRef = useRef<Set<string>>(new Set());
+  const expandedOrgsInitialized = useRef(false);
   const expandedReposInitialized = useRef(false);
 
   // PR Analysis tab state
@@ -484,6 +513,20 @@ export default function Home() {
   useEffect(() => {
     if (forks.length > 0) {
       forksLoadedRef.current = true;
+    }
+  }, [forks]);
+
+  // Auto-expand orgs and repos that have PRs
+  useEffect(() => {
+    if (forks.length > 0 && !expandedOrgsInitialized.current) {
+      // Get all unique orgs that have forks with PRs
+      const orgsWithPRs = new Set(
+        forks
+          .filter(f => f.prs.length > 0)
+          .map(f => f.originalOrg || "Other")
+      );
+      setExpandedOrgs(orgsWithPRs);
+      expandedOrgsInitialized.current = true;
     }
   }, [forks]);
 
@@ -1086,6 +1129,36 @@ export default function Home() {
     return result;
   }, [forks, searchQuery, showOnlyWithIssues, isPrUrl, normalizePrUrl, selectedOwner, internalFilter, sortMode]);
 
+  // Group forks by organization
+  const orgGroups = useMemo((): OrgGroup[] => {
+    const filtered = filteredForks();
+    const groups: Map<string, ForkRecord[]> = new Map();
+
+    for (const fork of filtered) {
+      const org = fork.originalOrg || "Other";
+      if (!groups.has(org)) {
+        groups.set(org, []);
+      }
+      groups.get(org)!.push(fork);
+    }
+
+    // Convert to array and sort
+    const result: OrgGroup[] = [];
+    for (const [org, forks] of groups.entries()) {
+      const metrics = orgMetrics.find(m => m.org === org);
+      result.push({ org, forks, metrics });
+    }
+
+    // Sort: "Other" always last, then alphabetically
+    result.sort((a, b) => {
+      if (a.org === "Other") return 1;
+      if (b.org === "Other") return -1;
+      return a.org.localeCompare(b.org);
+    });
+
+    return result;
+  }, [filteredForks, orgMetrics]);
+
   // Pagination data - keep repos together (don't split across pages)
   const paginationData = useMemo(() => {
     const filtered = filteredForks();
@@ -1139,6 +1212,35 @@ export default function Home() {
       showHeader: true,
     }));
   }, [paginationData.currentPageForks]);
+
+  // Group paginated forks by org for 3-level display
+  const paginatedOrgGroups = useMemo((): OrgGroup[] => {
+    const groups: Map<string, ForkRecord[]> = new Map();
+
+    for (const { fork } of paginatedForks) {
+      const org = fork.originalOrg || "Other";
+      if (!groups.has(org)) {
+        groups.set(org, []);
+      }
+      groups.get(org)!.push(fork);
+    }
+
+    // Convert to array
+    const result: OrgGroup[] = [];
+    for (const [org, forks] of groups.entries()) {
+      const metrics = orgMetrics.find(m => m.org === org);
+      result.push({ org, forks, metrics });
+    }
+
+    // Sort: "Other" always last, then alphabetically
+    result.sort((a, b) => {
+      if (a.org === "Other") return 1;
+      if (b.org === "Other") return -1;
+      return a.org.localeCompare(b.org);
+    });
+
+    return result;
+  }, [paginatedForks, orgMetrics]);
 
   // Helper to change page and scroll to top
   const goToPage = useCallback((page: number) => {
@@ -1213,6 +1315,18 @@ export default function Home() {
 
     return suggestions;
   }, [forks, searchQuery]);
+
+  const toggleOrgExpand = (org: string) => {
+    setExpandedOrgs((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(org)) {
+        newSet.delete(org);
+      } else {
+        newSet.add(org);
+      }
+      return newSet;
+    });
+  };
 
   const toggleRepoExpand = (repoName: string) => {
     setExpandedRepos((prev) => {
@@ -1446,6 +1560,17 @@ export default function Home() {
     const ampm = hours >= 12 ? "PM" : "AM";
     const hour12 = hours % 12 || 12;
     return `${month}/${day}/${year} ${hour12}:${minutes} ${ampm}`;
+  };
+
+  // Format large numbers with K/M suffix
+  const formatMetricNumber = (num: number): string => {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+    }
+    return num.toString();
   };
 
   // PR Analysis functions
@@ -2584,20 +2709,22 @@ export default function Home() {
               </div>
             ) : (
               <div className="divide-y divide-border">
-                    {paginatedForks.map(({ fork, prs: pagePrs }) => {
-                      const checkboxState = getRepoCheckboxState(fork.repoName);
-                      const isExpanded = expandedRepos.has(fork.repoName);
+                    {paginatedOrgGroups.map((orgGroup) => {
+                      const isOrgExpanded = expandedOrgs.has(orgGroup.org);
+                      const totalPRsInOrg = orgGroup.forks.reduce((sum, f) => sum + f.prs.length, 0);
+                      const totalReposInOrg = orgGroup.forks.length;
+
                       return (
-                        <div key={fork.forkUrl}>
-                          {/* Repo Header - Clickable Accordion */}
+                        <div key={orgGroup.org}>
+                          {/* Org Header - Clickable Accordion */}
                           <div
-                            className="flex items-center px-4 md:px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors min-h-[52px]"
-                            onClick={() => toggleRepoExpand(fork.repoName)}
+                            className="flex items-center px-4 md:px-6 py-3 bg-blue-50 hover:bg-blue-100 cursor-pointer transition-colors min-h-[56px] border-b border-blue-100"
+                            onClick={() => toggleOrgExpand(orgGroup.org)}
                           >
                             {/* Expand/Collapse Arrow */}
                             <div className="w-6 flex-shrink-0">
                               <svg
-                                className={`h-5 w-5 md:h-4 md:w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                                className={`h-5 w-5 md:h-4 md:w-4 text-blue-600 transition-transform duration-200 ${isOrgExpanded ? "rotate-90" : ""}`}
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -2607,21 +2734,89 @@ export default function Home() {
                               </svg>
                             </div>
 
-                            {/* Checkbox */}
-                            <div className="w-10 flex-shrink-0 flex justify-center">
-                              <input
-                                type="checkbox"
-                                checked={checkboxState === "checked"}
-                                ref={(el) => {
-                                  if (el) el.indeterminate = checkboxState === "indeterminate";
-                                }}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  toggleRepoSelection(fork.repoName);
-                                }}
+                            {/* Org Name and Stats */}
+                            <div className="flex-1 flex items-center gap-2 md:gap-3 ml-2 flex-wrap">
+                              <a
+                                href={`https://github.com/${orgGroup.org}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
-                                className="h-5 w-5 md:h-4 md:w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
-                              />
+                                className="text-base font-bold text-blue-900 hover:text-blue-700 hover:underline"
+                              >
+                                {orgGroup.org}
+                              </a>
+                              <span className="text-sm text-blue-700">
+                                ({totalReposInOrg} repo{totalReposInOrg !== 1 ? "s" : ""}, {totalPRsInOrg} PR{totalPRsInOrg !== 1 ? "s" : ""})
+                              </span>
+
+                              {/* Monthly Metrics Badges */}
+                              {orgGroup.metrics && (
+                                <div className="flex items-center gap-2 ml-auto mr-2">
+                                  <span className="text-xs text-blue-600 font-medium">Last 30 days:</span>
+                                  <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800" title={`${orgGroup.metrics.monthly_prs} PRs in the last 30 days`}>
+                                    <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                                    </svg>
+                                    {formatMetricNumber(orgGroup.metrics.monthly_prs)} PRs
+                                  </span>
+                                  <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800" title={`${orgGroup.metrics.monthly_commits} commits in the last 30 days`}>
+                                    <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {formatMetricNumber(orgGroup.metrics.monthly_commits)} commits
+                                  </span>
+                                  <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-purple-100 text-purple-800" title={`${orgGroup.metrics.monthly_lines_changed} lines changed in the last 30 days`}>
+                                    <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16m-7 6h7" />
+                                    </svg>
+                                    {formatMetricNumber(orgGroup.metrics.monthly_lines_changed)} lines
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Repos within this Org - Collapsible */}
+                          {isOrgExpanded && orgGroup.forks.map((fork) => {
+                            const checkboxState = getRepoCheckboxState(fork.repoName);
+                            const isExpanded = expandedRepos.has(fork.repoName);
+                            const pagePrs = fork.prs;
+
+                            return (
+                              <div key={fork.forkUrl} className="ml-4 border-l-2 border-blue-100">
+                                {/* Repo Header - Clickable Accordion */}
+                                <div
+                                  className="flex items-center px-4 md:px-6 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors min-h-[52px]"
+                                  onClick={() => toggleRepoExpand(fork.repoName)}
+                                >
+                                  {/* Expand/Collapse Arrow */}
+                                  <div className="w-6 flex-shrink-0">
+                                    <svg
+                                      className={`h-5 w-5 md:h-4 md:w-4 text-gray-500 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                  </div>
+
+                                  {/* Checkbox */}
+                                  <div className="w-10 flex-shrink-0 flex justify-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={checkboxState === "checked"}
+                                      ref={(el) => {
+                                        if (el) el.indeterminate = checkboxState === "indeterminate";
+                                      }}
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        toggleRepoSelection(fork.repoName);
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="h-5 w-5 md:h-4 md:w-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                                    />
                             </div>
 
                             {/* Repo Name and PR Count */}
@@ -2885,19 +3080,22 @@ export default function Home() {
                             </div>
                           )}
 
-                          {/* Empty state for repos with no PRs */}
-                          {isExpanded && fork.prs.length === 0 && (
-                            <div className="px-6 py-8 bg-white text-center">
-                              <svg className="mx-auto h-8 w-8 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              <p className="text-sm text-gray-500">No review PRs in this repository</p>
-                              <p className="text-xs text-gray-400 mt-1">Create a PR to get started</p>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                                  {/* Empty state for repos with no PRs */}
+                                  {isExpanded && pagePrs.length === 0 && (
+                                    <div className="px-6 py-8 bg-white text-center ml-4">
+                                      <svg className="mx-auto h-8 w-8 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                      </svg>
+                                      <p className="text-sm text-gray-500">No review PRs in this repository</p>
+                                      <p className="text-xs text-gray-400 mt-1">Create a PR to get started</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
 

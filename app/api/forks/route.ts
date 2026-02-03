@@ -8,6 +8,9 @@ import {
   deletePR,
   getFork,
   isRepoCached,
+  updateForkOriginalOrg,
+  getAllOrgMetrics,
+  OrgMetricsRecord,
 } from "@/lib/services/database";
 
 interface PRRecord {
@@ -35,7 +38,15 @@ interface ForkRecord {
   createdAt: string;
   isInternal?: boolean;
   isCached?: boolean;
+  originalOrg?: string | null; // The GitHub org of the original repo
   prs: PRRecord[];
+}
+
+// Extract org/owner from a GitHub URL
+function extractOrgFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const match = url.match(/github\.com\/([^\/]+)\//);
+  return match ? match[1] : null;
 }
 
 interface BugCountResult {
@@ -94,37 +105,57 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (source === "db") {
     try {
       const dbForks = getAllForksWithPRs();
+      const orgMetrics = getAllOrgMetrics();
 
       // Transform database format to API format
-      const forks: ForkRecord[] = dbForks.map(dbFork => ({
-        repoName: dbFork.repo_name,
-        repoOwner: dbFork.repo_owner,
-        forkUrl: dbFork.fork_url,
-        createdAt: dbFork.created_at,
-        isInternal: Boolean(dbFork.is_internal),
-        isCached: isRepoCached(dbFork.repo_owner, dbFork.repo_name),
-        prs: dbFork.prs.map(dbPR => ({
-          prNumber: dbPR.pr_number,
-          prUrl: dbPR.forked_pr_url,
-          prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
-          createdAt: dbPR.created_at,
-          updatedAt: dbPR.updated_at ?? null,
-          commitCount: dbPR.commit_count ?? 0,
-          state: dbPR.state || "open",
-          branchName: `review-pr-${dbPR.pr_number}`, // Reconstructed from convention
-          macroscopeBugs: dbPR.bug_count ?? undefined,
-          hasAnalysis: Boolean(dbPR.has_analysis),
-          analysisId: dbPR.analysis_id ?? null,
-          lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
-          originalPrUrl: dbPR.original_pr_url ?? null,
-          isInternal: Boolean(dbPR.is_internal),
-          createdBy: dbPR.created_by ?? null,
-        })),
-      }));
+      const forks: ForkRecord[] = dbForks.map(dbFork => {
+        // Try to derive originalOrg from PRs if not already set
+        let originalOrg = dbFork.original_org;
+        if (!originalOrg) {
+          // Look for originalPrUrl in any PR to extract the org
+          for (const pr of dbFork.prs) {
+            const extracted = extractOrgFromUrl(pr.original_pr_url);
+            if (extracted) {
+              originalOrg = extracted;
+              // Update the database for future queries
+              updateForkOriginalOrg(dbFork.id, extracted);
+              break;
+            }
+          }
+        }
+
+        return {
+          repoName: dbFork.repo_name,
+          repoOwner: dbFork.repo_owner,
+          forkUrl: dbFork.fork_url,
+          createdAt: dbFork.created_at,
+          isInternal: Boolean(dbFork.is_internal),
+          isCached: isRepoCached(dbFork.repo_owner, dbFork.repo_name),
+          originalOrg: originalOrg ?? null,
+          prs: dbFork.prs.map(dbPR => ({
+            prNumber: dbPR.pr_number,
+            prUrl: dbPR.forked_pr_url,
+            prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
+            createdAt: dbPR.created_at,
+            updatedAt: dbPR.updated_at ?? null,
+            commitCount: dbPR.commit_count ?? 0,
+            state: dbPR.state || "open",
+            branchName: `review-pr-${dbPR.pr_number}`, // Reconstructed from convention
+            macroscopeBugs: dbPR.bug_count ?? undefined,
+            hasAnalysis: Boolean(dbPR.has_analysis),
+            analysisId: dbPR.analysis_id ?? null,
+            lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
+            originalPrUrl: dbPR.original_pr_url ?? null,
+            isInternal: Boolean(dbPR.is_internal),
+            createdBy: dbPR.created_by ?? null,
+          })),
+        };
+      });
 
       return NextResponse.json({
         success: true,
         forks,
+        orgMetrics,
         source: "database",
       });
     } catch (error) {
@@ -243,9 +274,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // Merge GitHub data with database analysis status
     const mergedForks: ForkRecord[] = forkRecords.map(ghFork => {
       const dbFork = dbForks.find(f => f.repo_name === ghFork.repoName);
+
+      // Derive originalOrg from PRs
+      let originalOrg: string | null = dbFork?.original_org ?? null;
+      if (!originalOrg && dbFork) {
+        for (const pr of dbFork.prs) {
+          const extracted = extractOrgFromUrl(pr.original_pr_url);
+          if (extracted) {
+            originalOrg = extracted;
+            updateForkOriginalOrg(dbFork.id, extracted);
+            break;
+          }
+        }
+      }
+
       return {
         ...ghFork,
         isInternal: false,
+        originalOrg,
         prs: ghFork.prs.map(ghPR => {
           const dbPR = dbFork?.prs.find(p => p.pr_number === ghPR.prNumber);
           return {
@@ -266,37 +312,57 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // Add internal repos from database (not GitHub forks)
     const internalForks = dbForks
       .filter(dbFork => dbFork.is_internal)
-      .map(dbFork => ({
-        repoName: dbFork.repo_name,
-        repoOwner: dbFork.repo_owner,
-        forkUrl: dbFork.fork_url,
-        createdAt: dbFork.created_at,
-        isInternal: true,
-        isCached: isRepoCached(dbFork.repo_owner, dbFork.repo_name),
-        prs: dbFork.prs.map(dbPR => ({
-          prNumber: dbPR.pr_number,
-          prUrl: dbPR.forked_pr_url,
-          prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
-          createdAt: dbPR.created_at,
-          updatedAt: dbPR.updated_at ?? null,
-          commitCount: dbPR.commit_count ?? 0,
-          state: dbPR.state || "open",
-          branchName: `pr-${dbPR.pr_number}`,
-          macroscopeBugs: dbPR.bug_count ?? undefined,
-          hasAnalysis: Boolean(dbPR.has_analysis),
-          analysisId: dbPR.analysis_id ?? null,
-          lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
-          originalPrUrl: dbPR.original_pr_url ?? null,
+      .map(dbFork => {
+        // Derive originalOrg from PRs for internal repos too
+        let originalOrg: string | null = dbFork.original_org ?? null;
+        if (!originalOrg) {
+          for (const pr of dbFork.prs) {
+            const extracted = extractOrgFromUrl(pr.original_pr_url);
+            if (extracted) {
+              originalOrg = extracted;
+              updateForkOriginalOrg(dbFork.id, extracted);
+              break;
+            }
+          }
+        }
+
+        return {
+          repoName: dbFork.repo_name,
+          repoOwner: dbFork.repo_owner,
+          forkUrl: dbFork.fork_url,
+          createdAt: dbFork.created_at,
           isInternal: true,
-        })),
-      }));
+          isCached: isRepoCached(dbFork.repo_owner, dbFork.repo_name),
+          originalOrg,
+          prs: dbFork.prs.map(dbPR => ({
+            prNumber: dbPR.pr_number,
+            prUrl: dbPR.forked_pr_url,
+            prTitle: dbPR.pr_title || `PR #${dbPR.pr_number}`,
+            createdAt: dbPR.created_at,
+            updatedAt: dbPR.updated_at ?? null,
+            commitCount: dbPR.commit_count ?? 0,
+            state: dbPR.state || "open",
+            branchName: `pr-${dbPR.pr_number}`,
+            macroscopeBugs: dbPR.bug_count ?? undefined,
+            hasAnalysis: Boolean(dbPR.has_analysis),
+            analysisId: dbPR.analysis_id ?? null,
+            lastBugCheckAt: dbPR.last_bug_check_at ?? undefined,
+            originalPrUrl: dbPR.original_pr_url ?? null,
+            isInternal: true,
+          })),
+        };
+      });
 
     // Combine GitHub forks with internal repos
     const allForks = [...mergedForks, ...internalForks];
 
+    // Get org metrics from database
+    const orgMetrics = getAllOrgMetrics();
+
     return NextResponse.json({
       success: true,
       forks: allForks,
+      orgMetrics,
       username: orgOwner,
       source: "github",
       debug: allDebugInfo,

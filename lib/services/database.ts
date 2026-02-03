@@ -10,6 +10,7 @@ export interface ForkRecord {
   repo_name: string;
   fork_url: string;
   is_internal: boolean;
+  original_org: string | null; // The GitHub org of the original repo (extracted from original_pr_url)
   created_at: string;
 }
 
@@ -87,6 +88,18 @@ export interface CachedRepoRecord {
   repo_name: string;
   cached_at: string;
   notes: string | null;
+}
+
+export interface OrgMetricsRecord {
+  id: number;
+  org: string;
+  monthly_prs: number;
+  monthly_commits: number;
+  monthly_lines_changed: number;
+  period_start: string;
+  period_end: string;
+  calculated_at: string;
+  created_at: string;
 }
 
 // Extended types for API responses
@@ -204,6 +217,10 @@ function initializeSchema(db: Database.Database): void {
   const forkColumnNames = forkColumns.map(c => c.name);
   if (!forkColumnNames.includes("is_internal")) {
     db.exec("ALTER TABLE forks ADD COLUMN is_internal BOOLEAN DEFAULT FALSE");
+  }
+  if (!forkColumnNames.includes("original_org")) {
+    db.exec("ALTER TABLE forks ADD COLUMN original_org TEXT");
+    console.log("Added original_org column to forks table");
   }
 
   // Migration: Add created_by column to prs table for user tracking
@@ -331,6 +348,21 @@ function initializeSchema(db: Database.Database): void {
     )
   `);
 
+  // Create org_metrics table for storing monthly metrics during PR discovery
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS org_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org TEXT NOT NULL UNIQUE,
+      monthly_prs INTEGER NOT NULL,
+      monthly_commits INTEGER NOT NULL,
+      monthly_lines_changed INTEGER NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      calculated_at TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   console.log("Database initialized successfully at:", DB_PATH);
 }
 
@@ -338,20 +370,33 @@ function initializeSchema(db: Database.Database): void {
  * Save or update a fork record.
  * Returns the fork ID.
  */
-export function saveFork(repoOwner: string, repoName: string, forkUrl: string, isInternal: boolean = false): number {
+export function saveFork(repoOwner: string, repoName: string, forkUrl: string, isInternal: boolean = false, originalOrg: string | null = null): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal, created_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal, original_org, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(repo_owner, repo_name)
-    DO UPDATE SET fork_url = excluded.fork_url, is_internal = excluded.is_internal
+    DO UPDATE SET fork_url = excluded.fork_url, is_internal = excluded.is_internal, original_org = COALESCE(excluded.original_org, forks.original_org)
     RETURNING id
   `);
 
-  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0, now) as { id: number };
+  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0, originalOrg, now) as { id: number };
   return result.id;
+}
+
+/**
+ * Update the original_org for a fork.
+ */
+export function updateForkOriginalOrg(forkId: number, originalOrg: string): void {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE forks SET original_org = ? WHERE id = ?
+  `);
+
+  stmt.run(originalOrg, forkId);
 }
 
 /**
@@ -1157,6 +1202,81 @@ export function getRecentPRWithAnalysisAndEmail(): {
   }
 
   return { pr, analysis, email };
+}
+
+/**
+ * Save or update org monthly metrics.
+ * Returns the metrics ID.
+ */
+export function saveOrgMetrics(
+  org: string,
+  monthlyPRs: number,
+  monthlyCommits: number,
+  monthlyLinesChanged: number,
+  periodStart: string,
+  periodEnd: string,
+  calculatedAt: string
+): number {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    INSERT INTO org_metrics (org, monthly_prs, monthly_commits, monthly_lines_changed, period_start, period_end, calculated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(org)
+    DO UPDATE SET
+      monthly_prs = excluded.monthly_prs,
+      monthly_commits = excluded.monthly_commits,
+      monthly_lines_changed = excluded.monthly_lines_changed,
+      period_start = excluded.period_start,
+      period_end = excluded.period_end,
+      calculated_at = excluded.calculated_at
+    RETURNING id
+  `);
+
+  const result = stmt.get(org, monthlyPRs, monthlyCommits, monthlyLinesChanged, periodStart, periodEnd, calculatedAt) as { id: number };
+  return result.id;
+}
+
+/**
+ * Get org metrics by organization name.
+ * Returns null if not found.
+ */
+export function getOrgMetrics(org: string): OrgMetricsRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM org_metrics WHERE org = ?
+  `);
+
+  return (stmt.get(org) as OrgMetricsRecord | undefined) ?? null;
+}
+
+/**
+ * Delete org metrics by organization name.
+ * Returns true if a record was deleted.
+ */
+export function deleteOrgMetrics(org: string): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    DELETE FROM org_metrics WHERE org = ?
+  `);
+
+  const result = stmt.run(org);
+  return result.changes > 0;
+}
+
+/**
+ * Get all org metrics.
+ */
+export function getAllOrgMetrics(): OrgMetricsRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM org_metrics ORDER BY created_at DESC
+  `);
+
+  return stmt.all() as OrgMetricsRecord[];
 }
 
 /**
