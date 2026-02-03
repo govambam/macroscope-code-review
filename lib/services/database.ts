@@ -33,6 +33,7 @@ export interface PRRecord {
   created_by: string | null;
   created_at: string;
   updated_at: string | null;
+  session_id: number | null; // Link to prospecting session
 }
 
 export interface PRAnalysisRecord {
@@ -100,6 +101,27 @@ export interface OrgMetricsRecord {
   period_end: string;
   calculated_at: string;
   created_at: string;
+}
+
+// Prospecting session types
+export type ProspectingSessionStatus = 'in_progress' | 'completed';
+
+export interface ProspectingSessionRecord {
+  id: number;
+  company_name: string;
+  github_org: string | null;
+  github_repo: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  status: ProspectingSessionStatus;
+  notes: string | null;
+}
+
+export interface ProspectingSessionWithStats extends ProspectingSessionRecord {
+  pr_count: number;
+  bugs_found: number;
+  emails_sent: number;
 }
 
 // Extended types for API responses
@@ -361,6 +383,32 @@ function initializeSchema(db: Database.Database): void {
       calculated_at TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // Create prospecting_sessions table for the new Prospector workflow
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS prospecting_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_name TEXT NOT NULL,
+      github_org TEXT,
+      github_repo TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      status TEXT DEFAULT 'in_progress',
+      notes TEXT
+    )
+  `);
+
+  // Migration: Add session_id column to prs table for linking to prospecting sessions
+  if (!columnNames.includes("session_id")) {
+    db.exec("ALTER TABLE prs ADD COLUMN session_id INTEGER REFERENCES prospecting_sessions(id)");
+    console.log("Added session_id column to prs table");
+  }
+
+  // Create index for efficient session lookups
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_prs_session_id ON prs(session_id)
   `);
 
   console.log("Database initialized successfully at:", DB_PATH);
@@ -1279,6 +1327,251 @@ export function getAllOrgMetrics(): OrgMetricsRecord[] {
   return stmt.all() as OrgMetricsRecord[];
 }
 
+// ==================== Prospecting Session Functions ====================
+
+/**
+ * Create a new prospecting session.
+ * Returns the session ID.
+ */
+export function createProspectingSession(
+  companyName: string,
+  createdBy: string,
+  options: {
+    githubOrg?: string | null;
+    githubRepo?: string | null;
+    notes?: string | null;
+  } = {}
+): number {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO prospecting_sessions (company_name, github_org, github_repo, created_by, created_at, updated_at, status, notes)
+    VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?)
+    RETURNING id
+  `);
+
+  const result = stmt.get(
+    companyName,
+    options.githubOrg ?? null,
+    options.githubRepo ?? null,
+    createdBy,
+    now,
+    now,
+    options.notes ?? null
+  ) as { id: number };
+
+  return result.id;
+}
+
+/**
+ * Get a prospecting session by ID.
+ * Returns null if not found.
+ */
+export function getProspectingSession(id: number): ProspectingSessionRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`SELECT * FROM prospecting_sessions WHERE id = ?`);
+  return (stmt.get(id) as ProspectingSessionRecord | undefined) ?? null;
+}
+
+/**
+ * Get a prospecting session with statistics (PR count, bugs found, emails sent).
+ * Returns null if not found.
+ */
+export function getProspectingSessionWithStats(id: number): ProspectingSessionWithStats | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT
+      s.*,
+      COUNT(DISTINCT p.id) as pr_count,
+      COALESCE(SUM(CASE WHEN p.bug_count > 0 THEN p.bug_count ELSE 0 END), 0) as bugs_found,
+      COUNT(DISTINCT e.id) as emails_sent
+    FROM prospecting_sessions s
+    LEFT JOIN prs p ON p.session_id = s.id
+    LEFT JOIN pr_analyses a ON a.pr_id = p.id
+    LEFT JOIN generated_emails e ON e.pr_analysis_id = a.id
+    WHERE s.id = ?
+    GROUP BY s.id
+  `);
+
+  return (stmt.get(id) as ProspectingSessionWithStats | undefined) ?? null;
+}
+
+/**
+ * Get all prospecting sessions with statistics.
+ * Supports filtering by search query, status, and creator.
+ */
+export function getAllProspectingSessions(options: {
+  search?: string;
+  status?: ProspectingSessionStatus;
+  createdBy?: string;
+  sortBy?: 'updated_at' | 'created_at' | 'company_name';
+  sortOrder?: 'asc' | 'desc';
+} = {}): ProspectingSessionWithStats[] {
+  const db = getDatabase();
+
+  let query = `
+    SELECT
+      s.*,
+      COUNT(DISTINCT p.id) as pr_count,
+      COALESCE(SUM(CASE WHEN p.bug_count > 0 THEN p.bug_count ELSE 0 END), 0) as bugs_found,
+      COUNT(DISTINCT e.id) as emails_sent
+    FROM prospecting_sessions s
+    LEFT JOIN prs p ON p.session_id = s.id
+    LEFT JOIN pr_analyses a ON a.pr_id = p.id
+    LEFT JOIN generated_emails e ON e.pr_analysis_id = a.id
+    WHERE 1=1
+  `;
+
+  const params: (string | number)[] = [];
+
+  if (options.search) {
+    query += ` AND s.company_name LIKE ?`;
+    params.push(`%${options.search}%`);
+  }
+
+  if (options.status) {
+    query += ` AND s.status = ?`;
+    params.push(options.status);
+  }
+
+  if (options.createdBy) {
+    query += ` AND s.created_by = ?`;
+    params.push(options.createdBy);
+  }
+
+  query += ` GROUP BY s.id`;
+
+  const sortBy = options.sortBy || 'updated_at';
+  const sortOrder = options.sortOrder || 'desc';
+  query += ` ORDER BY s.${sortBy} ${sortOrder.toUpperCase()}`;
+
+  const stmt = db.prepare(query);
+  return stmt.all(...params) as ProspectingSessionWithStats[];
+}
+
+/**
+ * Update a prospecting session.
+ * Returns true if the session was updated.
+ */
+export function updateProspectingSession(
+  id: number,
+  updates: {
+    companyName?: string;
+    githubOrg?: string | null;
+    githubRepo?: string | null;
+    status?: ProspectingSessionStatus;
+    notes?: string | null;
+  }
+): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const setClauses: string[] = ['updated_at = ?'];
+  const params: (string | number | null)[] = [now];
+
+  if (updates.companyName !== undefined) {
+    setClauses.push('company_name = ?');
+    params.push(updates.companyName);
+  }
+  if (updates.githubOrg !== undefined) {
+    setClauses.push('github_org = ?');
+    params.push(updates.githubOrg);
+  }
+  if (updates.githubRepo !== undefined) {
+    setClauses.push('github_repo = ?');
+    params.push(updates.githubRepo);
+  }
+  if (updates.status !== undefined) {
+    setClauses.push('status = ?');
+    params.push(updates.status);
+  }
+  if (updates.notes !== undefined) {
+    setClauses.push('notes = ?');
+    params.push(updates.notes);
+  }
+
+  params.push(id);
+
+  const stmt = db.prepare(`
+    UPDATE prospecting_sessions
+    SET ${setClauses.join(', ')}
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(...params);
+  return result.changes > 0;
+}
+
+/**
+ * Delete a prospecting session.
+ * Note: This will NOT delete associated PRs - they will have their session_id set to null.
+ * Returns true if the session was deleted.
+ */
+export function deleteProspectingSession(id: number): boolean {
+  const db = getDatabase();
+
+  // First, unlink any PRs from this session
+  db.prepare(`UPDATE prs SET session_id = NULL WHERE session_id = ?`).run(id);
+
+  // Then delete the session
+  const stmt = db.prepare(`DELETE FROM prospecting_sessions WHERE id = ?`);
+  const result = stmt.run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Get PRs for a specific session.
+ */
+export function getPRsForSession(sessionId: number): PRRecordWithAnalysis[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT
+      p.*,
+      CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+      a.id as analysis_id
+    FROM prs p
+    LEFT JOIN pr_analyses a ON p.id = a.pr_id
+    WHERE p.session_id = ?
+    ORDER BY p.created_at DESC
+  `);
+
+  return stmt.all(sessionId) as PRRecordWithAnalysis[];
+}
+
+/**
+ * Link a PR to a session.
+ */
+export function linkPRToSession(prId: number, sessionId: number): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE prs SET session_id = ?, updated_at = ? WHERE id = ?
+  `);
+
+  const result = stmt.run(sessionId, now, prId);
+  return result.changes > 0;
+}
+
+/**
+ * Unlink a PR from a session.
+ */
+export function unlinkPRFromSession(prId: number): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE prs SET session_id = NULL, updated_at = ? WHERE id = ?
+  `);
+
+  const result = stmt.run(now, prId);
+  return result.changes > 0;
+}
+
 /**
  * Close the database connection.
  * Call this when shutting down the application.
@@ -1289,4 +1582,4 @@ export function closeDatabase(): void {
     db = null;
     initialized = false;
   }
-};
+}
