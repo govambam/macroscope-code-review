@@ -315,6 +315,24 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     }
   }, [workflow.selectedPRs]);
 
+  // Reset fork state when selected PRs change to a different repo
+  React.useEffect(() => {
+    if (workflow.selectedPRs.length === 0) return;
+    const key = `${workflow.selectedPRs[0].owner}/${workflow.selectedPRs[0].repo}`;
+    if (forkCheckDoneForRef.current && forkCheckDoneForRef.current !== key) {
+      forkCheckDoneForRef.current = "";
+      setForkStatus("idle");
+      setForkOwner("");
+      setForkRepo("");
+      setForkUrl("");
+      setExistingPRs([]);
+      setForkError(null);
+      setIsSimulating(false);
+      setSimulationComplete(false);
+      setCompletedSims([]);
+    }
+  }, [workflow.selectedPRs]);
+
   // Auto-check fork when entering Section 2
   React.useEffect(() => {
     if (
