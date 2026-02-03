@@ -77,9 +77,9 @@ export async function POST(request: NextRequest) {
     }
 
     const id = createProspectingSession(company_name.trim(), createdBy, {
-      githubOrg: github_org?.trim() || null,
-      githubRepo: github_repo?.trim() || null,
-      notes: notes?.trim() || null,
+      githubOrg: typeof github_org === "string" ? github_org.trim() || null : null,
+      githubRepo: typeof github_repo === "string" ? github_repo.trim() || null : null,
+      notes: typeof notes === "string" ? notes.trim() || null : null,
     });
 
     return NextResponse.json({
