@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { MobileMenu } from "@/components/MobileMenu";
@@ -14,6 +14,75 @@ export default function NewSessionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
+
+  // Org autocomplete state
+  const [orgSuggestions, setOrgSuggestions] = useState<Array<{ org: string; prCount: number }>>([]);
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false);
+  const orgDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const orgContainerRef = useRef<HTMLDivElement>(null);
+
+  function handleOrgChange(value: string) {
+    setGithubOrg(value);
+
+    // Debounce the search
+    if (orgDebounceRef.current) clearTimeout(orgDebounceRef.current);
+
+    if (!value.trim()) {
+      setOrgSuggestions([]);
+      setShowOrgDropdown(false);
+      return;
+    }
+
+    orgDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/orgs/search?q=${encodeURIComponent(value.trim())}`);
+        const data = await res.json();
+        if (data.success && data.orgs) {
+          setOrgSuggestions(data.orgs);
+          setShowOrgDropdown(data.orgs.length > 0);
+        }
+      } catch {
+        // Silently ignore autocomplete errors
+      }
+    }, 300);
+  }
+
+  function handleSelectOrg(org: string) {
+    setGithubOrg(org);
+    setShowOrgDropdown(false);
+    setOrgSuggestions([]);
+  }
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (orgContainerRef.current && !orgContainerRef.current.contains(event.target as Node)) {
+        setShowOrgDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Cleanup debounce timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (orgDebounceRef.current) clearTimeout(orgDebounceRef.current);
+    };
+  }, []);
+
+  function highlightMatch(text: string, query: string): React.ReactNode {
+    if (!query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <span className="font-semibold text-accent">{text.slice(idx, idx + query.length)}</span>
+        {text.slice(idx + query.length)}
+      </>
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -153,7 +222,7 @@ export default function NewSessionPage() {
               </div>
 
               {/* GitHub Organization */}
-              <div>
+              <div ref={orgContainerRef} className="relative">
                 <label htmlFor="github-org" className="block text-sm font-medium text-accent mb-1">
                   GitHub Organization
                 </label>
@@ -161,10 +230,36 @@ export default function NewSessionPage() {
                   id="github-org"
                   type="text"
                   value={githubOrg}
-                  onChange={(e) => setGithubOrg(e.target.value)}
+                  onChange={(e) => handleOrgChange(e.target.value)}
+                  onFocus={() => {
+                    if (orgSuggestions.length > 0) setShowOrgDropdown(true);
+                  }}
                   placeholder="e.g., vercel, netlify (optional)"
+                  autoComplete="off"
                   className="w-full px-3 py-2 bg-white border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-primary"
                 />
+                {showOrgDropdown && orgSuggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-30 max-h-[240px] overflow-y-auto">
+                    {orgSuggestions.map((s) => (
+                      <button
+                        key={s.org}
+                        type="button"
+                        onClick={() => handleSelectOrg(s.org)}
+                        className="w-full px-3 py-2 text-left hover:bg-bg-subtle transition-colors flex items-center gap-2 border-b border-border last:border-b-0"
+                      >
+                        <svg className="h-4 w-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        </svg>
+                        <span className="text-sm flex-1 truncate">
+                          {highlightMatch(s.org, githubOrg)}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 shrink-0">
+                          {s.prCount} PR{s.prCount !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <p className="mt-1 text-xs text-text-muted">
                   If you know their GitHub org, add it here. This helps with context but is optional.
                 </p>

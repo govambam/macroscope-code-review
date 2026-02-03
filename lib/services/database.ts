@@ -411,6 +411,11 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_prs_session_id ON prs(session_id)
   `);
 
+  // Create index for org-based PR lookups (used by Prospector existing PRs)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_forks_original_org ON forks(original_org)
+  `);
+
   console.log("Database initialized successfully at:", DB_PATH);
 }
 
@@ -445,6 +450,80 @@ export function updateForkOriginalOrg(forkId: number, originalOrg: string): void
   `);
 
   stmt.run(originalOrg, forkId);
+}
+
+/**
+ * Search for orgs (by original_org) that match a query, with PR counts.
+ */
+export interface OrgSearchResult {
+  org: string;
+  pr_count: number;
+}
+
+export function searchOrgsWithPRCounts(query: string): OrgSearchResult[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT f.original_org AS org, COUNT(p.id) AS pr_count
+    FROM forks f
+    JOIN prs p ON p.fork_id = f.id
+    WHERE f.original_org IS NOT NULL
+      AND f.original_org LIKE ?
+    GROUP BY f.original_org
+    ORDER BY pr_count DESC
+    LIMIT 10
+  `);
+
+  return stmt.all(`%${query}%`) as OrgSearchResult[];
+}
+
+/**
+ * Get all PRs for an org (by original_org), with analysis status.
+ */
+export interface OrgPRRecord {
+  pr_id: number;
+  pr_number: number;
+  pr_title: string | null;
+  original_pr_url: string | null;
+  original_pr_title: string | null;
+  forked_pr_url: string;
+  created_at: string;
+  has_macroscope_bugs: number;
+  bug_count: number | null;
+  state: string | null;
+  has_analysis: number;
+  analysis_id: number | null;
+  repo_name: string;
+  fork_owner: string;
+}
+
+export function getPRsForOrg(orgName: string): OrgPRRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT
+      p.id AS pr_id,
+      p.pr_number,
+      p.pr_title,
+      p.original_pr_url,
+      p.original_pr_title,
+      p.forked_pr_url,
+      p.created_at,
+      p.has_macroscope_bugs,
+      p.bug_count,
+      p.state,
+      CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS has_analysis,
+      a.id AS analysis_id,
+      f.repo_name,
+      f.repo_owner AS fork_owner
+    FROM forks f
+    JOIN prs p ON p.fork_id = f.id
+    LEFT JOIN pr_analyses a ON a.pr_id = p.id
+    WHERE f.original_org = ?
+    ORDER BY f.repo_name ASC, p.created_at DESC
+  `);
+
+  return stmt.all(orgName) as OrgPRRecord[];
 }
 
 /**
