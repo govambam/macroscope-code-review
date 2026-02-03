@@ -9,6 +9,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { MobileMenu } from "@/components/MobileMenu";
 import { PRCard, RepoGroupHeader } from "@/components/PRCard";
 import { DiscoverPRs } from "@/components/DiscoverPRs";
+import { QueueStatus } from "@/components/QueueStatus";
 
 type InternalFilter = "all" | "internal" | "external";
 type SortMode = "alpha-asc" | "alpha-desc" | "created-desc" | "created-asc" | "prs-desc" | "prs-asc";
@@ -2640,6 +2641,11 @@ export default function Home() {
                 {deleteResult.message}
               </div>
             )}
+
+            {/* Queue Status */}
+            <div className="mx-6 mt-4">
+              <QueueStatus />
+            </div>
 
             {/* Repos List - with top padding on mobile to ensure first repo header is visible */}
             {forks.length === 0 ? (

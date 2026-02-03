@@ -418,6 +418,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
         });
 
         // Delete the branch
+        // Note: This uses the GitHub API directly since:
+        // 1. User-initiated deletions are infrequent (not subject to rate limiting)
+        // 2. Fork repos may not be cloned locally to use git push --delete
+        // For bulk automated operations, use the queue system instead
         try {
           await octokit.git.deleteRef({
             owner: orgOwner,

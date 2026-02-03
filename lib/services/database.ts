@@ -102,6 +102,60 @@ export interface OrgMetricsRecord {
   created_at: string;
 }
 
+// Queue operation types
+export type GithubOperationType = 'create_fork' | 'create_pr' | 'delete_fork' | 'delete_branch' | 'simulate_pr';
+export type GithubOperationStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+export interface GithubOperationQueueRecord {
+  id: number;
+  operation_type: GithubOperationType;
+  payload: string; // JSON string with operation-specific data
+  status: GithubOperationStatus;
+  priority: number; // Lower = higher priority
+  result: string | null; // JSON string with result data (fork_url, pr_url, etc.)
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  created_by: string | null;
+}
+
+// Payload types for queue operations
+export interface CreateForkPayload {
+  sourceOwner: string;
+  sourceRepo: string;
+  targetOrg: string;
+  prUrl: string; // Original PR URL for context
+}
+
+export interface CreatePRPayload {
+  forkOwner: string;
+  forkRepo: string;
+  branch: string;
+  title: string;
+  body: string;
+  baseBranch: string;
+  originalPrUrl: string;
+  queuedForkId?: number; // Reference to fork operation if created together
+}
+
+export interface DeleteForkPayload {
+  owner: string;
+  repo: string;
+}
+
+export interface DeleteBranchPayload {
+  owner: string;
+  repo: string;
+  branch: string;
+}
+
+export interface SimulatePRPayload {
+  prUrl: string;
+  targetOrg: string;
+  cacheRepo?: boolean;
+}
+
 // Extended types for API responses
 export interface ForkWithPRs extends ForkRecord {
   prs: PRRecordWithAnalysis[];
@@ -361,6 +415,28 @@ function initializeSchema(db: Database.Database): void {
       calculated_at TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // Create github_operation_queue table for rate-limited write operations
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS github_operation_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      operation_type TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT DEFAULT 'queued',
+      priority INTEGER DEFAULT 0,
+      result TEXT,
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      completed_at DATETIME,
+      created_by TEXT
+    )
+  `);
+
+  // Create index for efficient queue processing
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_queue_status_priority ON github_operation_queue(status, priority, created_at)
   `);
 
   console.log("Database initialized successfully at:", DB_PATH);
@@ -1279,6 +1355,249 @@ export function getAllOrgMetrics(): OrgMetricsRecord[] {
   return stmt.all() as OrgMetricsRecord[];
 }
 
+// ==================== GitHub Operation Queue Functions ====================
+
+/**
+ * Add an operation to the queue.
+ * Returns the queue entry ID.
+ */
+export function queueGithubOperation(
+  operationType: GithubOperationType,
+  payload: object,
+  createdBy: string | null = null,
+  priority: number = 0
+): number {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    INSERT INTO github_operation_queue (operation_type, payload, status, priority, created_by)
+    VALUES (?, ?, 'queued', ?, ?)
+    RETURNING id
+  `);
+
+  const result = stmt.get(operationType, JSON.stringify(payload), priority, createdBy) as { id: number };
+  return result.id;
+}
+
+/**
+ * Get a queue entry by ID.
+ */
+export function getQueueEntry(id: number): GithubOperationQueueRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`SELECT * FROM github_operation_queue WHERE id = ?`);
+  return (stmt.get(id) as GithubOperationQueueRecord | undefined) ?? null;
+}
+
+/**
+ * Get the next queued operation to process.
+ * Returns null if no operations are queued.
+ * Orders by priority (lower first), then by created_at (older first).
+ */
+export function getNextQueuedOperation(): GithubOperationQueueRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM github_operation_queue
+    WHERE status = 'queued'
+    ORDER BY priority ASC, created_at ASC
+    LIMIT 1
+  `);
+
+  return (stmt.get() as GithubOperationQueueRecord | undefined) ?? null;
+}
+
+/**
+ * Mark an operation as processing.
+ */
+export function markOperationProcessing(id: number): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE github_operation_queue
+    SET status = 'processing', started_at = ?
+    WHERE id = ? AND status = 'queued'
+  `);
+
+  const result = stmt.run(now, id);
+  return result.changes > 0;
+}
+
+/**
+ * Mark an operation as completed with result.
+ */
+export function markOperationCompleted(id: number, result: object | null = null): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE github_operation_queue
+    SET status = 'completed', completed_at = ?, result = ?
+    WHERE id = ?
+  `);
+
+  const dbResult = stmt.run(now, result ? JSON.stringify(result) : null, id);
+  return dbResult.changes > 0;
+}
+
+/**
+ * Mark an operation as failed with error message.
+ */
+export function markOperationFailed(id: number, error: string): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE github_operation_queue
+    SET status = 'failed', completed_at = ?, error = ?
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(now, error, id);
+  return result.changes > 0;
+}
+
+/**
+ * Get all pending operations (queued or processing).
+ */
+export function getPendingOperations(): GithubOperationQueueRecord[] {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM github_operation_queue
+    WHERE status IN ('queued', 'processing')
+    ORDER BY priority ASC, created_at ASC
+  `);
+
+  return stmt.all() as GithubOperationQueueRecord[];
+}
+
+/**
+ * Get queue status summary.
+ */
+export function getQueueStatus(): {
+  queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  lastProcessedAt: string | null;
+} {
+  const db = getDatabase();
+
+  const counts = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued,
+      SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+    FROM github_operation_queue
+  `).get() as { queued: number; processing: number; completed: number; failed: number };
+
+  const lastProcessed = db.prepare(`
+    SELECT completed_at FROM github_operation_queue
+    WHERE status IN ('completed', 'failed')
+    ORDER BY completed_at DESC
+    LIMIT 1
+  `).get() as { completed_at: string } | undefined;
+
+  return {
+    queued: counts.queued || 0,
+    processing: counts.processing || 0,
+    completed: counts.completed || 0,
+    failed: counts.failed || 0,
+    lastProcessedAt: lastProcessed?.completed_at ?? null,
+  };
+}
+
+/**
+ * Get operations by their IDs.
+ */
+export function getQueueEntriesByIds(ids: number[]): GithubOperationQueueRecord[] {
+  if (ids.length === 0) return [];
+
+  const db = getDatabase();
+
+  const placeholders = ids.map(() => '?').join(',');
+  const stmt = db.prepare(`
+    SELECT * FROM github_operation_queue
+    WHERE id IN (${placeholders})
+    ORDER BY created_at ASC
+  `);
+
+  return stmt.all(...ids) as GithubOperationQueueRecord[];
+}
+
+/**
+ * Clean up old completed/failed operations (older than specified days).
+ * Returns number of records deleted.
+ */
+export function cleanupOldQueueEntries(olderThanDays: number = 7): number {
+  const db = getDatabase();
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - olderThanDays);
+
+  const stmt = db.prepare(`
+    DELETE FROM github_operation_queue
+    WHERE status IN ('completed', 'failed')
+    AND completed_at < ?
+  `);
+
+  const result = stmt.run(cutoff.toISOString());
+  return result.changes;
+}
+
+/**
+ * Check if there's a processing operation that might be stuck.
+ * Returns the operation if it's been processing for more than the timeout.
+ */
+export function getStuckOperation(timeoutMinutes: number = 10): GithubOperationQueueRecord | null {
+  const db = getDatabase();
+
+  const cutoff = new Date();
+  cutoff.setMinutes(cutoff.getMinutes() - timeoutMinutes);
+
+  const stmt = db.prepare(`
+    SELECT * FROM github_operation_queue
+    WHERE status = 'processing'
+    AND started_at < ?
+    LIMIT 1
+  `);
+
+  return (stmt.get(cutoff.toISOString()) as GithubOperationQueueRecord | undefined) ?? null;
+}
+
+/**
+ * Reset a stuck operation back to queued status.
+ */
+export function resetStuckOperation(id: number): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE github_operation_queue
+    SET status = 'queued', started_at = NULL
+    WHERE id = ? AND status = 'processing'
+  `);
+
+  const result = stmt.run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Delete a queue entry (for cancellation).
+ */
+export function deleteQueueEntry(id: number): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    DELETE FROM github_operation_queue WHERE id = ? AND status = 'queued'
+  `);
+
+  const result = stmt.run(id);
+  return result.changes > 0;
+}
+
 /**
  * Close the database connection.
  * Call this when shutting down the application.
@@ -1289,4 +1608,4 @@ export function closeDatabase(): void {
     db = null;
     initialized = false;
   }
-};
+}

@@ -271,42 +271,9 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
     let successCount = 0;
 
     try {
-      // Get unique repos from selected PRs for caching
-      const repos = new Set<string>();
-      selectedPRs.forEach((prUrl) => {
-        const match = prUrl.match(/github\.com\/([^\/]+\/[^\/]+)/);
-        if (match) {
-          repos.add(match[1]);
-        }
-      });
+      addStatus(`Queueing ${prUrls.length} PR${prUrls.length > 1 ? "s" : ""} for simulation...`, "info");
 
-      // Cache all repos first (parallel)
-      if (repos.size > 0) {
-        addStatus(`Caching ${repos.size} repository${repos.size > 1 ? "ies" : ""}...`, "info");
-
-        const cachePromises = Array.from(repos).map(async (repo) => {
-          try {
-            const response = await fetch("/api/cache/clone", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                repoUrl: `https://github.com/${repo}`,
-                shallow: true
-              }),
-            });
-            if (response.ok) {
-              addStatus(`Cached ${repo}`, "success");
-            }
-          } catch {
-            // Ignore cache errors, simulation can still work
-          }
-        });
-
-        await Promise.all(cachePromises);
-        addStatus("Repository caching complete", "success");
-      }
-
-      // Simulate PRs sequentially
+      // Queue all PRs (this is fast - just adds to database queue)
       for (let i = 0; i < prUrls.length; i++) {
         const prUrl = prUrls[i];
         const prMatch = prUrl.match(/\/pull\/(\d+)/);
@@ -316,109 +283,35 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
 
         setSimulationProgress((prev) => prev ? {
           ...prev,
-          currentPR: `PR #${prNumber}`,
+          currentPR: `Queueing PR #${prNumber}`,
           completed: i,
         } : null);
 
-        addStatus(`Starting simulation for ${repoName} PR #${prNumber}...`, "info", prNumber);
-
         try {
-          const response = await fetch("/api/create-pr", {
+          const response = await fetch("/api/queue/add", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              prUrl,
-              cacheRepo: true,
-            }),
+            body: JSON.stringify({ prUrl }),
           });
 
           if (!response.ok) {
-            // Handle non-SSE error responses (e.g., 500 errors with JSON/HTML)
-            const errorText = await response.text();
-            try {
-              const errorJson = JSON.parse(errorText);
-              throw new Error(errorJson.error || errorJson.message || `Server error: ${response.status}`);
-            } catch {
-              throw new Error(`Server error: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            // 409 means already queued, treat as success
+            if (response.status === 409) {
+              addStatus(`[PR #${prNumber}] Already in queue`, "info", prNumber);
+              successCount++;
+            } else {
+              throw new Error(errorData.error || `Failed to queue: ${response.status}`);
             }
-          }
-
-          if (!response.body) {
-            throw new Error("No response body");
-          }
-
-          // Read SSE stream and parse events
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let prSuccess = false;
-          let prError: string | null = null;
-
-          // Helper to process a single SSE event
-          const processEvent = (event: string) => {
-            if (!event.trim()) return;
-
-            const dataMatch = event.match(/^data: (.+)$/m);
-            if (!dataMatch) return;
-
-            try {
-              const data = JSON.parse(dataMatch[1]);
-
-              if (data.eventType === "status") {
-                // Show status message with PR context
-                const statusType = data.statusType === "error" ? "error" :
-                                  data.statusType === "success" ? "success" : "progress";
-                addStatus(`[PR #${prNumber}] ${data.message}`, statusType, prNumber);
-              } else if (data.eventType === "result") {
-                if (data.success) {
-                  prSuccess = true;
-                  addStatus(`[PR #${prNumber}] Simulation complete!`, "success", prNumber);
-                } else {
-                  prError = data.error || data.message || "Unknown error";
-                }
-              }
-            } catch {
-              // Ignore parse errors for individual events
-            }
-          };
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (value) {
-              buffer += decoder.decode(value, { stream: !done });
-            }
-            if (done) break;
-
-            // Process complete SSE events (separated by double newlines)
-            const events = buffer.split("\n\n");
-            buffer = events.pop() || "";
-
-            for (const event of events) {
-              processEvent(event);
-            }
-          }
-
-          // Process any remaining buffer content after stream ends
-          if (buffer.trim()) {
-            processEvent(buffer);
-          }
-
-          // Handle case where no success/error was detected (non-SSE response)
-          if (!prSuccess && !prError) {
-            prError = "No valid response received";
-          }
-
-          if (prSuccess) {
+          } else {
+            const data = await response.json();
+            addStatus(`[PR #${prNumber}] Queued (position ${data.queuePosition})`, "success", prNumber);
             successCount++;
-          } else if (prError) {
-            errors.push(`PR #${prNumber}: ${prError}`);
-            addStatus(`[PR #${prNumber}] Failed: ${prError}`, "error", prNumber);
           }
-
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : "Unknown error";
           errors.push(`PR #${prNumber}: ${errorMsg}`);
-          addStatus(`[PR #${prNumber}] Error: ${errorMsg}`, "error", prNumber);
+          addStatus(`[PR #${prNumber}] Failed to queue: ${errorMsg}`, "error", prNumber);
         }
 
         // Update progress
@@ -440,17 +333,18 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
       } : null);
 
       if (successCount > 0) {
-        addStatus(`Completed: ${successCount}/${prUrls.length} PRs simulated successfully`, "success");
+        addStatus(`Queued ${successCount}/${prUrls.length} PRs for simulation`, "success");
+        addStatus("PRs will be processed with 60-second delays to avoid rate limits", "info");
       }
       if (errors.length > 0) {
-        addStatus(`${errors.length} PR${errors.length > 1 ? "s" : ""} failed`, "error");
+        addStatus(`${errors.length} PR${errors.length > 1 ? "s" : ""} failed to queue`, "error");
       }
 
       setSimulationComplete(true);
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to simulate selected PRs");
-      addStatus(`Bulk simulation failed: ${err instanceof Error ? err.message : "Unknown error"}`, "error");
+      setError(err instanceof Error ? err.message : "Failed to queue PRs");
+      addStatus(`Queue failed: ${err instanceof Error ? err.message : "Unknown error"}`, "error");
     } finally {
       setIsSimulating(false);
     }
@@ -504,14 +398,14 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
                 )}
                 <span className="font-semibold text-accent">
                   {simulationComplete
-                    ? `Simulation Complete (${simulationProgress.successCount}/${simulationProgress.total} successful)`
-                    : `Simulating PRs (${simulationProgress.completed}/${simulationProgress.total})`
+                    ? `PRs Queued (${simulationProgress.successCount}/${simulationProgress.total} added to queue)`
+                    : `Queueing PRs (${simulationProgress.completed}/${simulationProgress.total})`
                   }
                 </span>
               </div>
               {simulationProgress.currentPR && !simulationComplete && (
                 <span className="text-sm text-primary">
-                  Current: {simulationProgress.currentPR}
+                  {simulationProgress.currentPR}
                 </span>
               )}
             </div>
@@ -543,13 +437,18 @@ export function DiscoverPRs({ onSelectPR, onSimulationComplete }: DiscoverPRsPro
 
           {/* Actions */}
           {simulationComplete && (
-            <div className="px-4 py-3 bg-white border-t border-primary/20 flex justify-end">
-              <button
-                onClick={handleFinishSimulation}
-                className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors"
-              >
-                View PRs in Dashboard
-              </button>
+            <div className="px-4 py-3 bg-white border-t border-primary/20 flex flex-col gap-2">
+              <p className="text-sm text-gray-600">
+                PRs will be processed in the background with 60-second delays between each operation to comply with GitHub rate limits.
+              </p>
+              <div className="flex justify-end">
+                <button
+                  onClick={handleFinishSimulation}
+                  className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors"
+                >
+                  View Queue in Dashboard
+                </button>
+              </div>
             </div>
           )}
         </div>
