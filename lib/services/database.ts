@@ -10,6 +10,7 @@ export interface ForkRecord {
   repo_name: string;
   fork_url: string;
   is_internal: boolean;
+  original_org: string | null; // The GitHub org of the original repo (extracted from original_pr_url)
   created_at: string;
 }
 
@@ -217,6 +218,10 @@ function initializeSchema(db: Database.Database): void {
   if (!forkColumnNames.includes("is_internal")) {
     db.exec("ALTER TABLE forks ADD COLUMN is_internal BOOLEAN DEFAULT FALSE");
   }
+  if (!forkColumnNames.includes("original_org")) {
+    db.exec("ALTER TABLE forks ADD COLUMN original_org TEXT");
+    console.log("Added original_org column to forks table");
+  }
 
   // Migration: Add created_by column to prs table for user tracking
   if (!columnNames.includes("created_by")) {
@@ -365,20 +370,33 @@ function initializeSchema(db: Database.Database): void {
  * Save or update a fork record.
  * Returns the fork ID.
  */
-export function saveFork(repoOwner: string, repoName: string, forkUrl: string, isInternal: boolean = false): number {
+export function saveFork(repoOwner: string, repoName: string, forkUrl: string, isInternal: boolean = false, originalOrg: string | null = null): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal, created_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO forks (repo_owner, repo_name, fork_url, is_internal, original_org, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(repo_owner, repo_name)
-    DO UPDATE SET fork_url = excluded.fork_url, is_internal = excluded.is_internal
+    DO UPDATE SET fork_url = excluded.fork_url, is_internal = excluded.is_internal, original_org = COALESCE(excluded.original_org, forks.original_org)
     RETURNING id
   `);
 
-  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0, now) as { id: number };
+  const result = stmt.get(repoOwner, repoName, forkUrl, isInternal ? 1 : 0, originalOrg, now) as { id: number };
   return result.id;
+}
+
+/**
+ * Update the original_org for a fork.
+ */
+export function updateForkOriginalOrg(forkId: number, originalOrg: string): void {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE forks SET original_org = ? WHERE id = ?
+  `);
+
+  stmt.run(originalOrg, forkId);
 }
 
 /**
