@@ -64,6 +64,13 @@ export default function NewSessionPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Cleanup debounce timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (orgDebounceRef.current) clearTimeout(orgDebounceRef.current);
+    };
+  }, []);
+
   function highlightMatch(text: string, query: string): React.ReactNode {
     if (!query) return text;
     const idx = text.toLowerCase().indexOf(query.toLowerCase());
