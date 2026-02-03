@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
@@ -68,21 +68,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   const session = data?.session;
 
-  // Local override for optimistic edits
-  const [optimisticSession, setOptimisticSession] = useState<SessionData | null>(null);
-  const displaySession = optimisticSession ?? session;
-
-  function handleEditSaved(updated: {
-    id: number;
-    company_name: string;
-    github_org: string | null;
-    notes: string | null;
-    status: "in_progress" | "completed";
-  }) {
-    if (session) {
-      setOptimisticSession({ ...session, ...updated });
-    }
-    refetch().then(() => setOptimisticSession(null));
+  function handleEditSaved() {
+    refetch();
   }
 
   function validatePrUrl(url: string): boolean {
@@ -106,7 +93,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   }
 
   // Error state
-  if (error || !displaySession) {
+  if (error || !session) {
     return (
       <div className="flex flex-col items-center justify-center py-32 text-center px-4">
         <svg className="w-12 h-12 text-text-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -149,16 +136,16 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
-            <span className="text-accent font-medium">{displaySession.company_name}</span>
+            <span className="text-accent font-medium">{session.company_name}</span>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div>
               <h1 className="text-xl md:text-2xl font-semibold text-accent tracking-tight">
-                {displaySession.company_name}
+                {session.company_name}
               </h1>
               <p className="mt-1 text-sm text-text-secondary">
-                Created by @{displaySession.created_by} &middot; Last updated {timeAgo(displaySession.updated_at)}
+                Created by @{session.created_by} &middot; Last updated {timeAgo(session.updated_at)}
               </p>
             </div>
             <button

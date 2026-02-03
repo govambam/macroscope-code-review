@@ -14,7 +14,7 @@ interface EditSessionModalProps {
   session: SessionData;
   open: boolean;
   onClose: () => void;
-  onSaved: (updated: SessionData) => void;
+  onSaved: () => void;
 }
 
 export function EditSessionModal({ session, open, onClose, onSaved }: EditSessionModalProps) {
@@ -57,16 +57,6 @@ export function EditSessionModal({ session, open, onClose, onSaved }: EditSessio
     setSaving(true);
     setError(null);
 
-    // Optimistic update
-    const optimistic: SessionData = {
-      ...session,
-      company_name: companyName.trim(),
-      github_org: githubOrg.trim() || null,
-      notes: notes.trim() || null,
-      status,
-    };
-    onSaved(optimistic);
-
     try {
       const res = await fetch(`/api/sessions/${session.id}`, {
         method: "PATCH",
@@ -84,10 +74,10 @@ export function EditSessionModal({ session, open, onClose, onSaved }: EditSessio
         throw new Error(data.error || "Failed to update session");
       }
 
+      // Notify parent only after PATCH succeeds
+      onSaved();
       onClose();
     } catch (err) {
-      // Revert optimistic update
-      onSaved(session);
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
