@@ -4,22 +4,28 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 
 export interface SelectedPR {
   url: string;
-  number: number;
+  owner: string;
   repo: string;
+  prNumber: number;
+  source: "direct-url" | "discover";
+  score?: number;
   title?: string;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
 }
 
 export interface WorkflowState {
   currentStep: number;
   completedSteps: Set<number>;
   collapsedSections: Set<number>;
-  selectedPR: SelectedPR | null;
+  selectedPRs: SelectedPR[];
 }
 
 interface WorkflowContextValue extends WorkflowState {
   advanceToStep: (step: number) => void;
   markStepComplete: (step: number) => void;
-  setSelectedPR: (pr: SelectedPR | null) => void;
+  setSelectedPRs: (prs: SelectedPR[]) => void;
   toggleSectionCollapsed: (step: number) => void;
   scrollToSection: (sectionId: string) => void;
 }
@@ -40,7 +46,7 @@ function loadState(sessionId: string): Partial<WorkflowState> | null {
       currentStep: parsed.currentStep,
       completedSteps: new Set(parsed.completedSteps),
       collapsedSections: new Set(parsed.collapsedSections),
-      selectedPR: parsed.selectedPR,
+      selectedPRs: parsed.selectedPRs ?? [],
     };
   } catch {
     return null;
@@ -56,7 +62,7 @@ function saveState(sessionId: string, state: WorkflowState) {
         currentStep: state.currentStep,
         completedSteps: Array.from(state.completedSteps),
         collapsedSections: Array.from(state.collapsedSections),
-        selectedPR: state.selectedPR,
+        selectedPRs: state.selectedPRs,
       })
     );
   } catch {
@@ -86,7 +92,7 @@ export function WorkflowProvider({
       currentStep: saved?.currentStep ?? 1,
       completedSteps: saved?.completedSteps ?? new Set<number>(),
       collapsedSections: saved?.collapsedSections ?? new Set<number>(),
-      selectedPR: saved?.selectedPR ?? null,
+      selectedPRs: saved?.selectedPRs ?? [],
     };
   });
 
@@ -133,8 +139,8 @@ export function WorkflowProvider({
     });
   }, []);
 
-  const setSelectedPR = useCallback((pr: SelectedPR | null) => {
-    setState((prev) => ({ ...prev, selectedPR: pr }));
+  const setSelectedPRs = useCallback((prs: SelectedPR[]) => {
+    setState((prev) => ({ ...prev, selectedPRs: prs }));
   }, []);
 
   const toggleSectionCollapsed = useCallback((step: number) => {
@@ -155,7 +161,7 @@ export function WorkflowProvider({
         ...state,
         advanceToStep,
         markStepComplete,
-        setSelectedPR,
+        setSelectedPRs,
         toggleSectionCollapsed,
         scrollToSection,
       }}
