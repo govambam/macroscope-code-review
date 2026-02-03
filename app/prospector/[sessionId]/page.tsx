@@ -15,7 +15,11 @@ import { DiscoverResults, type DiscoveredPR } from "@/components/prospector/Disc
 import { ExistingPRsList, type ExistingPR } from "@/components/prospector/ExistingPRsList";
 import { SimulationStatus, type SimulationStep } from "@/components/prospector/SimulationStatus";
 import { SimulationQueue, type CompletedSimulation } from "@/components/prospector/SimulationQueue";
+import { AnalysisSection } from "@/components/prospector/AnalysisSection";
+import { EmailSection } from "@/components/prospector/EmailSection";
+import { AttioSection } from "@/components/prospector/AttioSection";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
+import type { AnalysisApiResponse, EmailSequence } from "@/lib/types/prospector-analysis";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
 
 interface SessionData {
@@ -126,6 +130,18 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [completedSims, setCompletedSims] = useState<CompletedSimulation[]>([]);
   const forkCheckDoneForRef = React.useRef<string>("");
   const simAbortRef = React.useRef<AbortController | null>(null);
+
+  // Section 3-5 state
+  const [analysisData, setAnalysisData] = useState<{
+    analysisResult: AnalysisApiResponse;
+    analysisId: number | null;
+    selectedBugIndex: number | null;
+  } | null>(null);
+  const [emailData, setEmailData] = useState<{
+    generatedEmail: EmailSequence;
+    editedEmail: EmailSequence;
+  } | null>(null);
+  const [sessionCompleted, setSessionCompleted] = useState(false);
 
   const {
     data,
@@ -497,6 +513,49 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     forkCheckDoneForRef.current = "";
     setForkStatus("idle");
     checkForkStatus();
+  }
+
+  // ── Section 3-5 handlers ────────────────────────────────────
+
+  function handleAnalysisComplete(data: {
+    analysisResult: AnalysisApiResponse;
+    analysisId: number | null;
+    selectedBugIndex: number | null;
+  }) {
+    setAnalysisData(data);
+  }
+
+  function handleGenerateEmailClick() {
+    workflow.markStepComplete(3);
+    workflow.advanceToStep(4);
+  }
+
+  function handleEmailsGenerated(data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) {
+    setEmailData(data);
+  }
+
+  function handleEmailEdited(editedEmail: EmailSequence) {
+    setEmailData((prev) => (prev ? { ...prev, editedEmail } : null));
+  }
+
+  function handleContinueToSend() {
+    workflow.markStepComplete(4);
+    workflow.advanceToStep(5);
+  }
+
+  function handleAttioSendComplete() {
+    workflow.markStepComplete(5);
+    setSessionCompleted(true);
+    // Update session status to completed
+    fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "completed" }),
+    }).catch(() => {});
+  }
+
+  function handleBackToPRSelection() {
+    workflow.advanceToStep(1);
   }
 
   // ── Session helpers ──────────────────────────────────────────
@@ -968,8 +1027,14 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           />
           {!sectionStates[2].isCollapsed && (
             <div className="p-5">
-              {sectionStates[2].isActive || sectionStates[2].isCompleted ? (
-                <p className="text-sm text-text-secondary">Analysis content will be implemented in Phase 5.</p>
+              {(sectionStates[2].isActive || sectionStates[2].isCompleted) &&
+              completedSims.find((s) => s.success)?.forkedPrUrl ? (
+                <AnalysisSection
+                  forkedPrUrl={completedSims.find((s) => s.success)!.forkedPrUrl!}
+                  onAnalysisComplete={handleAnalysisComplete}
+                  onGenerateEmailClick={handleGenerateEmailClick}
+                  onBackToPRSelection={handleBackToPRSelection}
+                />
               ) : (
                 <p className="text-sm text-text-muted italic">Analysis will appear after simulation completes.</p>
               )}
@@ -990,8 +1055,21 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           />
           {!sectionStates[3].isCollapsed && (
             <div className="p-5">
-              {sectionStates[3].isActive || sectionStates[3].isCompleted ? (
-                <p className="text-sm text-text-secondary">Email generation will be implemented in Phase 5.</p>
+              {(sectionStates[3].isActive || sectionStates[3].isCompleted) && analysisData ? (
+                <EmailSection
+                  analysisResult={analysisData.analysisResult}
+                  selectedBugIndex={analysisData.selectedBugIndex}
+                  forkedPrUrl={completedSims.find((s) => s.success)?.forkedPrUrl ?? ""}
+                  currentAnalysisId={analysisData.analysisId}
+                  initialEmail={
+                    analysisData.analysisResult.cachedEmail
+                      ? (JSON.parse(analysisData.analysisResult.cachedEmail) as EmailSequence)
+                      : undefined
+                  }
+                  onEmailsGenerated={handleEmailsGenerated}
+                  onEmailEdited={handleEmailEdited}
+                  onContinueToSend={handleContinueToSend}
+                />
               ) : (
                 <p className="text-sm text-text-muted italic">Email generation will appear after finding bugs.</p>
               )}
@@ -1012,8 +1090,13 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           />
           {!sectionStates[4].isCollapsed && (
             <div className="p-5">
-              {sectionStates[4].isActive || sectionStates[4].isCompleted ? (
-                <p className="text-sm text-text-secondary">Send to Attio will be implemented in Phase 5.</p>
+              {(sectionStates[4].isActive || sectionStates[4].isCompleted) && emailData ? (
+                <AttioSection
+                  emailSequence={emailData.editedEmail}
+                  defaultSearchQuery={session?.company_name ?? ""}
+                  currentAnalysisId={analysisData?.analysisId ?? null}
+                  onSendComplete={handleAttioSendComplete}
+                />
               ) : (
                 <p className="text-sm text-text-muted italic">Ready to send after email generation.</p>
               )}
