@@ -78,6 +78,14 @@ export async function PATCH(
     }
 
     const body = await request.json();
+
+    if (body === null || typeof body !== "object") {
+      return NextResponse.json(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
+
     const { company_name, github_org, github_repo, status, notes } = body;
 
     // Validate status if provided
