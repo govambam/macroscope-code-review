@@ -245,14 +245,6 @@ export function SimulationQueue({
   }, [currentPR, isWaiting, queue, completed, selectedPRs.length, onAllComplete, processNext]);
 
   // When waiting ends, process next
-  useEffect(() => {
-    if (!isWaiting && !currentPR && queue.length > 0 && lastEndTimeRef.current > 0) {
-      const elapsed = Date.now() - lastEndTimeRef.current;
-      if (elapsed >= RATE_LIMIT_MS) {
-        processNext();
-      }
-    }
-  }, [isWaiting, currentPR, queue, processNext]);
 
   // Run simulation when currentPR changes
   useEffect(() => {
