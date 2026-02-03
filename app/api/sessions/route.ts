@@ -24,8 +24,10 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get("search") || undefined;
     const status = searchParams.get("status") as ProspectingSessionStatus | null;
     const createdBy = searchParams.get("createdBy") || undefined;
-    const sortBy = searchParams.get("sortBy") as "updated_at" | "created_at" | "company_name" | null;
-    const sortOrder = searchParams.get("sortOrder") as "asc" | "desc" | null;
+    const sortByParam = searchParams.get("sortBy");
+    const sortBy = (["updated_at", "created_at", "company_name"].includes(sortByParam ?? "") ? sortByParam : null) as "updated_at" | "created_at" | "company_name" | null;
+    const sortOrderParam = searchParams.get("sortOrder");
+    const sortOrder = (sortOrderParam === "asc" || sortOrderParam === "desc" ? sortOrderParam : null) as "asc" | "desc" | null;
 
     const sessions = getAllProspectingSessions({
       search,

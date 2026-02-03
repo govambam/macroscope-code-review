@@ -1385,15 +1385,11 @@ export function getProspectingSessionWithStats(id: number): ProspectingSessionWi
   const stmt = db.prepare(`
     SELECT
       s.*,
-      COUNT(DISTINCT p.id) as pr_count,
-      COALESCE(SUM(CASE WHEN p.bug_count > 0 THEN p.bug_count ELSE 0 END), 0) as bugs_found,
-      COUNT(DISTINCT e.id) as emails_sent
+      COALESCE((SELECT COUNT(*) FROM prs WHERE session_id = s.id), 0) as pr_count,
+      COALESCE((SELECT SUM(CASE WHEN bug_count > 0 THEN bug_count ELSE 0 END) FROM prs WHERE session_id = s.id), 0) as bugs_found,
+      COALESCE((SELECT COUNT(*) FROM generated_emails ge JOIN pr_analyses pa ON ge.pr_analysis_id = pa.id JOIN prs p ON pa.pr_id = p.id WHERE p.session_id = s.id), 0) as emails_sent
     FROM prospecting_sessions s
-    LEFT JOIN prs p ON p.session_id = s.id
-    LEFT JOIN pr_analyses a ON a.pr_id = p.id
-    LEFT JOIN generated_emails e ON e.pr_analysis_id = a.id
     WHERE s.id = ?
-    GROUP BY s.id
   `);
 
   return (stmt.get(id) as ProspectingSessionWithStats | undefined) ?? null;
@@ -1415,13 +1411,10 @@ export function getAllProspectingSessions(options: {
   let query = `
     SELECT
       s.*,
-      COUNT(DISTINCT p.id) as pr_count,
-      COALESCE(SUM(CASE WHEN p.bug_count > 0 THEN p.bug_count ELSE 0 END), 0) as bugs_found,
-      COUNT(DISTINCT e.id) as emails_sent
+      COALESCE((SELECT COUNT(*) FROM prs WHERE session_id = s.id), 0) as pr_count,
+      COALESCE((SELECT SUM(CASE WHEN bug_count > 0 THEN bug_count ELSE 0 END) FROM prs WHERE session_id = s.id), 0) as bugs_found,
+      COALESCE((SELECT COUNT(*) FROM generated_emails ge JOIN pr_analyses pa ON ge.pr_analysis_id = pa.id JOIN prs p ON pa.pr_id = p.id WHERE p.session_id = s.id), 0) as emails_sent
     FROM prospecting_sessions s
-    LEFT JOIN prs p ON p.session_id = s.id
-    LEFT JOIN pr_analyses a ON a.pr_id = p.id
-    LEFT JOIN generated_emails e ON e.pr_analysis_id = a.id
     WHERE 1=1
   `;
 
@@ -1442,10 +1435,10 @@ export function getAllProspectingSessions(options: {
     params.push(options.createdBy);
   }
 
-  query += ` GROUP BY s.id`;
-
-  const sortBy = options.sortBy || 'updated_at';
-  const sortOrder = options.sortOrder || 'desc';
+  const allowedSortBy = ['updated_at', 'created_at', 'company_name'] as const;
+  const allowedSortOrder = ['asc', 'desc'] as const;
+  const sortBy = allowedSortBy.includes(options.sortBy as typeof allowedSortBy[number]) ? options.sortBy! : 'updated_at';
+  const sortOrder = allowedSortOrder.includes(options.sortOrder as typeof allowedSortOrder[number]) ? options.sortOrder! : 'desc';
   query += ` ORDER BY s.${sortBy} ${sortOrder.toUpperCase()}`;
 
   const stmt = db.prepare(query);
@@ -1513,13 +1506,17 @@ export function updateProspectingSession(
 export function deleteProspectingSession(id: number): boolean {
   const db = getDatabase();
 
-  // First, unlink any PRs from this session
-  db.prepare(`UPDATE prs SET session_id = NULL WHERE session_id = ?`).run(id);
+  const deleteInTransaction = db.transaction(() => {
+    // First, unlink any PRs from this session
+    db.prepare(`UPDATE prs SET session_id = NULL WHERE session_id = ?`).run(id);
 
-  // Then delete the session
-  const stmt = db.prepare(`DELETE FROM prospecting_sessions WHERE id = ?`);
-  const result = stmt.run(id);
-  return result.changes > 0;
+    // Then delete the session
+    const stmt = db.prepare(`DELETE FROM prospecting_sessions WHERE id = ?`);
+    const result = stmt.run(id);
+    return result.changes > 0;
+  });
+
+  return deleteInTransaction();
 }
 
 /**
