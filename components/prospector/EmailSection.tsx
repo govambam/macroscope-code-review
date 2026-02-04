@@ -24,7 +24,7 @@ interface EmailSectionProps {
   forkedPrUrl: string;
   currentAnalysisId: number | null;
   initialCachedData?: string | null;
-  onEmailsGenerated: (data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) => void;
+  onEmailsGenerated: (data: { generatedEmail: EmailSequence; editedEmail: EmailSequence; allVariables?: Record<string, string> }) => void;
   onEmailEdited: (editedEmail: EmailSequence) => void;
   onContinueToSend: () => void;
 }
@@ -149,10 +149,11 @@ export function EmailSection({
         setSavedVariables(JSON.parse(JSON.stringify(data.variables)));
         setDbVariables(data.dbVariables);
 
-        // Notify parent with rendered previews
+        // Notify parent with rendered previews and all variables
         onEmailsGenerated({
           generatedEmail: data.previews,
           editedEmail: JSON.parse(JSON.stringify(data.previews)),
+          allVariables: { ...data.variables, ...data.dbVariables },
         });
       } else {
         setEmailError(data.error || "Failed to generate email variables");
@@ -172,6 +173,7 @@ export function EmailSection({
         onEmailsGenerated({
           generatedEmail: previews,
           editedEmail: JSON.parse(JSON.stringify(previews)),
+          allVariables: variables && dbVariables ? { ...variables, ...dbVariables } : undefined,
         });
       } else {
         generateEmail();

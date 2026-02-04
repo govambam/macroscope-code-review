@@ -2,26 +2,25 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { EmailSequence } from "@/lib/types/prospector-analysis";
 
-interface AttioSectionProps {
-  emailSequence: EmailSequence;
+interface ApolloSectionProps {
+  variables: Record<string, string>;
   defaultSearchQuery: string;
   currentAnalysisId: number | null;
   onSendComplete: () => void;
 }
 
-export function AttioSection({
-  emailSequence,
+export function ApolloSection({
+  variables,
   defaultSearchQuery,
   currentAnalysisId,
   onSendComplete,
-}: AttioSectionProps) {
+}: ApolloSectionProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState(defaultSearchQuery);
   const [searchResults, setSearchResults] = useState<Array<{ id: string; name: string; domain: string | null }>>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<{ id: string; name: string } | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<{ id: string; name: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,10 +29,10 @@ export function AttioSection({
     if (!searchQuery.trim()) return;
     setSearchLoading(true);
     setError(null);
-    setSelectedRecord(null);
+    setSelectedAccount(null);
 
     try {
-      const res = await fetch("/api/attio/search", {
+      const res = await fetch("/api/apollo/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: searchQuery.trim() }),
@@ -41,10 +40,10 @@ export function AttioSection({
 
       const data = await res.json();
 
-      if (data.success && data.records) {
-        setSearchResults(data.records);
-        if (data.records.length === 0) {
-          setError("No companies found matching that name.");
+      if (data.success && data.accounts) {
+        setSearchResults(data.accounts);
+        if (data.accounts.length === 0) {
+          setError("No accounts found matching that name.");
         }
       } else {
         setError(data.error || "Search failed");
@@ -57,17 +56,17 @@ export function AttioSection({
   }
 
   async function handleSend() {
-    if (!selectedRecord || !emailSequence) return;
+    if (!selectedAccount || !variables) return;
     setSending(true);
     setError(null);
 
     try {
-      const res = await fetch("/api/attio/update", {
+      const res = await fetch("/api/apollo/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          recordId: selectedRecord.id,
-          emailSequence,
+          accountId: selectedAccount.id,
+          variables,
         }),
       });
 
@@ -77,10 +76,10 @@ export function AttioSection({
         setSendSuccess(true);
         onSendComplete();
       } else {
-        setError(data.error || "Failed to send to Attio");
+        setError(data.error || "Failed to send to Apollo");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send to Attio");
+      setError(err instanceof Error ? err.message : "Failed to send to Apollo");
     } finally {
       setSending(false);
     }
@@ -98,11 +97,11 @@ export function AttioSection({
             </svg>
             <div>
               <p className="text-sm font-medium text-green-800">
-                Email sequence sent to Attio successfully!
+                Variables sent to Apollo successfully!
               </p>
-              {selectedRecord && (
+              {selectedAccount && (
                 <p className="text-sm text-green-700 mt-1">
-                  Sent to: {selectedRecord.name}
+                  Sent to: {selectedAccount.name}
                 </p>
               )}
             </div>
@@ -113,7 +112,7 @@ export function AttioSection({
           <h3 className="text-sm font-semibold text-accent mb-3">Prospecting session complete!</h3>
           <p className="text-sm text-text-secondary mb-4">What&apos;s next?</p>
           <ul className="text-sm text-text-secondary space-y-1.5 mb-5">
-            <li>&bull; View this company in Attio to start your outreach</li>
+            <li>&bull; View this account in Apollo to start your outreach</li>
             <li>&bull; Simulate more PRs for this company</li>
             <li>&bull; Start a new prospecting session</li>
           </ul>
@@ -121,7 +120,6 @@ export function AttioSection({
             <button
               type="button"
               onClick={() => {
-                // Reload page to reset workflow
                 window.location.reload();
               }}
               className="px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary-hover rounded-lg transition-colors"
@@ -153,9 +151,9 @@ export function AttioSection({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-medium text-accent mb-1">Send to Attio</h3>
+        <h3 className="text-sm font-medium text-accent mb-1">Send to Apollo</h3>
         <p className="text-xs text-text-secondary mb-4">
-          Search for a company in Attio and send all 4 emails to their custom attributes.
+          Search for an account in Apollo and send the email variables to their custom fields.
         </p>
       </div>
 
@@ -166,7 +164,7 @@ export function AttioSection({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Search company name..."
+          placeholder="Search account name..."
           className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
         />
         <button
@@ -188,32 +186,32 @@ export function AttioSection({
       {/* Search results */}
       {searchResults.length > 0 && (
         <div className="border border-border rounded-lg divide-y divide-border max-h-48 overflow-y-auto">
-          {searchResults.map((record) => (
+          {searchResults.map((account) => (
             <button
-              key={record.id}
-              onClick={() => setSelectedRecord({ id: record.id, name: record.name })}
+              key={account.id}
+              onClick={() => setSelectedAccount({ id: account.id, name: account.name })}
               className={`w-full px-3 py-2 text-left text-sm hover:bg-bg-subtle transition-colors ${
-                selectedRecord?.id === record.id ? "bg-primary/5 border-l-2 border-l-primary" : ""
+                selectedAccount?.id === account.id ? "bg-primary/5 border-l-2 border-l-primary" : ""
               }`}
             >
-              <div className="font-medium text-text-primary">{record.name}</div>
-              {record.domain && (
-                <div className="text-xs text-text-secondary">{record.domain}</div>
+              <div className="font-medium text-text-primary">{account.name}</div>
+              {account.domain && (
+                <div className="text-xs text-text-secondary">{account.domain}</div>
               )}
             </button>
           ))}
         </div>
       )}
 
-      {/* Selected record & send button */}
-      {selectedRecord && (
+      {/* Selected account & send button */}
+      {selectedAccount && (
         <div className="flex items-center justify-between p-3 bg-primary/5 border border-primary/20 rounded-lg">
           <div>
             <div className="text-sm font-medium text-text-primary">
-              Selected: {selectedRecord.name}
+              Selected: {selectedAccount.name}
             </div>
             <div className="text-xs text-text-secondary">
-              Will send all 4 emails to company custom attributes
+              Will send email variables to account custom fields
             </div>
           </div>
           <button
@@ -230,7 +228,7 @@ export function AttioSection({
                 Sending...
               </span>
             ) : (
-              "Send to Attio"
+              "Send to Apollo"
             )}
           </button>
         </div>
