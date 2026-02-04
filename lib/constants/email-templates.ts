@@ -1,6 +1,6 @@
 /**
  * Hardcoded email templates for preview rendering.
- * The actual templates live in Apollo/Attio — these are copies used
+ * The actual templates live in Apollo — these are copies used
  * to preview how the LLM-generated variables look in context.
  *
  * Template variables use {SINGLE_BRACES}.
