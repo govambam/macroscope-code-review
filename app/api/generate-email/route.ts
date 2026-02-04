@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateEmail, EmailBugInput, EmailGenerationResult } from "@/lib/services/email-generator";
 import { EmailVariables, EmailSequence } from "@/lib/constants/email-templates";
 import { saveGeneratedEmail } from "@/lib/services/database";
+import { generateCodeImage, isCodeImageGenerationAvailable } from "@/lib/services/code-image";
 
 interface GenerateEmailRequest {
   originalPrUrl: string;
@@ -60,6 +61,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { success: false, error: "bug is required" },
         { status: 400 }
       );
+    }
+
+    // Generate code image if missing but code suggestion exists
+    if (!body.bug.code_snippet_image_url && body.bug.code_suggestion && isCodeImageGenerationAvailable()) {
+      try {
+        const ext = body.bug.file_path?.split(".").pop()?.toLowerCase() || "js";
+        const langMap: Record<string, string> = {
+          ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+          py: "python", rb: "ruby", go: "go", rs: "rust", java: "java",
+          cs: "csharp", cpp: "cpp", c: "c", php: "php", swift: "swift",
+        };
+        const language = langMap[ext] || ext;
+        const imageResult = await generateCodeImage({
+          code: body.bug.code_suggestion,
+          language,
+          prId: `email-${Date.now()}`,
+        });
+        if (imageResult.success) {
+          body.bug.code_snippet_image_url = imageResult.url;
+          console.log("Generated code image during email generation:", imageResult.url);
+        } else {
+          console.warn("Code image generation failed:", imageResult.error);
+        }
+      } catch (imageError) {
+        console.error("Failed to generate code image during email generation:", imageError);
+      }
     }
 
     const result = await generateEmail({
