@@ -27,6 +27,7 @@ interface GetMacroscopeReviewRequest {
   forkedPrUrl: string;
   originalPrUrl?: string;
   forceRefresh?: boolean;
+  cacheOnly?: boolean;
 }
 
 interface GetMacroscopeReviewResponse {
@@ -42,6 +43,7 @@ interface GetMacroscopeReviewResponse {
   analysisId?: number;
   cachedEmail?: string;
   needsOriginalPrUrl?: boolean;
+  noCache?: boolean;
 }
 
 /**
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const createdBy = session?.user?.login || null;
 
     const body: GetMacroscopeReviewRequest = await request.json();
-    const { forkedPrUrl, forceRefresh } = body;
+    const { forkedPrUrl, forceRefresh, cacheOnly } = body;
     let { originalPrUrl } = body;
 
     if (!forkedPrUrl) {
@@ -87,6 +89,51 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         },
         { status: 400 }
       );
+    }
+
+    // CACHE-ONLY MODE: check DB without calling GitHub
+    if (cacheOnly) {
+      try {
+        const cachedAnalysis = getAnalysisByPRUrl(forkedPrUrl);
+        if (cachedAnalysis) {
+          const result = JSON.parse(cachedAnalysis.analysis_json) as PRAnalysisResult;
+          const prRecord = getPRByUrl(forkedPrUrl);
+          const storedOriginalUrl = prRecord?.original_pr_url || originalPrUrl;
+          const originalPrTitle = prRecord?.original_pr_title || undefined;
+          const originalPrState = (prRecord?.original_pr_state as "open" | "merged" | "closed") || undefined;
+          const originalPrMergedAt = prRecord?.original_pr_merged_at || undefined;
+
+          let cachedEmail: string | undefined;
+          try {
+            const emails = getEmailsForAnalysis(cachedAnalysis.id);
+            if (emails.length > 0) {
+              cachedEmail = emails[0].email_content;
+            }
+          } catch {
+            // Continue without cached email
+          }
+
+          return NextResponse.json<GetMacroscopeReviewResponse>({
+            success: true,
+            result,
+            forkedPrUrl,
+            originalPrUrl: storedOriginalUrl,
+            originalPrTitle,
+            originalPrState,
+            originalPrMergedAt,
+            cached: true,
+            analysisId: cachedAnalysis.id,
+            cachedEmail,
+          });
+        }
+      } catch {
+        // Ignore DB errors in cache-only mode
+      }
+      return NextResponse.json<GetMacroscopeReviewResponse>({
+        success: true,
+        noCache: true,
+        forkedPrUrl,
+      });
     }
 
     // CHECK CACHE FIRST

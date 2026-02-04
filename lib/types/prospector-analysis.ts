@@ -60,6 +60,7 @@ export interface AnalysisApiResponse {
   analysisId?: number;
   cachedEmail?: string;
   needsOriginalPrUrl?: boolean;
+  noCache?: boolean;
 }
 
 export interface EmailGenerationResponse {
