@@ -599,6 +599,10 @@ export async function POST(request: NextRequest): Promise<Response> {
           const repoGit = simpleGit(tmpDir);
           await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);
           await repoGit.addConfig("user.name", GITHUB_BOT_NAME);
+          // Set commit dates to simulation time so all cherry-picked commits appear recent
+          const simDate = new Date().toISOString();
+          repoGit.env("GIT_AUTHOR_DATE", simDate);
+          repoGit.env("GIT_COMMITTER_DATE", simDate);
 
           // Add upstream remote and fetch
           sendStatus({ type: "info", step: 7, totalSteps: 10, message: "Fetching commits from upstream repository..." });
@@ -1208,6 +1212,10 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           const repoGit = simpleGit(tmpDir);
           await repoGit.addConfig("user.email", GITHUB_BOT_EMAIL);
           await repoGit.addConfig("user.name", GITHUB_BOT_NAME);
+          // Set commit dates to simulation time so all cherry-picked commits appear recent
+          const simDateCommitMode = new Date().toISOString();
+          repoGit.env("GIT_AUTHOR_DATE", simDateCommitMode);
+          repoGit.env("GIT_COMMITTER_DATE", simDateCommitMode);
 
           const upstreamCloneUrl = `https://github.com/${upstreamOwner}/${repoName}.git`;
           // Add upstream remote (fresh clone, so no need for set-url fallback)
