@@ -22,15 +22,14 @@ function ErrorContent() {
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
           <p className="text-gray-600">
             {error === 'AccessDenied'
-              ? 'You are not a member of the macroscope-gtm organization.'
+              ? 'Access was denied. Please try again.'
               : 'An unexpected error occurred during authentication.'}
           </p>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
           <p className="text-sm text-blue-800">
-            <strong>Need access?</strong> Ask your team administrator to add you to the{' '}
-            <span className="font-mono">macroscope-gtm</span> organization on GitHub.
+            <strong>Having trouble?</strong> Try signing in again with your GitHub account.
           </p>
         </div>
 

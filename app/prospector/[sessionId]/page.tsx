@@ -981,7 +981,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   <div>
                     <p className="text-sm font-medium text-accent">Checking fork status...</p>
                     <p className="text-xs text-text-muted mt-0.5">
-                      Looking for an existing fork of {workflow.selectedPRs[0]?.owner}/{workflow.selectedPRs[0]?.repo} in macroscope-gtm
+                      Looking for an existing fork of {workflow.selectedPRs[0]?.owner}/{workflow.selectedPRs[0]?.repo} in govambam
                     </p>
                   </div>
                 </div>
@@ -995,7 +995,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   )}
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-sm font-medium text-accent mb-2">
-                      No fork found in macroscope-gtm
+                      No fork found in govambam
                     </p>
                     <p className="text-sm text-text-secondary mb-3">
                       A fork is needed to simulate PRs. You can either start the simulation (which will create a fork automatically) or create one manually.
@@ -1024,7 +1024,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                     <div className="mt-2 p-4 bg-gray-50 border border-border rounded-lg space-y-2 text-text-secondary">
                       <p>1. Go to <span className="font-mono text-xs bg-white px-1.5 py-0.5 rounded border border-border">https://github.com/{workflow.selectedPRs[0]?.owner}/{workflow.selectedPRs[0]?.repo}</span></p>
                       <p>2. Click <strong>Fork</strong> in the top right</p>
-                      <p>3. Change the owner to <strong>macroscope-gtm</strong></p>
+                      <p>3. Change the owner to <strong>govambam</strong></p>
                       <p>4. Click <strong>Create fork</strong></p>
                       <p>5. Come back here and click <strong>Re-check Fork</strong></p>
                     </div>
