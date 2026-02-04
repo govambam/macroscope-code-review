@@ -1059,6 +1059,22 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                       existingPRs={existingPRs}
                       onRunAnalysis={() => {}}
                       onViewAnalysis={() => {}}
+                      onDeletePR={async (pr) => {
+                        if (!window.confirm(`Remove PR #${pr.prNumber} from the database?`)) return;
+                        try {
+                          const res = await fetch("/api/db/delete", {
+                            method: "DELETE",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ prIds: [pr.id] }),
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            setExistingPRs((prev) => prev.filter((p) => p.id !== pr.id));
+                          }
+                        } catch {
+                          // Silently fail
+                        }
+                      }}
                     />
                   )}
 

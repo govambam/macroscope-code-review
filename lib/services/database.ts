@@ -949,6 +949,21 @@ export function deletePR(forkId: number, prNumber: number): boolean {
 }
 
 /**
+ * Delete a PR by its database ID.
+ * Cascades to delete analyses and emails.
+ */
+export function deletePRById(prId: number): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    DELETE FROM prs WHERE id = ?
+  `);
+
+  const result = stmt.run(prId);
+  return result.changes > 0;
+}
+
+/**
  * Sync forks from GitHub API response to database.
  * This merges GitHub data with existing database records.
  */
