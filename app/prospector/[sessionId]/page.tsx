@@ -17,10 +17,10 @@ import { SimulationStatus, type SimulationStep } from "@/components/prospector/S
 import { SimulationQueue, type CompletedSimulation } from "@/components/prospector/SimulationQueue";
 import { AnalysisSection } from "@/components/prospector/AnalysisSection";
 import { EmailSection } from "@/components/prospector/EmailSection";
-import { AttioSection } from "@/components/prospector/AttioSection";
+import { ApolloSection } from "@/components/prospector/ApolloSection";
 import { ExistingPRsSelector, type OrgPR } from "@/components/prospector/ExistingPRsSelector";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
-import type { AnalysisApiResponse, EmailSequence } from "@/lib/types/prospector-analysis";
+import type { AnalysisApiResponse, EmailSequence, EmailVariables, AllEmailVariables } from "@/lib/types/prospector-analysis";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
 
 interface SessionData {
@@ -141,6 +141,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [emailData, setEmailData] = useState<{
     generatedEmail: EmailSequence;
     editedEmail: EmailSequence;
+    variables: EmailVariables;
+    dbVariables: Omit<AllEmailVariables, keyof EmailVariables>;
   } | null>(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
 
@@ -574,7 +576,12 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.advanceToStep(4);
   }
 
-  const handleEmailsGenerated = useCallback((data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) => {
+  const handleEmailsGenerated = useCallback((data: {
+    generatedEmail: EmailSequence;
+    editedEmail: EmailSequence;
+    variables: EmailVariables;
+    dbVariables: Omit<AllEmailVariables, keyof EmailVariables>;
+  }) => {
     setEmailData(data);
   }, []);
 
@@ -587,7 +594,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.advanceToStep(5);
   }
 
-  function handleAttioSendComplete() {
+  function handleApolloSendComplete() {
     workflow.markStepComplete(5);
     setSessionCompleted(true);
     // Update session status to completed
@@ -1160,11 +1167,11 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           )}
         </section>
 
-        {/* ── Section 5: Send to Attio ─────────────────────────── */}
+        {/* ── Section 5: Send to Apollo ────────────────────────── */}
         <section id="send" className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
           <SectionHeader
             stepNumber={5}
-            title="Send to Attio"
+            title="Send to Apollo"
             isActive={sectionStates[4].isActive}
             isCompleted={sectionStates[4].isCompleted}
             canCollapse={sectionStates[4].isCompleted}
@@ -1174,11 +1181,12 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           {!sectionStates[4].isCollapsed && (
             <div className="p-5">
               {(sectionStates[4].isActive || sectionStates[4].isCompleted) && emailData ? (
-                <AttioSection
-                  emailSequence={emailData.editedEmail}
+                <ApolloSection
+                  variables={emailData.variables}
+                  dbVariables={emailData.dbVariables}
                   defaultSearchQuery={session?.company_name ?? ""}
                   currentAnalysisId={analysisData?.analysisId ?? null}
-                  onSendComplete={handleAttioSendComplete}
+                  onSendComplete={handleApolloSendComplete}
                 />
               ) : (
                 <p className="text-sm text-text-muted italic">Ready to send after email generation.</p>

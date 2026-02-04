@@ -24,7 +24,12 @@ interface EmailSectionProps {
   forkedPrUrl: string;
   currentAnalysisId: number | null;
   initialCachedData?: string | null;
-  onEmailsGenerated: (data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) => void;
+  onEmailsGenerated: (data: {
+    generatedEmail: EmailSequence;
+    editedEmail: EmailSequence;
+    variables: EmailVariables;
+    dbVariables: Omit<AllEmailVariables, keyof EmailVariables>;
+  }) => void;
   onEmailEdited: (editedEmail: EmailSequence) => void;
   onContinueToSend: () => void;
 }
@@ -43,30 +48,24 @@ const VARIABLE_LABELS: Record<keyof AllEmailVariables, string> = {
 
 /**
  * Parses cached email data from the database.
- * Handles both new format ({ variables, dbVariables }) and legacy format (EmailSequence).
+ * Expects the new format: { variables, dbVariables }.
  */
 function parseCachedData(raw: string | null | undefined): {
   variables: EmailVariables | null;
   dbVariables: Omit<AllEmailVariables, keyof EmailVariables> | null;
-  legacyEmail: EmailSequence | null;
 } {
-  if (!raw) return { variables: null, dbVariables: null, legacyEmail: null };
+  if (!raw) return { variables: null, dbVariables: null };
   try {
     const parsed = JSON.parse(raw);
     if (parsed.variables && parsed.dbVariables) {
       return {
         variables: parsed.variables as EmailVariables,
         dbVariables: parsed.dbVariables,
-        legacyEmail: null,
       };
     }
-    // Legacy format: raw EmailSequence
-    if (parsed.email_1 && parsed.email_2 && parsed.email_3 && parsed.email_4) {
-      return { variables: null, dbVariables: null, legacyEmail: parsed as EmailSequence };
-    }
-    return { variables: null, dbVariables: null, legacyEmail: null };
+    return { variables: null, dbVariables: null };
   } catch {
-    return { variables: null, dbVariables: null, legacyEmail: null };
+    return { variables: null, dbVariables: null };
   }
 }
 
@@ -99,16 +98,13 @@ export function EmailSection({
     cached.dbVariables
   );
 
-  // Legacy email support
-  const [legacyEmail, setLegacyEmail] = useState<EmailSequence | null>(cached.legacyEmail);
-
   // Derive previews from current variables
   const previews = useMemo<EmailSequence | null>(() => {
     if (variables && dbVariables) {
       return renderEmailSequence({ ...variables, ...dbVariables });
     }
-    return legacyEmail;
-  }, [variables, dbVariables, legacyEmail]);
+    return null;
+  }, [variables, dbVariables]);
 
   const generateEmail = useCallback(async () => {
     if (!analysisResult?.result || !resultHasMeaningfulBugs(analysisResult.result)) return;
@@ -127,7 +123,6 @@ export function EmailSection({
     setVariables(null);
     setSavedVariables(null);
     setDbVariables(null);
-    setLegacyEmail(null);
 
     try {
       const res = await fetch("/api/generate-email", {
@@ -149,10 +144,12 @@ export function EmailSection({
         setSavedVariables(JSON.parse(JSON.stringify(data.variables)));
         setDbVariables(data.dbVariables);
 
-        // Notify parent with rendered previews
+        // Notify parent with rendered previews and variables
         onEmailsGenerated({
           generatedEmail: data.previews,
           editedEmail: JSON.parse(JSON.stringify(data.previews)),
+          variables: data.variables,
+          dbVariables: data.dbVariables,
         });
       } else {
         setEmailError(data.error || "Failed to generate email variables");
@@ -168,16 +165,18 @@ export function EmailSection({
   useEffect(() => {
     if (!hasTriggeredRef.current) {
       hasTriggeredRef.current = true;
-      if (previews) {
+      if (previews && variables && dbVariables) {
         onEmailsGenerated({
           generatedEmail: previews,
           editedEmail: JSON.parse(JSON.stringify(previews)),
+          variables,
+          dbVariables,
         });
       } else {
         generateEmail();
       }
     }
-  }, [previews, generateEmail, onEmailsGenerated]);
+  }, [previews, variables, dbVariables, generateEmail, onEmailsGenerated]);
 
   function handleVariableEdit(key: keyof EmailVariables, value: string) {
     if (!variables || !dbVariables) return;
@@ -285,7 +284,7 @@ export function EmailSection({
 
   // ── Error state ───────────────────────────────────────────────────────
 
-  if (emailError && !variables && !legacyEmail) {
+  if (emailError && !variables) {
     return (
       <div className="space-y-4">
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -308,7 +307,7 @@ export function EmailSection({
 
   // ── No data yet ────────────────────────────────────────────────────────
 
-  if (!variables && !legacyEmail) {
+  if (!variables) {
     return (
       <div className="text-center py-8">
         <p className="text-sm text-text-muted italic">Waiting for email variable generation...</p>
@@ -436,14 +435,6 @@ export function EmailSection({
                 ))}
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Legacy email display (old cached format) */}
-        {isVariablesTab && !variables && legacyEmail && (
-          <div className="text-sm text-text-muted italic">
-            This email was generated with an older format. Variable editing is not available.
-            Click &quot;Regenerate&quot; to generate new variables.
           </div>
         )}
 
