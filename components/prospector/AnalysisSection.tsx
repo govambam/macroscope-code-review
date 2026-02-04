@@ -14,6 +14,14 @@ import {
   getSeverityColor,
 } from "@/lib/types/prospector-analysis";
 
+/**
+ * Strips leading severity prefix (e.g. "🟢 **Low** ", "🟡 **Medium** ") from text.
+ * The severity is already shown via category badges in the card header.
+ */
+function stripSeverityPrefix(text: string): string {
+  return text.replace(/^[^*]*\*\*(Critical|High|Medium|Low|Info)\*\*\s*/i, "");
+}
+
 interface AnalysisSectionProps {
   forkedPrUrl: string;
   onAnalysisComplete: (data: {
@@ -75,11 +83,8 @@ export function AnalysisSection({
 
         setAnalysisResult(data);
 
-        let bugIdx: number | null = null;
-        if (data.result && isV2Result(data.result)) {
-          bugIdx = data.result.best_bug_for_outreach_index;
-          setSelectedBugIndex(bugIdx);
-        }
+        const bugIdx: number | null = null;
+        // Don't auto-select a bug — let the user choose explicitly
 
         if (data.analysisId) {
           setCurrentAnalysisId(data.analysisId);
@@ -438,8 +443,8 @@ export function AnalysisSection({
                         </button>
                       </div>
                       <div className="p-4">
-                        <h4 className="font-medium text-accent mb-2">{comment.title}</h4>
-                        <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
+                        <h4 className="font-medium text-accent mb-2">{stripSeverityPrefix(comment.title)}</h4>
+                        <p className="text-sm text-text-secondary mb-3">{stripSeverityPrefix(comment.explanation)}</p>
                         {comment.impact_scenario && (
                           <p className="text-sm text-amber-700 bg-amber-50 p-2 rounded mb-3">
                             <span className="font-medium">Impact:</span> {comment.impact_scenario}
@@ -457,9 +462,29 @@ export function AnalysisSection({
                         ) : comment.code_suggestion ? (
                           <div className="mb-3">
                             <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
-                            <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto">
-                              <code>{comment.code_suggestion}</code>
-                            </pre>
+                            <div className="text-xs rounded border border-gray-200 overflow-x-auto font-mono">
+                              {comment.code_suggestion.split("\n").map((line, i) => {
+                                const isRemoval = line.startsWith("-");
+                                const isAddition = line.startsWith("+");
+                                const isHunkHeader = line.startsWith("@@");
+                                return (
+                                  <div
+                                    key={i}
+                                    className={
+                                      isRemoval
+                                        ? "bg-red-50 text-red-800 px-2 py-px"
+                                        : isAddition
+                                          ? "bg-green-50 text-green-800 px-2 py-px"
+                                          : isHunkHeader
+                                            ? "bg-blue-50 text-blue-700 px-2 py-px"
+                                            : "bg-gray-50 px-2 py-px"
+                                    }
+                                  >
+                                    <pre className="whitespace-pre">{line || " "}</pre>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         ) : null}
                         <div className="flex items-center gap-2 flex-wrap">
@@ -547,10 +572,20 @@ export function AnalysisSection({
 
           {/* Generate Email Sequence button */}
           <div className="border-t border-border pt-5">
+            {selectedBugIndex === null && (
+              <p className="text-sm text-text-muted mb-3">
+                Select a bug above to generate an email sequence for outreach.
+              </p>
+            )}
             <button
               type="button"
               onClick={onGenerateEmailClick}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
+              disabled={selectedBugIndex === null}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 font-medium rounded-lg transition-colors ${
+                selectedBugIndex === null
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-primary hover:bg-primary-hover text-white"
+              }`}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -620,8 +655,8 @@ export function AnalysisSection({
                     </button>
                   </div>
                   <div className="p-4">
-                    <h4 className="font-medium text-accent mb-2">{comment.title}</h4>
-                    <p className="text-sm text-text-secondary mb-3">{comment.explanation}</p>
+                    <h4 className="font-medium text-accent mb-2">{stripSeverityPrefix(comment.title)}</h4>
+                    <p className="text-sm text-text-secondary mb-3">{stripSeverityPrefix(comment.explanation)}</p>
                     <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded inline-block">
                       {comment.file_path}{comment.line_number ? `:${comment.line_number}` : ""}
                     </div>
