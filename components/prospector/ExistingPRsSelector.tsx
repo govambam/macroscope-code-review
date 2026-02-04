@@ -201,7 +201,10 @@ export function ExistingPRsSelector({ orgName, onSelectPR }: ExistingPRsSelector
   }
 
   async function handleDeleteRepo(repo: RepoGroup) {
-    if (!window.confirm(`Remove ${repo.fullName} and all its ${repo.prs.length} PR${repo.prs.length !== 1 ? "s" : ""} from the database?`)) return;
+    // Look up actual PR count from unfiltered repos state (repo.prs may be filtered by search)
+    const actualRepo = repos.find((r) => r.repoName === repo.repoName);
+    const actualPRCount = actualRepo?.prs.length ?? repo.prs.length;
+    if (!window.confirm(`Remove ${repo.fullName} and all its ${actualPRCount} PR${actualPRCount !== 1 ? "s" : ""} from the database?`)) return;
     setDeletingRepos((prev) => new Set(prev).add(repo.repoName));
     try {
       const res = await fetch("/api/db/delete", {
@@ -211,9 +214,8 @@ export function ExistingPRsSelector({ orgName, onSelectPR }: ExistingPRsSelector
       });
       const data = await res.json();
       if (data.success) {
-        const removedCount = repo.prs.length;
         setRepos((prev) => prev.filter((r) => r.repoName !== repo.repoName));
-        setTotalPRs((prev) => prev - removedCount);
+        setTotalPRs((prev) => prev - actualPRCount);
       }
     } catch {
       // Silently fail — repo stays in list

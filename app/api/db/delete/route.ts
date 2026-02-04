@@ -25,7 +25,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     const body: DeleteRequest = await request.json();
     const { prIds, forks } = body;
 
-    if ((!prIds || prIds.length === 0) && (!forks || forks.length === 0)) {
+    const validPrIds = Array.isArray(prIds) && prIds.length > 0;
+    const validForks = Array.isArray(forks) && forks.length > 0;
+
+    if (!validPrIds && !validForks) {
       return NextResponse.json<DeleteResponse>(
         { success: false, deletedPRs: [], deletedForks: [], errors: ["No prIds or forks provided"] },
         { status: 400 }
@@ -37,7 +40,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     const errors: string[] = [];
 
     // Delete individual PRs
-    if (prIds) {
+    if (validPrIds) {
       for (const prId of prIds) {
         try {
           const deleted = deletePRById(prId);
@@ -54,7 +57,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     }
 
     // Delete entire forks (cascades to PRs, analyses, emails)
-    if (forks) {
+    if (validForks) {
       for (const fork of forks) {
         try {
           const deleted = deleteFork(fork.repoOwner, fork.repoName);
