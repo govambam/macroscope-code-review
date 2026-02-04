@@ -15,14 +15,14 @@ interface ApolloUpdateResponse {
 // Apollo custom field IDs for the email template variables.
 // These were created via the Apollo API and map to our AllEmailVariables keys.
 const APOLLO_FIELD_IDS: Record<string, string> = {
-  BUG_DESCRIPTION: "697967aa1f5edb000d93a158",
-  BUG_IMPACT: "6979681c0d207100193f8e7e",
-  FIX_SUGGESTION: "6979680bff3e0e00192f1e38",
-  BUG_TYPE: "6979681fec7fc4002117ee99",
-  PR_NAME: "69796813ff3e0e0011702a78",
-  PR_LINK: "69796825d01e21000d61c202",
-  BUG_FIX_URL: "69796818d01e21000d61c1be",
-  SIMULATED_PR_LINK: "6979682b979d150021c01504",
+  BUG_DESCRIPTION: "69837cab139a64001576391f",
+  BUG_IMPACT: "69837cb9cb2415000db6e25d",
+  FIX_SUGGESTION: "69837cce9c0fa9001d7489e1",
+  BUG_TYPE: "69837cdd139a640015764099",
+  PR_NAME: "69837cf32f2450000d446067",
+  PR_LINK: "69837d0186a00f0015c0625a",
+  BUG_FIX_URL: "69837d10955d06000db56beb",
+  SIMULATED_PR_LINK: "69837d1e618f6b0019bfa967",
 };
 
 /**
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log("Sending to Apollo:", JSON.stringify(requestBody, null, 2));
 
     const response = await fetch(
-      `https://api.apollo.io/v1/accounts/${encodeURIComponent(accountId)}`,
+      `https://api.apollo.io/api/v1/accounts/${encodeURIComponent(accountId)}`,
       {
         method: "PATCH",
         headers: {

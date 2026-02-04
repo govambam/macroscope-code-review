@@ -70,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Search for accounts using Apollo API
     // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/search_accounts
-    const response = await fetch("https://api.apollo.io/v1/accounts/search", {
+    const response = await fetch("https://api.apollo.io/api/v1/accounts/search", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
