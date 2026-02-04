@@ -8,55 +8,17 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
       authorization: {
         params: {
-          scope: "read:user read:org",
+          scope: "read:user",
         },
       },
     }),
   ],
   callbacks: {
-    async signIn({ account, profile }) {
-      // Check if user is member of macroscope-gtm org
-      if (!account?.access_token || !profile) {
-        console.log("Auth: Sign in failed - Missing account or profile")
-        return false
-      }
-
-      const githubLogin = (profile as { login?: string }).login
-
-      if (!githubLogin) {
-        console.log("Auth: Sign in failed - No GitHub login found")
-        return false
-      }
-
-      try {
-        console.log(`Auth: Checking org membership for ${githubLogin}`)
-
-        const response = await fetch(
-          `https://api.github.com/orgs/macroscope-gtm/members/${githubLogin}`,
-          {
-            headers: {
-              Authorization: `Bearer ${account.access_token}`,
-              Accept: "application/vnd.github+json",
-            },
-          }
-        )
-
-        if (response.status === 204) {
-          // 204 = user is a member
-          console.log(`Auth: Access granted - ${githubLogin} is a member of macroscope-gtm`)
-          return true
-        } else if (response.status === 404) {
-          // 404 = user is not a member
-          console.log(`Auth: Access denied - ${githubLogin} is not a member of macroscope-gtm`)
-          return false
-        } else {
-          console.log(`Auth: Unexpected response status: ${response.status}`)
-          return false
-        }
-      } catch (error) {
-        console.error("Auth: Error checking org membership:", error)
-        return false
-      }
+    async signIn({ profile }) {
+      // Allow any GitHub user to sign in (no org membership check)
+      const githubLogin = (profile as { login?: string })?.login
+      console.log(`Auth: Sign in for ${githubLogin || "unknown"}`)
+      return true
     },
     async session({ session, token }) {
       // Add GitHub username to session for future user tracking

@@ -32,7 +32,7 @@ function SignInContent() {
               <div>
                 <p className="text-sm font-medium">
                   {error === 'AccessDenied'
-                    ? 'Access denied. You must be a member of the macroscope-gtm organization.'
+                    ? 'Access denied. Please try again.'
                     : 'An error occurred during sign in. Please try again.'}
                 </p>
               </div>
@@ -52,9 +52,7 @@ function SignInContent() {
 
         <div className="text-center">
           <p className="text-xs text-gray-500">
-            Only members of{' '}
-            <span className="font-mono font-medium text-gray-700">macroscope-gtm</span>
-            {' '}can access this application
+            Sign in with your GitHub account to continue
           </p>
         </div>
       </div>
