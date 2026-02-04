@@ -166,6 +166,13 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   const session = data?.session;
 
+  // Validate workflow state matches this session (clears stale state after DB wipe)
+  React.useEffect(() => {
+    if (session?.created_at) {
+      workflow.validateSession(session.created_at);
+    }
+  }, [session?.created_at, workflow.validateSession]);
+
   function handleEditSaved() {
     refetch();
   }
