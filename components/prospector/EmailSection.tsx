@@ -61,7 +61,7 @@ function parseCachedData(raw: string | null | undefined): {
       };
     }
     // Legacy format: raw EmailSequence
-    if (parsed.email_1) {
+    if (parsed.email_1 && parsed.email_2 && parsed.email_3 && parsed.email_4) {
       return { variables: null, dbVariables: null, legacyEmail: parsed as EmailSequence };
     }
     return { variables: null, dbVariables: null, legacyEmail: null };
