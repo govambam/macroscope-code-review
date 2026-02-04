@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "@octokit/rest";
 import { config, GITHUB_ORG } from "@/lib/config";
-import { getFork, getPRsForFork } from "@/lib/services/database";
+import { getFork, getPRsForFork, saveFork } from "@/lib/services/database";
 
 export interface ExistingPR {
   id: number;
@@ -56,10 +56,41 @@ export async function POST(request: NextRequest) {
     }
 
     const forkOwner = GITHUB_ORG;
+
+    // Check database first
+    const dbFork = getFork(forkOwner, repo);
+    if (dbFork) {
+      console.log(`[CACHE HIT] Fork ${forkOwner}/${repo} found in database`);
+      const prs = getPRsForFork(dbFork.id);
+      const existingPRs: ExistingPR[] = prs.map((pr) => ({
+        id: pr.id,
+        prNumber: pr.pr_number,
+        title: pr.pr_title,
+        originalPrUrl: pr.original_pr_url,
+        originalPrTitle: pr.original_pr_title,
+        forkedPrUrl: pr.forked_pr_url,
+        createdAt: pr.created_at,
+        hasMacroscopeBugs: !!pr.has_macroscope_bugs,
+        bugCount: pr.bug_count,
+        hasAnalysis: !!(pr as unknown as Record<string, unknown>).has_analysis,
+        state: pr.state,
+      }));
+
+      return NextResponse.json({
+        success: true,
+        hasFork: true,
+        forkOwner,
+        forkRepo: repo,
+        forkUrl: dbFork.fork_url,
+        existingPRs,
+      } satisfies CheckForkResponse);
+    }
+
+    // Database miss - check GitHub API
+    console.log(`[CACHE MISS] Fork ${forkOwner}/${repo} not in database, checking GitHub`);
     const octokit = new Octokit({ auth: githubToken });
 
     try {
-      // Single API call: check if the org has a repo with the same name
       const { data: repoData } = await octokit.repos.get({
         owner: forkOwner,
         repo,
@@ -67,26 +98,9 @@ export async function POST(request: NextRequest) {
 
       // Verify it's actually a fork of the target repo
       if (repoData.fork && repoData.parent?.full_name === `${owner}/${repo}`) {
-        // Fork exists - get existing PRs from our database
-        const dbFork = getFork(forkOwner, repo);
-        let existingPRs: ExistingPR[] = [];
-
-        if (dbFork) {
-          const prs = getPRsForFork(dbFork.id);
-          existingPRs = prs.map((pr) => ({
-            id: pr.id,
-            prNumber: pr.pr_number,
-            title: pr.pr_title,
-            originalPrUrl: pr.original_pr_url,
-            originalPrTitle: pr.original_pr_title,
-            forkedPrUrl: pr.forked_pr_url,
-            createdAt: pr.created_at,
-            hasMacroscopeBugs: !!pr.has_macroscope_bugs,
-            bugCount: pr.bug_count,
-            hasAnalysis: !!(pr as unknown as Record<string, unknown>).has_analysis,
-            state: pr.state,
-          }));
-        }
+        // Fork exists on GitHub but not in DB - save it
+        console.log(`[CACHE SAVE] Saving fork ${forkOwner}/${repo} to database`);
+        saveFork(forkOwner, repo, repoData.html_url);
 
         return NextResponse.json({
           success: true,
@@ -94,7 +108,7 @@ export async function POST(request: NextRequest) {
           forkOwner,
           forkRepo: repo,
           forkUrl: repoData.html_url,
-          existingPRs,
+          existingPRs: [], // No PRs in DB yet
         } satisfies CheckForkResponse);
       }
 

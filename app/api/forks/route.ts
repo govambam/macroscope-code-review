@@ -9,6 +9,7 @@ import {
   getFork,
   isRepoCached,
   updateForkOriginalOrg,
+  updatePRBugCount,
   getAllOrgMetrics,
   OrgMetricsRecord,
 } from "@/lib/services/database";
@@ -193,6 +194,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const forks = repos;
 
+    // Bug count cache TTL: 1 hour
+    const BUG_COUNT_TTL_MS = 60 * 60 * 1000;
+
+    // Pre-load all DB forks for efficient lookups
+    const dbForksForCache = getAllForksWithPRs();
+    const dbForkMap = new Map(dbForksForCache.map(f => [`${f.repo_owner}/${f.repo_name}`, f]));
+
     // For each fork, get PRs that look like review PRs
     const forkRecords: ForkRecord[] = [];
     const allDebugInfo: { fork: string; prNumber: number; debug: BugCountResult["debug"] }[] = [];
@@ -216,14 +224,46 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         if (reviewPRs.length > 0) {
           // Build PR records with bug counts
           const prRecords: PRRecord[] = [];
+          const dbForkForCache = dbForkMap.get(`${orgOwner}/${fork.name}`);
 
           for (const pr of reviewPRs) {
-            const bugResult = await countMacroscopeBugs(
-              octokit,
-              orgOwner,
-              fork.name,
-              pr.number
-            );
+            // Check DB cache for recent bug count
+            let bugCount: number | undefined;
+            let debugInfo: BugCountResult["debug"] | undefined;
+
+            if (dbForkForCache) {
+              const dbPR = dbForkForCache.prs.find(p => p.pr_number === pr.number);
+              if (dbPR?.last_bug_check_at) {
+                const lastCheck = new Date(dbPR.last_bug_check_at).getTime();
+                if (Date.now() - lastCheck < BUG_COUNT_TTL_MS) {
+                  console.log(`[CACHE HIT] Bug count for ${fork.name}#${pr.number}: ${dbPR.bug_count} (checked ${dbPR.last_bug_check_at})`);
+                  bugCount = dbPR.bug_count ?? 0;
+                  debugInfo = { totalReviewComments: 0, commentUsers: [] }; // Cached, no debug available
+                }
+              }
+            }
+
+            // Cache miss - fetch from GitHub API
+            if (bugCount === undefined) {
+              console.log(`[CACHE MISS] Bug count for ${fork.name}#${pr.number}, fetching from GitHub`);
+              const bugResult = await countMacroscopeBugs(
+                octokit,
+                orgOwner,
+                fork.name,
+                pr.number
+              );
+              bugCount = bugResult.count;
+              debugInfo = bugResult.debug;
+
+              // Save to DB cache
+              if (dbForkForCache) {
+                const dbPR = dbForkForCache.prs.find(p => p.pr_number === pr.number);
+                if (dbPR) {
+                  console.log(`[CACHE SAVE] Bug count for ${fork.name}#${pr.number}: ${bugCount}`);
+                  updatePRBugCount(dbPR.id, bugCount);
+                }
+              }
+            }
 
             prRecords.push({
               prNumber: pr.number,
@@ -234,15 +274,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
               commitCount: 0,
               state: pr.state,
               branchName: pr.head.ref,
-              macroscopeBugs: bugResult.count,
+              macroscopeBugs: bugCount,
             });
 
             // Collect debug info for all PRs
-            allDebugInfo.push({
-              fork: fork.name,
-              prNumber: pr.number,
-              debug: bugResult.debug
-            });
+            if (debugInfo) {
+              allDebugInfo.push({
+                fork: fork.name,
+                prNumber: pr.number,
+                debug: debugInfo
+              });
+            }
           }
 
           forkRecords.push({
