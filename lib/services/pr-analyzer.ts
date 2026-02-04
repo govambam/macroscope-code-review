@@ -250,7 +250,7 @@ export function extractTitleFromBody(body: string): string {
  */
 export function extractCodeSuggestion(body: string): string | null {
   // Match all fenced code blocks: ```lang\ncode\n```
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  const codeBlockRegex = /```([^\n\r]*)\r?\n([\s\S]*?)```/g;
   let match;
   let suggestionBlock: string | null = null;
   let lastBlock: string | null = null;
