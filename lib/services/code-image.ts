@@ -153,11 +153,14 @@ function parseDiffLines(code: string): DiffLine[] | null {
   const diffLines: DiffLine[] = [];
 
   for (const line of lines) {
-    if (line.startsWith("- ") || line === "-") {
-      diffLines.push({ type: "removed", code: line.startsWith("- ") ? line.slice(2) : "" });
+    if (line.startsWith("@@")) {
+      // Hunk header — treat as context
+      diffLines.push({ type: "context", code: line });
+    } else if (line.startsWith("-")) {
+      diffLines.push({ type: "removed", code: line.slice(1) });
       hasRemovals = true;
-    } else if (line.startsWith("+ ") || line === "+") {
-      diffLines.push({ type: "added", code: line.startsWith("+ ") ? line.slice(2) : "" });
+    } else if (line.startsWith("+")) {
+      diffLines.push({ type: "added", code: line.slice(1) });
       hasAdditions = true;
     } else {
       diffLines.push({ type: "context", code: line });
@@ -165,7 +168,7 @@ function parseDiffLines(code: string): DiffLine[] | null {
   }
 
   // Require both + and - markers to avoid false positives from
-  // Markdown/YAML lists that use "- " as bullet points
+  // plain code that happens to start a line with + or -
   return (hasRemovals && hasAdditions) ? diffLines : null;
 }
 
