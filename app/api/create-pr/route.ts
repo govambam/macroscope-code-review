@@ -765,6 +765,29 @@ export async function POST(request: NextRequest): Promise<Response> {
             sendStatus({ type: "success", message: `All ${commitsToApply.length} commit(s) applied successfully` });
           }
 
+          // Rewrite commits: replace original author with bot and set dates to now
+          // This ensures: (1) Macroscope reviews all commits regardless of original date,
+          // (2) original authors receive no GitHub notifications from our simulated PRs
+          sendStatus({ type: "info", message: "Preparing commits for review..." });
+          try {
+            await repoGit.raw(["rebase", baseBranchName, "--exec", "git commit --amend --no-edit --reset-author"]);
+          } catch (rebaseErr) {
+            console.warn("Commit rewrite rebase failed, continuing with original commits:", rebaseErr);
+            try { await repoGit.raw(["rebase", "--abort"]); } catch { /* ignore */ }
+          }
+
+          // Disable GitHub Actions on the fork to prevent workflows from running on simulated PRs.
+          // This only affects Actions workflows, not GitHub Apps (Macroscope) which use webhooks.
+          try {
+            await octokit.request("PUT /repos/{owner}/{repo}/actions/permissions", {
+              owner: forkOwner,
+              repo: repoName,
+              enabled: false,
+            });
+          } catch {
+            // Non-critical — fork may not have Actions configured
+          }
+
           // Step 10: Push and create PR
           sendStatus({ type: "info", step: 10, totalSteps: 10, message: "Pushing branches to GitHub..." });
 
@@ -1301,6 +1324,26 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           }
 
           sendStatus({ type: "success", message: "Commits applied" });
+
+          // Rewrite commits: replace original author with bot and set dates to now
+          sendStatus({ type: "info", message: "Preparing commits for review..." });
+          try {
+            await repoGit.raw(["rebase", parentCommit, "--exec", "git commit --amend --no-edit --reset-author"]);
+          } catch (rebaseErr) {
+            console.warn("Commit rewrite rebase failed, continuing with original commits:", rebaseErr);
+            try { await repoGit.raw(["rebase", "--abort"]); } catch { /* ignore */ }
+          }
+
+          // Disable GitHub Actions on the fork
+          try {
+            await octokit.request("PUT /repos/{owner}/{repo}/actions/permissions", {
+              owner: forkOwner,
+              repo: repoName,
+              enabled: false,
+            });
+          } catch {
+            // Non-critical
+          }
 
           // Push
           sendStatus({ type: "info", step: 10, totalSteps: 10, message: "Pushing to GitHub..." });
