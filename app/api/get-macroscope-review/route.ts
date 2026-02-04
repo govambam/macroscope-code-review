@@ -8,10 +8,7 @@ import {
   convertMacroscopeCommentsToV2,
   extractOriginalPRUrl,
   PRAnalysisResult,
-  isV2AnalysisResult,
-  AnalysisComment,
 } from "@/lib/services/pr-analyzer";
-import { generateCodeImage, isCodeImageGenerationAvailable } from "@/lib/services/code-image";
 import {
   getAnalysisByPRUrl,
   saveAnalysis,
@@ -252,42 +249,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Convert to V2 format
     const result = convertMacroscopeCommentsToV2(macroscopeComments);
-
-    // Generate code snippet images for comments with code suggestions
-    if (isCodeImageGenerationAvailable()) {
-      const prIdForImage = parsedForkedPr.prNumber.toString();
-      const commentsWithSuggestions = result.all_comments.filter((c) => c.code_suggestion);
-      console.log(`Code image generation: ${commentsWithSuggestions.length} comments with code suggestions out of ${result.all_comments.length} total`);
-
-      for (const comment of commentsWithSuggestions) {
-        try {
-          const ext = comment.file_path.split(".").pop()?.toLowerCase() || "js";
-          const langMap: Record<string, string> = {
-            ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
-            py: "python", rb: "ruby", go: "go", rs: "rust", java: "java",
-            cs: "csharp", cpp: "cpp", c: "c", php: "php", swift: "swift",
-          };
-          const language = langMap[ext] || ext;
-
-          const imageResult = await generateCodeImage({
-            code: comment.code_suggestion!,
-            language,
-            prId: `${prIdForImage}-${comment.index}`,
-          });
-
-          if (imageResult.success) {
-            (comment as AnalysisComment).code_snippet_image_url = imageResult.url;
-            console.log(`Generated code image for comment ${comment.index}:`, imageResult.url);
-          } else {
-            console.warn(`Code image generation failed for comment ${comment.index}:`, imageResult.error);
-          }
-        } catch (imageError) {
-          console.error(`Failed to generate image for comment ${comment.index}:`, imageError);
-        }
-      }
-    } else {
-      console.log("Code image generation skipped: R2 storage is not configured");
-    }
 
     // Save to database
     let analysisId: number | undefined;
