@@ -7,7 +7,7 @@ import * as os from "os";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { config, GITHUB_ORG, GITHUB_BOT_NAME, GITHUB_BOT_EMAIL } from "@/lib/config";
-import { saveFork, savePR, getFork, getPR, isRepoCached as shouldCacheRepo, addCachedRepo } from "@/lib/services/database";
+import { saveFork, savePR, getFork, isRepoCached as shouldCacheRepo, addCachedRepo } from "@/lib/services/database";
 
 // Cache directory for reference repositories (speeds up cloning)
 // Uses config for environment-aware paths (local vs Railway)
@@ -523,31 +523,11 @@ export async function POST(request: NextRequest): Promise<Response> {
           sendStatus({ type: "info", step: 6, totalSteps: 10, message: "Fork verified, continuing..." });
           sendStatus({ type: "success", message: "Fork configuration verified" });
 
-          // Check for existing PR (DB-first, then GitHub API fallback)
+          // Check for existing open PR on GitHub
+          // Note: PR state can change externally (closed/merged), so we always
+          // check the GitHub API here rather than relying on potentially stale DB state.
           const branchName = `review-pr-${prNumber}`;
 
-          // Check database first for existing PR
-          const existingDbFork = dbFork || getFork(forkOwner, repoName);
-          if (existingDbFork) {
-            const existingDbPR = getPR(existingDbFork.id, prNumber);
-            if (existingDbPR && existingDbPR.state === "open") {
-              console.log(`[CACHE HIT] Existing PR #${prNumber} found in database`);
-              sendStatus({ type: "success", message: "Found existing PR for this review (from database)" });
-              sendResult({
-                success: true,
-                message: `A PR already exists for PR #${prNumber}`,
-                prUrl: existingDbPR.forked_pr_url,
-                forkUrl,
-                commitCount: regularCommitCount,
-                originalPrNumber: prNumber,
-                prTitle: existingDbPR.pr_title ?? undefined,
-              });
-              return;
-            }
-          }
-
-          // Database miss - check GitHub API
-          console.log(`[CACHE MISS] No existing open PR for review-pr-${prNumber} in database, checking GitHub`);
           try {
             const { data: existingPRs } = await octokit.pulls.list({
               owner: forkOwner,
