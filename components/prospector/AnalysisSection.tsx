@@ -461,16 +461,7 @@ export function AnalysisSection({
                             <span className="font-medium">Impact:</span> {comment.impact_scenario}
                           </p>
                         )}
-                        {comment.code_snippet_image_url ? (
-                          <div className="mb-3">
-                            <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
-                            <img
-                              src={comment.code_snippet_image_url}
-                              alt="Code suggestion"
-                              className="max-w-full rounded shadow-sm"
-                            />
-                          </div>
-                        ) : comment.code_suggestion ? (
+                        {comment.code_suggestion ? (
                           <div className="mb-3">
                             <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
                             <div className="text-xs rounded border border-gray-200 overflow-x-auto font-mono">
