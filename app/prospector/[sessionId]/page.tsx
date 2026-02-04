@@ -1148,11 +1148,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   selectedBugIndex={analysisData.selectedBugIndex}
                   forkedPrUrl={completedSims.find((s) => s.success)?.forkedPrUrl ?? ""}
                   currentAnalysisId={analysisData.analysisId}
-                  initialEmail={
-                    analysisData.analysisResult.cachedEmail
-                      ? (JSON.parse(analysisData.analysisResult.cachedEmail) as EmailSequence)
-                      : undefined
-                  }
+                  initialCachedData={analysisData.analysisResult.cachedEmail ?? undefined}
                   onEmailsGenerated={handleEmailsGenerated}
                   onEmailEdited={handleEmailEdited}
                   onContinueToSend={handleContinueToSend}

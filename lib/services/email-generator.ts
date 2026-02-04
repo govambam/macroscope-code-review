@@ -1,54 +1,47 @@
 import { loadPrompt, getPromptMetadata } from "./prompt-loader";
 import { sendMessageAndParseJSON, DEFAULT_MODEL } from "./anthropic";
-import { BugSnippet, AnalysisComment } from "./pr-analyzer";
+import {
+  EmailVariables,
+  AllEmailVariables,
+  EmailSequence,
+  EmailEntry,
+  renderEmailSequence,
+} from "../constants/email-templates";
+
+// Re-export types that other files depend on
+export type { EmailEntry, EmailSequence };
+export type { EmailVariables, AllEmailVariables } from "../constants/email-templates";
 
 /**
- * Single email entry in the sequence.
- */
-export interface EmailEntry {
-  subject: string;
-  body: string;
-}
-
-/**
- * Complete 4-email outreach sequence returned by the email generator.
- * Contains Apollo merge fields like {{first_name}}, {{company}}, {{sender_first_name}}
- */
-export interface EmailSequence {
-  email_1: EmailEntry;
-  email_2: EmailEntry;
-  email_3: EmailEntry;
-  email_4: EmailEntry;
-}
-
-/**
- * Extended bug info for email generation.
- * Supports both V1 BugSnippet and V2 AnalysisComment-derived data.
+ * Bug data needed for email variable generation.
  */
 export interface EmailBugInput {
   title: string;
   explanation: string;
-  explanation_short?: string; // V2: Short version for concise emails
   file_path: string;
   severity: "critical" | "high" | "medium";
-  code_suggestion?: string; // V2: Suggested fix
-  impact_scenario?: string; // V2: Real-world impact scenario
-  macroscope_comment_text?: string; // Original Macroscope comment (may contain code snippet)
-  code_snippet_image_url?: string; // URL to syntax-highlighted code image
+  code_suggestion?: string;
+  macroscope_comment_text?: string;
+  code_snippet_image_url?: string;
 }
 
 /**
  * Input for email generation.
- * Only PR and bug data - recipient info will be Apollo merge fields.
  */
 export interface EmailGenerationInput {
-  originalPrUrl: string; // URL to their original PR in their repo
-  prTitle?: string; // Optional - will use default based on PR number if not provided
-  prStatus?: "open" | "merged" | "closed"; // Status of the original PR
-  prMergedAt?: string | null; // ISO timestamp if merged
-  forkedPrUrl: string; // URL to our fork with Macroscope review
-  bug: BugSnippet | EmailBugInput; // Supports both V1 and V2 formats
-  totalBugs: number;
+  originalPrUrl: string;
+  prTitle?: string;
+  forkedPrUrl: string;
+  bug: EmailBugInput;
+}
+
+/**
+ * Result of email generation: LLM variables, DB variables, and rendered previews.
+ */
+export interface EmailGenerationResult {
+  variables: EmailVariables;
+  dbVariables: Omit<AllEmailVariables, keyof EmailVariables>;
+  previews: EmailSequence;
 }
 
 /**
@@ -60,7 +53,6 @@ export function extractCompanyFromUrl(url: string): string | null {
   if (!match) return null;
 
   const orgName = match[1];
-  // Capitalize first letter and handle common patterns
   return orgName
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -76,96 +68,66 @@ export function extractPrNumber(url: string): string | null {
 }
 
 /**
- * Generates a 4-email outreach sequence using the bug analysis results.
- * Each email will contain Apollo merge fields for personalization:
- * - {{first_name}} - Recipient's first name
- * - {{company}} - Prospect's company name
- * - {{sender_first_name}} - Sender's first name
- *
- * @param input - Email generation parameters (PR and bug data only)
- * @returns EmailSequence object with 4 emails, each containing subject and body
- * @throws Error if prompt loading or API call fails
+ * Calls the LLM to generate 4 email variables from a Macroscope comment.
  */
-export async function generateEmail(input: EmailGenerationInput): Promise<EmailSequence> {
-  const {
-    originalPrUrl,
-    prTitle,
-    prStatus,
-    prMergedAt,
-    forkedPrUrl,
-    bug,
-    totalBugs,
-  } = input;
+export async function generateEmailVariables(
+  macroscopeComment: string,
+  filePath: string,
+  codeSuggestion: string | null
+): Promise<EmailVariables> {
+  // Build the code suggestion section conditionally
+  const codeSuggestionSection = codeSuggestion
+    ? `**Code suggestion:**\n\`\`\`\n${codeSuggestion}\n\`\`\``
+    : "";
 
-  // Validate required fields
+  const prompt = loadPrompt("email-variables", {
+    FILE_PATH: filePath,
+    CODE_SUGGESTION_SECTION: codeSuggestionSection,
+    MACROSCOPE_COMMENT: macroscopeComment,
+  });
+
+  const metadata = getPromptMetadata("email-variables");
+  const model = metadata.model || DEFAULT_MODEL;
+
+  const variables = await sendMessageAndParseJSON<EmailVariables>(prompt, {
+    model,
+    maxTokens: 1024,
+    temperature: 0.3,
+  });
+
+  return variables;
+}
+
+/**
+ * Generates email variables from a Macroscope comment and renders preview emails.
+ *
+ * @param input - PR and bug data
+ * @returns LLM-generated variables, DB-sourced variables, and rendered email previews
+ */
+export async function generateEmail(input: EmailGenerationInput): Promise<EmailGenerationResult> {
+  const { originalPrUrl, prTitle, forkedPrUrl, bug } = input;
+
   if (!originalPrUrl || !forkedPrUrl || !bug) {
     throw new Error("Missing required fields for email generation");
   }
 
-  // Extract the PR number from the original PR URL
-  const originalPrNumber = extractPrNumber(originalPrUrl);
-  if (!originalPrNumber) {
-    throw new Error(`Could not extract PR number from original URL: ${originalPrUrl}`);
-  }
+  // Step 1: LLM generates the 4 variables from the Macroscope comment
+  const variables = await generateEmailVariables(
+    bug.macroscope_comment_text || bug.explanation,
+    bug.file_path || "unknown",
+    bug.code_suggestion || null
+  );
 
-  // Use explanation_short if available (V2 format), otherwise use full explanation
-  const bugInput = bug as EmailBugInput;
-  const bugExplanation = bugInput.explanation_short || bug.explanation;
+  // Step 2: Gather DB variables from input
+  const dbVariables = {
+    PR_NAME: prTitle || `PR #${extractPrNumber(originalPrUrl) || "unknown"}`,
+    PR_LINK: originalPrUrl,
+    BUG_FIX_URL: bug.code_snippet_image_url || "",
+    SIMULATED_PR_LINK: forkedPrUrl,
+  };
 
-  // Format merged date for context (e.g., "3 days ago" or "January 15, 2024")
-  let mergedDateFormatted = "";
-  if (prMergedAt) {
-    const mergedDate = new Date(prMergedAt);
-    if (isNaN(mergedDate.getTime())) {
-      mergedDateFormatted = "unknown";
-    } else {
-      const now = new Date();
-      const diffDays = Math.floor((now.getTime() - mergedDate.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays === 0) {
-        mergedDateFormatted = "today";
-      } else if (diffDays === 1) {
-        mergedDateFormatted = "yesterday";
-      } else if (diffDays < 7) {
-        mergedDateFormatted = `${diffDays} days ago`;
-      } else if (diffDays < 30) {
-        const weeks = Math.floor(diffDays / 7);
-        mergedDateFormatted = `${weeks} week${weeks > 1 ? "s" : ""} ago`;
-      } else {
-        mergedDateFormatted = mergedDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-      }
-    }
-  }
+  // Step 3: Render templates with all variables
+  const previews = renderEmailSequence({ ...variables, ...dbVariables });
 
-  // Load the prompt and interpolate variables
-  const prompt = loadPrompt("email-generation", {
-    ORIGINAL_PR_NUMBER: originalPrNumber,
-    ORIGINAL_PR_URL: originalPrUrl,
-    PR_TITLE: prTitle || `PR #${originalPrNumber}`,
-    PR_STATUS: prStatus || "open",
-    PR_MERGED_DATE: mergedDateFormatted || "unknown",
-    FORKED_PR_URL: forkedPrUrl,
-    BUG_TITLE: bug.title,
-    BUG_EXPLANATION: bugExplanation,
-    BUG_SEVERITY: bug.severity,
-    TOTAL_BUGS: totalBugs.toString(),
-    // Optional V2 fields
-    ...(bugInput.code_suggestion && { BUG_FIX_SUGGESTION: bugInput.code_suggestion }),
-    ...(bugInput.code_suggestion && { CODE_SNIPPET: bugInput.code_suggestion }),
-    ...(bugInput.impact_scenario && { IMPACT_SCENARIO: bugInput.impact_scenario }),
-    ...(bugInput.macroscope_comment_text && { MACROSCOPE_COMMENT: bugInput.macroscope_comment_text }),
-    ...(bugInput.code_snippet_image_url && { CODE_SNIPPET_IMAGE_URL: bugInput.code_snippet_image_url }),
-  });
-
-  // Get model from prompt metadata, fallback to Sonnet
-  const metadata = getPromptMetadata("email-generation");
-  const model = metadata.model || DEFAULT_MODEL;
-
-  // Send to Claude and parse JSON response
-  const emailSequence = await sendMessageAndParseJSON<EmailSequence>(prompt, {
-    model,
-    maxTokens: 4096, // Increased for 4-email sequence
-    temperature: 0.3, // Slight creativity for natural language
-  });
-
-  return emailSequence;
+  return { variables, dbVariables, previews };
 }
