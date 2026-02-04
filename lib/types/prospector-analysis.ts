@@ -21,6 +21,11 @@ import type {
 import type {
   EmailEntry as _EmailEntry,
   EmailSequence as _EmailSequence,
+  EmailVariables as _EmailVariables,
+  AllEmailVariables as _AllEmailVariables,
+} from "@/lib/constants/email-templates";
+
+import type {
   EmailBugInput as _EmailBugInput,
 } from "@/lib/services/email-generator";
 
@@ -37,6 +42,8 @@ export type NoMeaningfulBugsResult = _NoMeaningfulBugsResult;
 export type EmailEntry = _EmailEntry;
 export type EmailSequence = _EmailSequence;
 export type EmailBugInput = _EmailBugInput;
+export type EmailVariables = _EmailVariables;
+export type AllEmailVariables = _AllEmailVariables;
 
 // ── API response types (client-only, not in service layer) ──────────────
 
@@ -57,11 +64,14 @@ export interface AnalysisApiResponse {
 
 export interface EmailGenerationResponse {
   success: boolean;
-  email?: EmailSequence;
+  variables?: EmailVariables;
+  dbVariables?: Omit<AllEmailVariables, keyof EmailVariables>;
+  previews?: EmailSequence;
   error?: string;
+  emailId?: number;
 }
 
-export type EmailTabKey = "email_1" | "email_2" | "email_3" | "email_4";
+export type EmailTabKey = "variables" | "email_1" | "email_2" | "email_3" | "email_4";
 
 // ── Display constants ───────────────────────────────────────────────────
 
@@ -102,10 +112,11 @@ export const SEVERITY_COLORS: Record<string, string> = {
 };
 
 export const EMAIL_TABS: ReadonlyArray<{ key: EmailTabKey; label: string; desc: string }> = [
-  { key: "email_1", label: "Email 1", desc: "Proof Point" },
-  { key: "email_2", label: "Email 2", desc: "Fix Offer" },
-  { key: "email_3", label: "Email 3", desc: "Broader Value" },
-  { key: "email_4", label: "Email 4", desc: "Breakup" },
+  { key: "variables", label: "Variables", desc: "CRM Export" },
+  { key: "email_1", label: "Email 1", desc: "Simulated PR" },
+  { key: "email_2", label: "Email 2", desc: "Scale of Review" },
+  { key: "email_3", label: "Email 3", desc: "Macroscope Local" },
+  { key: "email_4", label: "Email 4", desc: "Multi-Option Close" },
 ];
 
 // ── Type guards (duplicated from pr-analyzer.ts for client safety) ──────

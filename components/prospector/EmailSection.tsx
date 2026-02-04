@@ -1,27 +1,73 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   type AnalysisApiResponse,
   type EmailSequence,
   type EmailTabKey,
   type EmailGenerationResponse,
-  isV2Result,
+  type EmailVariables,
   resultHasMeaningfulBugs,
-  getTotalBugCount,
   getBestBugForEmail,
   EMAIL_TABS,
 } from "@/lib/types/prospector-analysis";
+import {
+  renderEmailSequence,
+  LLM_VARIABLE_KEYS,
+  DB_VARIABLE_KEYS,
+  type AllEmailVariables,
+} from "@/lib/constants/email-templates";
 
 interface EmailSectionProps {
   analysisResult: AnalysisApiResponse;
   selectedBugIndex: number | null;
   forkedPrUrl: string;
   currentAnalysisId: number | null;
-  initialEmail?: EmailSequence | null;
+  initialCachedData?: string | null;
   onEmailsGenerated: (data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) => void;
   onEmailEdited: (editedEmail: EmailSequence) => void;
   onContinueToSend: () => void;
+}
+
+/** Labels for display in the Variables tab */
+const VARIABLE_LABELS: Record<keyof AllEmailVariables, string> = {
+  BUG_DESCRIPTION: "Bug Description",
+  BUG_IMPACT: "Bug Impact",
+  FIX_SUGGESTION: "Fix Suggestion",
+  BUG_TYPE: "Bug Type",
+  PR_NAME: "PR Name",
+  PR_LINK: "PR Link",
+  BUG_FIX_URL: "Bug Fix URL",
+  SIMULATED_PR_LINK: "Simulated PR Link",
+};
+
+/**
+ * Parses cached email data from the database.
+ * Handles both new format ({ variables, dbVariables }) and legacy format (EmailSequence).
+ */
+function parseCachedData(raw: string | null | undefined): {
+  variables: EmailVariables | null;
+  dbVariables: Omit<AllEmailVariables, keyof EmailVariables> | null;
+  legacyEmail: EmailSequence | null;
+} {
+  if (!raw) return { variables: null, dbVariables: null, legacyEmail: null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.variables && parsed.dbVariables) {
+      return {
+        variables: parsed.variables as EmailVariables,
+        dbVariables: parsed.dbVariables,
+        legacyEmail: null,
+      };
+    }
+    // Legacy format: raw EmailSequence
+    if (parsed.email_1 && parsed.email_2 && parsed.email_3 && parsed.email_4) {
+      return { variables: null, dbVariables: null, legacyEmail: parsed as EmailSequence };
+    }
+    return { variables: null, dbVariables: null, legacyEmail: null };
+  } catch {
+    return { variables: null, dbVariables: null, legacyEmail: null };
+  }
 }
 
 export function EmailSection({
@@ -29,21 +75,40 @@ export function EmailSection({
   selectedBugIndex,
   forkedPrUrl,
   currentAnalysisId,
-  initialEmail,
+  initialCachedData,
   onEmailsGenerated,
   onEmailEdited,
   onContinueToSend,
 }: EmailSectionProps) {
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
-  const [generatedEmail, setGeneratedEmail] = useState<EmailSequence | null>(initialEmail ?? null);
-  const [editedEmail, setEditedEmail] = useState<EmailSequence | null>(
-    initialEmail ? JSON.parse(JSON.stringify(initialEmail)) : null
-  );
-  const [activeEmailTab, setActiveEmailTab] = useState<EmailTabKey>("email_1");
   const [emailCopied, setEmailCopied] = useState(false);
   const [emailSaving, setEmailSaving] = useState(false);
+  const [activeEmailTab, setActiveEmailTab] = useState<EmailTabKey>("variables");
   const hasTriggeredRef = useRef(false);
+
+  // Parse initial cached data
+  const cached = useMemo(() => parseCachedData(initialCachedData), [initialCachedData]);
+
+  // Variables state (LLM-generated, editable)
+  const [variables, setVariables] = useState<EmailVariables | null>(cached.variables);
+  const [savedVariables, setSavedVariables] = useState<EmailVariables | null>(cached.variables);
+
+  // DB variables (read-only)
+  const [dbVariables, setDbVariables] = useState<Omit<AllEmailVariables, keyof EmailVariables> | null>(
+    cached.dbVariables
+  );
+
+  // Legacy email support
+  const [legacyEmail, setLegacyEmail] = useState<EmailSequence | null>(cached.legacyEmail);
+
+  // Derive previews from current variables
+  const previews = useMemo<EmailSequence | null>(() => {
+    if (variables && dbVariables) {
+      return renderEmailSequence({ ...variables, ...dbVariables });
+    }
+    return legacyEmail;
+  }, [variables, dbVariables, legacyEmail]);
 
   const generateEmail = useCallback(async () => {
     if (!analysisResult?.result || !resultHasMeaningfulBugs(analysisResult.result)) return;
@@ -59,10 +124,10 @@ export function EmailSection({
 
     setEmailLoading(true);
     setEmailError(null);
-    setGeneratedEmail(null);
-    setEditedEmail(null);
-
-    const totalBugs = getTotalBugCount(analysisResult.result);
+    setVariables(null);
+    setSavedVariables(null);
+    setDbVariables(null);
+    setLegacyEmail(null);
 
     try {
       const res = await fetch("/api/generate-email", {
@@ -71,24 +136,26 @@ export function EmailSection({
         body: JSON.stringify({
           originalPrUrl,
           prTitle: analysisResult.originalPrTitle,
-          prStatus: analysisResult.originalPrState,
-          prMergedAt: analysisResult.originalPrMergedAt,
           forkedPrUrl,
           bug: bestBug,
-          totalBugs,
           analysisId: currentAnalysisId,
         }),
       });
 
       const data: EmailGenerationResponse = await res.json();
 
-      if (data.success && data.email) {
-        setGeneratedEmail(data.email);
-        const editCopy = JSON.parse(JSON.stringify(data.email)) as EmailSequence;
-        setEditedEmail(editCopy);
-        onEmailsGenerated({ generatedEmail: data.email, editedEmail: editCopy });
+      if (data.success && data.variables && data.dbVariables && data.previews) {
+        setVariables(data.variables);
+        setSavedVariables(JSON.parse(JSON.stringify(data.variables)));
+        setDbVariables(data.dbVariables);
+
+        // Notify parent with rendered previews
+        onEmailsGenerated({
+          generatedEmail: data.previews,
+          editedEmail: JSON.parse(JSON.stringify(data.previews)),
+        });
       } else {
-        setEmailError(data.error || "Failed to generate email");
+        setEmailError(data.error || "Failed to generate email variables");
       }
     } catch (error) {
       setEmailError(error instanceof Error ? error.message : "Failed to generate email");
@@ -97,41 +164,36 @@ export function EmailSection({
     }
   }, [analysisResult, selectedBugIndex, forkedPrUrl, currentAnalysisId, onEmailsGenerated]);
 
-  // Auto-trigger email generation on mount if no initial email
+  // Auto-trigger on mount if no cached data
   useEffect(() => {
     if (!hasTriggeredRef.current) {
       hasTriggeredRef.current = true;
-      if (initialEmail) {
+      if (previews) {
         onEmailsGenerated({
-          generatedEmail: initialEmail,
-          editedEmail: JSON.parse(JSON.stringify(initialEmail)),
+          generatedEmail: previews,
+          editedEmail: JSON.parse(JSON.stringify(previews)),
         });
       } else {
         generateEmail();
       }
     }
-  }, [initialEmail, generateEmail, onEmailsGenerated]);
+  }, [previews, generateEmail, onEmailsGenerated]);
 
-  function handleEmailEdit(field: "subject" | "body", value: string) {
-    if (!editedEmail) return;
-    const updated = {
-      ...editedEmail,
-      [activeEmailTab]: {
-        ...editedEmail[activeEmailTab],
-        [field]: value,
-      },
-    };
-    setEditedEmail(updated);
-    onEmailEdited(updated);
+  function handleVariableEdit(key: keyof EmailVariables, value: string) {
+    if (!variables || !dbVariables) return;
+    const updated = { ...variables, [key]: value };
+    setVariables(updated);
+    // Notify parent with re-rendered previews directly (avoids useEffect dependency loop)
+    onEmailEdited(renderEmailSequence({ ...updated, ...dbVariables }));
   }
 
-  function hasUnsavedEmailChanges(): boolean {
-    if (!generatedEmail || !editedEmail) return false;
-    return JSON.stringify(generatedEmail) !== JSON.stringify(editedEmail);
+  function hasUnsavedChanges(): boolean {
+    if (!variables || !savedVariables) return false;
+    return JSON.stringify(variables) !== JSON.stringify(savedVariables);
   }
 
-  async function handleSaveEmail(): Promise<boolean> {
-    if (!editedEmail || !currentAnalysisId) return false;
+  async function handleSave(): Promise<boolean> {
+    if (!variables || !dbVariables || !currentAnalysisId) return false;
     setEmailSaving(true);
     try {
       const res = await fetch("/api/emails/update", {
@@ -139,11 +201,11 @@ export function EmailSection({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           analysisId: currentAnalysisId,
-          emailContent: JSON.stringify(editedEmail),
+          emailContent: JSON.stringify({ variables, dbVariables }),
         }),
       });
       if (res.ok) {
-        setGeneratedEmail(JSON.parse(JSON.stringify(editedEmail)));
+        setSavedVariables(JSON.parse(JSON.stringify(variables)));
         return true;
       }
       return false;
@@ -154,10 +216,27 @@ export function EmailSection({
     }
   }
 
-  async function copyEmail() {
-    if (!editedEmail) return;
-    const active = editedEmail[activeEmailTab];
-    const text = `Subject: ${active.subject}\n\n${active.body}`;
+  async function copyVariables() {
+    if (!variables || !dbVariables) return;
+    const allVars = { ...variables, ...dbVariables };
+    const lines = [
+      ...LLM_VARIABLE_KEYS.map((k) => `${k}: ${allVars[k]}`),
+      "",
+      ...DB_VARIABLE_KEYS.map((k) => `${k}: ${allVars[k]}`),
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setEmailCopied(true);
+      setTimeout(() => setEmailCopied(false), 2000);
+    } catch {
+      // Clipboard not available
+    }
+  }
+
+  async function copyPreviewEmail() {
+    if (!previews || activeEmailTab === "variables") return;
+    const email = previews[activeEmailTab as keyof EmailSequence];
+    const text = `Subject: ${email.subject}\n\n${email.body}`;
     try {
       await navigator.clipboard.writeText(text);
       setEmailCopied(true);
@@ -168,8 +247,8 @@ export function EmailSection({
   }
 
   async function handleContinueToSend() {
-    if (hasUnsavedEmailChanges()) {
-      await handleSaveEmail();
+    if (hasUnsavedChanges()) {
+      await handleSave();
     }
     onContinueToSend();
   }
@@ -181,31 +260,24 @@ export function EmailSection({
       <div className="space-y-4 animate-pulse">
         <div className="h-6 bg-gray-200 rounded w-56" />
         <div className="flex gap-2 border-b border-gray-200 pb-2">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="h-8 w-24 bg-gray-200 rounded" />
           ))}
         </div>
         <div className="border border-gray-200 rounded-lg p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-16 bg-gray-200 rounded" />
-            <div className="h-8 flex-1 bg-gray-200 rounded" />
-          </div>
-          <div className="space-y-2 pt-3 border-t border-gray-200">
-            <div className="h-4 w-12 bg-gray-200 rounded" />
-            <div className="h-4 w-full bg-gray-200 rounded" />
-            <div className="h-4 w-5/6 bg-gray-200 rounded" />
-            <div className="h-4 w-full bg-gray-200 rounded" />
-            <div className="h-4 w-2/3 bg-gray-200 rounded" />
-            <div className="h-4 w-full bg-gray-200 rounded" />
-            <div className="h-4 w-4/5 bg-gray-200 rounded" />
-          </div>
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="space-y-1">
+              <div className="h-3 w-24 bg-gray-200 rounded" />
+              <div className="h-8 w-full bg-gray-200 rounded" />
+            </div>
+          ))}
         </div>
         <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
-          <span>Generating email sequence...</span>
+          <span>Generating email variables...</span>
         </div>
       </div>
     );
@@ -213,7 +285,7 @@ export function EmailSection({
 
   // ── Error state ───────────────────────────────────────────────────────
 
-  if (emailError && !editedEmail) {
+  if (emailError && !variables && !legacyEmail) {
     return (
       <div className="space-y-4">
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -234,23 +306,26 @@ export function EmailSection({
     );
   }
 
-  // ── No email yet ──────────────────────────────────────────────────────
+  // ── No data yet ────────────────────────────────────────────────────────
 
-  if (!editedEmail) {
+  if (!variables && !legacyEmail) {
     return (
       <div className="text-center py-8">
-        <p className="text-sm text-text-muted italic">Waiting for email generation...</p>
+        <p className="text-sm text-text-muted italic">Waiting for email variable generation...</p>
       </div>
     );
   }
 
-  // ── Email editor ──────────────────────────────────────────────────────
+  // ── Main UI ────────────────────────────────────────────────────────────
+
+  const isVariablesTab = activeEmailTab === "variables";
+  const isPreviewTab = !isVariablesTab;
 
   return (
     <div className="space-y-4">
       {/* Header with actions */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-accent">4-Email Outreach Sequence</h3>
+        <h3 className="text-sm font-medium text-accent">Email Variables & Previews</h3>
         <div className="flex items-center gap-3">
           <button
             onClick={() => {
@@ -265,7 +340,7 @@ export function EmailSection({
             Regenerate
           </button>
           <button
-            onClick={copyEmail}
+            onClick={isVariablesTab ? copyVariables : copyPreviewEmail}
             className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary-hover font-medium"
           >
             {emailCopied ? (
@@ -280,21 +355,21 @@ export function EmailSection({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                Copy Selected
+                {isVariablesTab ? "Copy Variables" : "Copy Email"}
               </>
             )}
           </button>
         </div>
       </div>
 
-      {/* Email tabs */}
+      {/* Tabs */}
       <div className="border-b border-border">
-        <div className="flex gap-1">
+        <div className="flex gap-1 overflow-x-auto">
           {EMAIL_TABS.map(({ key, label, desc }) => (
             <button
               key={key}
               onClick={() => setActiveEmailTab(key)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap ${
                 activeEmailTab === key
                   ? "border-primary text-primary"
                   : "border-transparent text-text-secondary hover:text-accent hover:border-gray-300"
@@ -307,49 +382,117 @@ export function EmailSection({
         </div>
       </div>
 
-      {/* Editable email content */}
-      <div className="bg-bg-subtle border border-border rounded-lg p-4 space-y-3">
-        <div className="flex items-start gap-2">
-          <label className="text-sm font-medium text-accent shrink-0 pt-2">Subject:</label>
-          <input
-            type="text"
-            value={editedEmail[activeEmailTab].subject}
-            onChange={(e) => handleEmailEdit("subject", e.target.value)}
-            className="flex-1 px-3 py-2 text-sm text-text-primary bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          />
-        </div>
-        <div className="border-t border-border pt-3">
-          <label className="text-sm font-medium text-accent block mb-2">Body:</label>
-          <textarea
-            value={editedEmail[activeEmailTab].body}
-            onChange={(e) => handleEmailEdit("body", e.target.value)}
-            rows={12}
-            className="w-full px-3 py-2 text-sm text-text-secondary bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y font-sans"
-          />
-        </div>
-        {hasUnsavedEmailChanges() && (
-          <div className="flex items-center justify-between pt-2 border-t border-border">
-            <span className="text-xs text-amber-600">You have unsaved changes</span>
-            <button
-              onClick={handleSaveEmail}
-              disabled={emailSaving}
-              className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
-            >
-              {emailSaving ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Saving...
-                </span>
-              ) : (
-                "Save Changes"
-              )}
-            </button>
+      {/* Tab content */}
+      <div className="bg-bg-subtle border border-border rounded-lg p-4">
+        {isVariablesTab && variables && dbVariables && (
+          <div className="space-y-4">
+            {/* LLM-generated variables (editable) */}
+            <div>
+              <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-3">
+                LLM-Generated Variables
+              </p>
+              <div className="space-y-3">
+                {LLM_VARIABLE_KEYS.map((key) => (
+                  <div key={key}>
+                    <label className="text-xs font-medium text-accent block mb-1">
+                      {VARIABLE_LABELS[key]}
+                      <span className="text-text-muted font-normal ml-1">({key})</span>
+                    </label>
+                    {key === "BUG_TYPE" ? (
+                      <input
+                        type="text"
+                        value={variables[key]}
+                        onChange={(e) => handleVariableEdit(key, e.target.value)}
+                        className="w-full px-3 py-2 text-sm text-text-primary bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                      />
+                    ) : (
+                      <textarea
+                        value={variables[key]}
+                        onChange={(e) => handleVariableEdit(key, e.target.value)}
+                        rows={key === "BUG_DESCRIPTION" ? 2 : key === "BUG_IMPACT" ? 2 : 1}
+                        className="w-full px-3 py-2 text-sm text-text-primary bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* DB variables (read-only) */}
+            <div className="border-t border-border pt-4">
+              <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-3">
+                Database Variables (read-only)
+              </p>
+              <div className="space-y-2">
+                {DB_VARIABLE_KEYS.map((key) => (
+                  <div key={key} className="flex items-start gap-2">
+                    <span className="text-xs font-medium text-text-muted shrink-0 pt-1 w-36">
+                      {VARIABLE_LABELS[key]}
+                    </span>
+                    <span className="text-sm text-text-secondary break-all">
+                      {dbVariables[key] || <span className="italic text-text-muted">empty</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
+
+        {/* Legacy email display (old cached format) */}
+        {isVariablesTab && !variables && legacyEmail && (
+          <div className="text-sm text-text-muted italic">
+            This email was generated with an older format. Variable editing is not available.
+            Click &quot;Regenerate&quot; to generate new variables.
+          </div>
+        )}
+
+        {/* Email preview tabs */}
+        {isPreviewTab && previews && (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2">
+              <label className="text-sm font-medium text-accent shrink-0 pt-2">Subject:</label>
+              <div className="flex-1 px-3 py-2 text-sm text-text-primary bg-white border border-border rounded-lg">
+                {previews[activeEmailTab as keyof EmailSequence].subject}
+              </div>
+            </div>
+            <div className="border-t border-border pt-3">
+              <label className="text-sm font-medium text-accent block mb-2">Body:</label>
+              <div className="w-full px-3 py-2 text-sm text-text-secondary bg-white border border-border rounded-lg whitespace-pre-wrap font-sans min-h-[200px]">
+                {previews[activeEmailTab as keyof EmailSequence].body}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isPreviewTab && !previews && (
+          <div className="text-sm text-text-muted italic">No preview available.</div>
+        )}
       </div>
+
+      {/* Unsaved changes bar */}
+      {hasUnsavedChanges() && (
+        <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+          <span className="text-xs text-amber-600">You have unsaved variable changes</span>
+          <button
+            onClick={handleSave}
+            disabled={emailSaving}
+            className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            {emailSaving ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Saving...
+              </span>
+            ) : (
+              "Save Changes"
+            )}
+          </button>
+        </div>
+      )}
 
       {emailError && (
         <p className="text-sm text-error">{emailError}</p>
