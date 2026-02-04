@@ -141,8 +141,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [emailData, setEmailData] = useState<{
     generatedEmail: EmailSequence;
     editedEmail: EmailSequence;
-    variables?: EmailVariables;
-    dbVariables?: Omit<AllEmailVariables, keyof EmailVariables>;
+    variables: EmailVariables;
+    dbVariables: Omit<AllEmailVariables, keyof EmailVariables>;
   } | null>(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
 
@@ -579,8 +579,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const handleEmailsGenerated = useCallback((data: {
     generatedEmail: EmailSequence;
     editedEmail: EmailSequence;
-    variables?: EmailVariables;
-    dbVariables?: Omit<AllEmailVariables, keyof EmailVariables>;
+    variables: EmailVariables;
+    dbVariables: Omit<AllEmailVariables, keyof EmailVariables>;
   }) => {
     setEmailData(data);
   }, []);
@@ -1180,7 +1180,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
           />
           {!sectionStates[4].isCollapsed && (
             <div className="p-5">
-              {(sectionStates[4].isActive || sectionStates[4].isCompleted) && emailData?.variables && emailData?.dbVariables ? (
+              {(sectionStates[4].isActive || sectionStates[4].isCompleted) && emailData ? (
                 <ApolloSection
                   variables={emailData.variables}
                   dbVariables={emailData.dbVariables}
