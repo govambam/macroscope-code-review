@@ -28,6 +28,7 @@ interface WorkflowContextValue extends WorkflowState {
   setSelectedPRs: (prs: SelectedPR[]) => void;
   toggleSectionCollapsed: (step: number) => void;
   scrollToSection: (sectionId: string) => void;
+  validateSession: (createdAt: string) => void;
 }
 
 const WorkflowContext = createContext<WorkflowContextValue | null>(null);
@@ -53,7 +54,7 @@ function loadState(sessionId: string): Partial<WorkflowState> | null {
   }
 }
 
-function saveState(sessionId: string, state: WorkflowState) {
+function saveState(sessionId: string, state: WorkflowState, sessionCreatedAt?: string) {
   if (typeof window === "undefined") return;
   try {
     sessionStorage.setItem(
@@ -63,6 +64,7 @@ function saveState(sessionId: string, state: WorkflowState) {
         completedSteps: Array.from(state.completedSteps),
         collapsedSections: Array.from(state.collapsedSections),
         selectedPRs: state.selectedPRs,
+        sessionCreatedAt,
       })
     );
   } catch {
@@ -86,6 +88,8 @@ export function WorkflowProvider({
   sessionId: string;
   children: React.ReactNode;
 }) {
+  const sessionCreatedAtRef = useRef<string | undefined>(undefined);
+
   const [state, setState] = useState<WorkflowState>(() => {
     const saved = loadState(sessionId);
     return {
@@ -101,7 +105,7 @@ export function WorkflowProvider({
 
   // Persist on change
   useEffect(() => {
-    saveState(sessionId, state);
+    saveState(sessionId, state, sessionCreatedAtRef.current);
   }, [sessionId, state]);
 
   const scrollToSection = useCallback((sectionId: string) => {
@@ -155,6 +159,33 @@ export function WorkflowProvider({
     });
   }, []);
 
+  const validateSession = useCallback(
+    (createdAt: string) => {
+      if (typeof window === "undefined") return;
+      try {
+        const raw = sessionStorage.getItem(getStorageKey(sessionId));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.sessionCreatedAt && parsed.sessionCreatedAt !== createdAt) {
+            // Session ID was reused (e.g. after DB wipe) — clear stale state
+            sessionCreatedAtRef.current = createdAt;
+            setState({
+              currentStep: 1,
+              completedSteps: new Set<number>(),
+              collapsedSections: new Set<number>(),
+              selectedPRs: [],
+            });
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      sessionCreatedAtRef.current = createdAt;
+    },
+    [sessionId]
+  );
+
   return (
     <WorkflowContext.Provider
       value={{
@@ -164,6 +195,7 @@ export function WorkflowProvider({
         setSelectedPRs,
         toggleSectionCollapsed,
         scrollToSection,
+        validateSession,
       }}
     >
       {children}

@@ -166,6 +166,13 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   const session = data?.session;
 
+  // Validate workflow state matches this session (clears stale state after DB wipe)
+  React.useEffect(() => {
+    if (session?.created_at) {
+      workflow.validateSession(session.created_at);
+    }
+  }, [session?.created_at, workflow.validateSession]);
+
   function handleEditSaved() {
     refetch();
   }
@@ -213,6 +220,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.advanceToStep(2);
     setConfirmPr(null);
     updateSessionRepo(confirmPr.owner, confirmPr.repo);
+    startSingleSimulation(pr);
   }
 
   // ── Option B: Discover ───────────────────────────────────────
@@ -272,6 +280,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.setSelectedPRs([selected]);
     workflow.markStepComplete(1);
     workflow.advanceToStep(2);
+    startSingleSimulation(selected);
   }
 
   function handleDiscoverSimulateMulti(prs: DiscoveredPR[]) {
@@ -304,6 +313,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.markStepComplete(1);
     workflow.advanceToStep(2);
     setConfirmMulti(null);
+    setIsSimulating(true);
   }
 
   // ── Section 2: Fork detection & simulation ──────────────────
@@ -367,18 +377,17 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     }
   }, [workflow.selectedPRs]);
 
-  // Auto-check fork when entering Section 2
+  // Auto-check fork when entering Section 2 (also runs during simulation to populate existingPRs)
   React.useEffect(() => {
     if (
       workflow.currentStep === 2 &&
       workflow.selectedPRs.length > 0 &&
       forkStatus === "idle" &&
-      !isSimulating &&
       !simulationComplete
     ) {
       checkForkStatus();
     }
-  }, [workflow.currentStep, workflow.selectedPRs, forkStatus, isSimulating, simulationComplete, checkForkStatus]);
+  }, [workflow.currentStep, workflow.selectedPRs, forkStatus, simulationComplete, checkForkStatus]);
 
   function stepIndexFromApiStep(apiStep: number): number {
     if (apiStep <= 1) return 0;
@@ -474,12 +483,31 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                 setSingleSimSteps((prev) =>
                   prev.map((s) => ({ ...s, state: "done" as const }))
                 );
-                setCompletedSims([{
-                  pr,
-                  success: true,
-                  forkedPrUrl: event.prUrl,
-                  prTitle: event.prTitle,
-                }]);
+                setCompletedSims(() => {
+                  const newSim: CompletedSimulation = {
+                    pr,
+                    success: true,
+                    forkedPrUrl: event.prUrl,
+                    prTitle: event.prTitle,
+                  };
+                  // Include existing fork PRs alongside the new simulation
+                  const existingAsCompleted: CompletedSimulation[] = existingPRs
+                    .filter((ep) => ep.forkedPrUrl !== event.prUrl)
+                    .map((ep) => ({
+                      pr: {
+                        url: ep.originalPrUrl || ep.forkedPrUrl,
+                        owner: pr.owner,
+                        repo: pr.repo,
+                        prNumber: ep.prNumber,
+                        source: "existing" as const,
+                        title: ep.originalPrTitle || ep.title || undefined,
+                      },
+                      success: true,
+                      forkedPrUrl: ep.forkedPrUrl,
+                      prTitle: ep.originalPrTitle || ep.title || undefined,
+                    }));
+                  return [newSim, ...existingAsCompleted];
+                });
                 setSimulationComplete(true);
                 setIsSimulating(false);
                 workflow.markStepComplete(2);
@@ -517,7 +545,24 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   }
 
   function handleQueueComplete(completed: CompletedSimulation[]) {
-    setCompletedSims(completed);
+    // Merge existing fork PRs with newly completed simulations
+    const completedUrls = new Set(completed.map((s) => s.forkedPrUrl).filter(Boolean));
+    const existingAsCompleted: CompletedSimulation[] = existingPRs
+      .filter((ep) => !completedUrls.has(ep.forkedPrUrl))
+      .map((ep) => ({
+        pr: {
+          url: ep.originalPrUrl || ep.forkedPrUrl,
+          owner: workflow.selectedPRs[0]?.owner || "",
+          repo: workflow.selectedPRs[0]?.repo || "",
+          prNumber: ep.prNumber,
+          source: "existing" as const,
+          title: ep.originalPrTitle || ep.title || undefined,
+        },
+        success: true,
+        forkedPrUrl: ep.forkedPrUrl,
+        prTitle: ep.originalPrTitle || ep.title || undefined,
+      }));
+    setCompletedSims([...completed, ...existingAsCompleted]);
     setSimulationComplete(true);
     setIsSimulating(false);
     const anySuccess = completed.some((s) => s.success);
