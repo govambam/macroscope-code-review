@@ -15,11 +15,20 @@ import {
 } from "@/lib/types/prospector-analysis";
 
 /**
- * Strips leading severity prefix (e.g. "🟢 **Low** ", "🟡 **Medium** ") from text.
- * The severity is already shown via category badges in the card header.
+ * Cleans Macroscope comment text for display:
+ * - Strips leading severity prefix (e.g. "🟢 **Medium** " or "🟡 **Medium")
+ * - Removes inline code blocks (```...```)
+ * - Removes the Macroscope CTA ("🚀 **Want me to fix this?...")
  */
-function stripSeverityPrefix(text: string): string {
-  return text.replace(/^[^*]*\*\*(Critical|High|Medium|Low|Info)\*\*\s*/i, "");
+function cleanCommentText(text: string): string {
+  let cleaned = text;
+  // Strip severity prefix — handle both "**Medium**" and "**Medium" (without closing **)
+  cleaned = cleaned.replace(/^[^*]*\*\*(Critical|High|Medium|Low|Info)(\*\*)?\s*/i, "");
+  // Remove fenced code blocks (```...```)
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
+  // Remove Macroscope CTA (🚀 Want me to fix this? ...)
+  cleaned = cleaned.replace(/\s*>?\s*🚀\s*\*?\*?Want me to fix this\?[\s\S]*$/, "");
+  return cleaned.trim();
 }
 
 interface AnalysisSectionProps {
@@ -443,8 +452,10 @@ export function AnalysisSection({
                         </button>
                       </div>
                       <div className="p-4">
-                        <h4 className="font-medium text-accent mb-2">{stripSeverityPrefix(comment.title)}</h4>
-                        <p className="text-sm text-text-secondary mb-3">{stripSeverityPrefix(comment.explanation)}</p>
+                        {cleanCommentText(comment.title) && (
+                          <h4 className="font-medium text-accent mb-2">{cleanCommentText(comment.title)}</h4>
+                        )}
+                        <p className="text-sm text-text-secondary mb-3">{cleanCommentText(comment.explanation)}</p>
                         {comment.impact_scenario && (
                           <p className="text-sm text-amber-700 bg-amber-50 p-2 rounded mb-3">
                             <span className="font-medium">Impact:</span> {comment.impact_scenario}
@@ -655,8 +666,10 @@ export function AnalysisSection({
                     </button>
                   </div>
                   <div className="p-4">
-                    <h4 className="font-medium text-accent mb-2">{stripSeverityPrefix(comment.title)}</h4>
-                    <p className="text-sm text-text-secondary mb-3">{stripSeverityPrefix(comment.explanation)}</p>
+                    {cleanCommentText(comment.title) && (
+                      <h4 className="font-medium text-accent mb-2">{cleanCommentText(comment.title)}</h4>
+                    )}
+                    <p className="text-sm text-text-secondary mb-3">{cleanCommentText(comment.explanation)}</p>
                     <div className="text-xs text-text-muted font-mono bg-bg-subtle px-2 py-1 rounded inline-block">
                       {comment.file_path}{comment.line_number ? `:${comment.line_number}` : ""}
                     </div>
