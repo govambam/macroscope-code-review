@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useCallback } from "react";
 import {
   type AnalysisApiResponse,
   type PRAnalysisResultV2,
@@ -40,10 +40,11 @@ export function AnalysisSection({
   const [showUrlPrompt, setShowUrlPrompt] = useState(false);
   const [analysisOriginalUrl, setAnalysisOriginalUrl] = useState("");
   const [pendingForceRefresh, setPendingForceRefresh] = useState(false);
-  const hasTriggeredRef = useRef(false);
+  const [hasRun, setHasRun] = useState(false);
 
   const runAnalysis = useCallback(
     async (forceRefresh = false) => {
+      setHasRun(true);
       setAnalysisLoading(true);
       setAnalysisResult(null);
       setSelectedBugIndex(null);
@@ -104,14 +105,6 @@ export function AnalysisSection({
     },
     [forkedPrUrl, analysisOriginalUrl, onAnalysisComplete]
   );
-
-  // Auto-trigger analysis on mount
-  useEffect(() => {
-    if (!hasTriggeredRef.current && forkedPrUrl) {
-      hasTriggeredRef.current = true;
-      runAnalysis();
-    }
-  }, [forkedPrUrl, runAnalysis]);
 
   function handleOriginalUrlSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -238,7 +231,54 @@ export function AnalysisSection({
     );
   }
 
-  // ── No result yet ─────────────────────────────────────────────────────
+  // ── Not yet run ──────────────────────────────────────────────────────
+
+  if (!hasRun && !analysisResult) {
+    return (
+      <div className="space-y-5">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <svg className="h-6 w-6 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <h3 className="font-medium text-blue-800">Waiting for Macroscope Review</h3>
+              <p className="text-sm text-blue-700 mt-1">
+                The Macroscope bot needs time to review the PR and leave comments before analysis can find bugs.
+                This typically takes 1-3 minutes after the PR is created.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => runAnalysis()}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Run Analysis
+          </button>
+          <span className="text-xs text-text-muted">
+            Click when the bot has had time to review
+          </span>
+        </div>
+
+        {forkedPrUrl && (
+          <p className="text-xs text-text-muted">
+            PR:{" "}
+            <a href={forkedPrUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+              {forkedPrUrl.replace("https://github.com/", "")}
+            </a>
+          </p>
+        )}
+      </div>
+    );
+  }
 
   if (!analysisResult) {
     return (
