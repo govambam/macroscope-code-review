@@ -131,6 +131,11 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [completedSims, setCompletedSims] = useState<CompletedSimulation[]>([]);
   const forkCheckDoneForRef = React.useRef<string>("");
   const simAbortRef = React.useRef<AbortController | null>(null);
+  // Ref to track latest existingPRs for use in async callbacks
+  const existingPRsRef = React.useRef<ExistingPR[]>(existingPRs);
+  React.useEffect(() => {
+    existingPRsRef.current = existingPRs;
+  }, [existingPRs]);
 
   // Section 3-5 state
   const [analysisData, setAnalysisData] = useState<{
@@ -483,7 +488,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                 setSingleSimSteps((prev) =>
                   prev.map((s) => ({ ...s, state: "done" as const }))
                 );
-                setCompletedSims(() => {
+                setCompletedSims((prevCompleted) => {
                   const newSim: CompletedSimulation = {
                     pr,
                     success: true,
@@ -491,7 +496,9 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                     prTitle: event.prTitle,
                   };
                   // Include existing fork PRs alongside the new simulation
-                  const existingAsCompleted: CompletedSimulation[] = existingPRs
+                  // Use ref to get latest existingPRs value at execution time
+                  const currentExistingPRs = existingPRsRef.current;
+                  const existingAsCompleted: CompletedSimulation[] = currentExistingPRs
                     .filter((ep) => ep.forkedPrUrl !== event.prUrl)
                     .map((ep) => ({
                       pr: {
