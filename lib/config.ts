@@ -15,9 +15,9 @@ const isDevelopment = !isProduction;
 const defaultDataDir = isRailway ? "/data" : path.join(process.cwd(), "data");
 
 // GitHub organization and bot configuration
-export const GITHUB_ORG = "macroscope-gtm";
-export const GITHUB_BOT_NAME = "macroscope-gtm-bot";
-export const GITHUB_BOT_EMAIL = "bot@macroscope-gtm.github.io";
+export const GITHUB_ORG = "govambam";
+export const GITHUB_BOT_NAME = "govambam";
+export const GITHUB_BOT_EMAIL = "govambam@users.noreply.github.com";
 
 export const config = {
   // Environment detection

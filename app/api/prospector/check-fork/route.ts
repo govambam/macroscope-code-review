@@ -30,7 +30,7 @@ export interface CheckForkResponse {
 /**
  * POST /api/prospector/check-fork
  *
- * Checks if the macroscope-gtm org has a fork of the given repo.
+ * Checks if the configured GitHub org has a fork of the given repo.
  * If so, returns existing simulated PRs from our database.
  *
  * Body: { owner: string, repo: string }
