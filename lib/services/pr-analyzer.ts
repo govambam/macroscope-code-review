@@ -181,7 +181,7 @@ function parsePRUrl(url: string): ParsedPRUrl | null {
 /**
  * Fetches review comments from Macroscope bot on a PR.
  */
-async function fetchMacroscopeComments(
+export async function fetchMacroscopeComments(
   owner: string,
   repo: string,
   prNumber: number
@@ -214,6 +214,105 @@ async function fetchMacroscopeComments(
     }));
 
   return macroscopeComments;
+}
+
+/**
+ * Extracts a title from a Macroscope comment body.
+ * Takes the first non-empty line, strips markdown markers, truncates.
+ */
+export function extractTitleFromBody(body: string): string {
+  const lines = body.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Strip leading markdown markers: #, **, >, -, *
+    let cleaned = trimmed
+      .replace(/^#{1,6}\s*/, "")
+      .replace(/^\*\*(.+?)\*\*$/, "$1")
+      .replace(/^\*\*/, "")
+      .replace(/\*\*$/, "")
+      .replace(/^>\s*/, "")
+      .replace(/^[-*]\s+/, "")
+      .trim();
+    if (!cleaned) continue;
+    if (cleaned.length > 120) {
+      cleaned = cleaned.slice(0, 117) + "...";
+    }
+    return cleaned;
+  }
+  return "Macroscope finding";
+}
+
+/**
+ * Extracts a code suggestion from a Macroscope comment body.
+ * Looks for ```suggestion blocks first (GitHub suggestion syntax),
+ * then falls back to the last fenced code block.
+ */
+export function extractCodeSuggestion(body: string): string | null {
+  // Match all fenced code blocks: ```lang\ncode\n```
+  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  let match;
+  let suggestionBlock: string | null = null;
+  let lastBlock: string | null = null;
+
+  while ((match = codeBlockRegex.exec(body)) !== null) {
+    const lang = match[1].toLowerCase();
+    const code = match[2].trimEnd();
+    if (lang === "suggestion") {
+      suggestionBlock = code;
+    }
+    lastBlock = code;
+  }
+
+  // Prefer suggestion blocks, then fall back to last code block
+  return suggestionBlock || lastBlock;
+}
+
+/**
+ * Converts raw Macroscope comments to PRAnalysisResultV2 format.
+ * Each Macroscope comment is treated as a bug finding.
+ */
+export function convertMacroscopeCommentsToV2(
+  comments: MacroscopeComment[]
+): PRAnalysisResultV2 {
+  const allComments: AnalysisComment[] = comments.map((comment, i) => ({
+    index: i,
+    macroscope_comment_text: comment.body,
+    file_path: comment.path,
+    line_number: comment.line,
+    category: "bug_medium" as CommentCategory,
+    title: extractTitleFromBody(comment.body),
+    explanation: comment.body,
+    explanation_short: null,
+    impact_scenario: null,
+    code_suggestion: extractCodeSuggestion(comment.body),
+    code_snippet_image_url: null,
+    is_meaningful_bug: true,
+    outreach_ready: true,
+    outreach_skip_reason: null,
+  }));
+
+  return {
+    total_comments_processed: comments.length,
+    meaningful_bugs_count: comments.length,
+    outreach_ready_count: comments.length,
+    best_bug_for_outreach_index: comments.length > 0 ? 0 : null,
+    all_comments: allComments,
+    summary: {
+      bugs_by_severity: {
+        critical: 0,
+        high: 0,
+        medium: comments.length,
+        low: 0,
+      },
+      non_bugs: {
+        suggestions: 0,
+        style: 0,
+        nitpicks: 0,
+      },
+      recommendation: `Macroscope found ${comments.length} issue${comments.length !== 1 ? "s" : ""} in this PR.`,
+    },
+  };
 }
 
 /**
