@@ -179,16 +179,12 @@ export function EmailSection({
     }
   }, [previews, generateEmail, onEmailsGenerated]);
 
-  // Notify parent when variables change (previews update)
-  useEffect(() => {
-    if (previews && variables && savedVariables) {
-      onEmailEdited(previews);
-    }
-  }, [previews, variables, savedVariables, onEmailEdited]);
-
   function handleVariableEdit(key: keyof EmailVariables, value: string) {
-    if (!variables) return;
-    setVariables({ ...variables, [key]: value });
+    if (!variables || !dbVariables) return;
+    const updated = { ...variables, [key]: value };
+    setVariables(updated);
+    // Notify parent with re-rendered previews directly (avoids useEffect dependency loop)
+    onEmailEdited(renderEmailSequence({ ...updated, ...dbVariables }));
   }
 
   function hasUnsavedChanges(): boolean {

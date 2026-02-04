@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
@@ -574,13 +574,13 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.advanceToStep(4);
   }
 
-  function handleEmailsGenerated(data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) {
+  const handleEmailsGenerated = useCallback((data: { generatedEmail: EmailSequence; editedEmail: EmailSequence }) => {
     setEmailData(data);
-  }
+  }, []);
 
-  function handleEmailEdited(editedEmail: EmailSequence) {
+  const handleEmailEdited = useCallback((editedEmail: EmailSequence) => {
     setEmailData((prev) => (prev ? { ...prev, editedEmail } : null));
-  }
+  }, []);
 
   function handleContinueToSend() {
     workflow.markStepComplete(4);

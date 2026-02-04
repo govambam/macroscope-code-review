@@ -107,18 +107,16 @@ export const EMAIL_TEMPLATES = {
 
 /**
  * Replaces {VARIABLE} placeholders in a template string with actual values.
- * Apollo merge fields ({{double_braces}}) are left untouched.
+ * Uses a single-pass regex with a function callback to avoid:
+ * - Cross-variable injection (e.g., BUG_DESCRIPTION containing {PR_NAME})
+ * - Special replacement pattern interpretation ($&, $$, $' in values)
+ * Apollo merge fields ({{double_braces}}) are left untouched because
+ * the inner key (e.g., "first_name") won't match any AllEmailVariables key.
  */
 function interpolate(template: string, vars: AllEmailVariables): string {
-  return template
-    .replace(/\{BUG_DESCRIPTION\}/g, vars.BUG_DESCRIPTION)
-    .replace(/\{BUG_IMPACT\}/g, vars.BUG_IMPACT)
-    .replace(/\{FIX_SUGGESTION\}/g, vars.FIX_SUGGESTION)
-    .replace(/\{BUG_TYPE\}/g, vars.BUG_TYPE)
-    .replace(/\{PR_NAME\}/g, vars.PR_NAME)
-    .replace(/\{PR_LINK\}/g, vars.PR_LINK)
-    .replace(/\{BUG_FIX_URL\}/g, vars.BUG_FIX_URL)
-    .replace(/\{SIMULATED_PR_LINK\}/g, vars.SIMULATED_PR_LINK);
+  return template.replace(/\{(\w+)\}/g, (match, key) =>
+    key in vars ? vars[key as keyof AllEmailVariables] : match
+  );
 }
 
 /**
