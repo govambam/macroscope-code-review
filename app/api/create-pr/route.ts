@@ -7,7 +7,7 @@ import * as os from "os";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { config, GITHUB_ORG, GITHUB_BOT_NAME, GITHUB_BOT_EMAIL } from "@/lib/config";
-import { saveFork, savePR, isRepoCached as shouldCacheRepo, addCachedRepo } from "@/lib/services/database";
+import { saveFork, savePR, getFork, isRepoCached as shouldCacheRepo, addCachedRepo } from "@/lib/services/database";
 
 // Cache directory for reference repositories (speeds up cloning)
 // Uses config for environment-aware paths (local vs Railway)
@@ -107,11 +107,6 @@ async function cleanup(tmpDir: string): Promise<void> {
   } catch {
     // Silently ignore cleanup errors
   }
-}
-
-// Wait for a specified number of milliseconds
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -490,59 +485,47 @@ export async function POST(request: NextRequest): Promise<Response> {
             sendStatus({ type: "info", step: 4, totalSteps: 10, message: `Using ${strategyName} strategy (no cherry-pick needed)` });
           }
 
-          // Step 5: Check/create fork
+          // Step 5: Check fork exists (DB-first, then GitHub API fallback)
           sendStatus({ type: "info", step: 5, totalSteps: 10, message: "Checking for existing fork..." });
 
-          let forkExists = false;
           let forkUrl: string;
 
-          try {
-            await octokit.repos.get({
-              owner: forkOwner,
-              repo: repoName,
-            });
-            forkExists = true;
-            forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-            sendStatus({ type: "success", message: "Fork already exists, will reuse it" });
-          } catch {
-            sendStatus({ type: "info", message: "Fork not found, creating one..." });
-
+          // Check database first
+          const dbFork = getFork(forkOwner, repoName);
+          if (dbFork) {
+            console.log(`[CACHE HIT] Fork ${forkOwner}/${repoName} found in database`);
+            forkUrl = dbFork.fork_url;
+            sendStatus({ type: "success", message: "Fork found (from database)" });
+          } else {
+            // Database miss - check GitHub API
+            console.log(`[CACHE MISS] Fork ${forkOwner}/${repoName} not in database, checking GitHub`);
             try {
               await octokit.repos.get({
-                owner: upstreamOwner,
+                owner: forkOwner,
                 repo: repoName,
               });
+              forkUrl = `https://github.com/${forkOwner}/${repoName}`;
+              console.log(`[CACHE SAVE] Saving fork ${forkOwner}/${repoName} to database`);
+              saveFork(forkOwner, repoName, forkUrl);
+              sendStatus({ type: "success", message: "Fork found on GitHub" });
             } catch {
-              sendError("Repository not accessible", `The repository ${upstreamOwner}/${repoName} does not exist or is not accessible`);
+              // Fork does not exist - require manual creation
+              console.log(`[FORK REQUIRED] Fork ${forkOwner}/${repoName} does not exist`);
+              sendError(
+                "Fork required",
+                `No fork found for ${upstreamOwner}/${repoName} in ${forkOwner}. Please create a fork manually at https://github.com/${upstreamOwner}/${repoName}/fork and select "${forkOwner}" as the owner, then try again.`
+              );
               return;
             }
-
-            await octokit.repos.createFork({
-              owner: upstreamOwner,
-              repo: repoName,
-              organization: GITHUB_ORG, // Fork to organization instead of personal account
-            });
-            forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-            sendStatus({ type: "info", message: `Fork created in ${GITHUB_ORG}, waiting for GitHub to process...` });
-            await wait(3000);
-            sendStatus({ type: "success", message: "Fork is ready" });
           }
 
-          // Step 6: Disable GitHub Actions
-          sendStatus({ type: "info", step: 6, totalSteps: 10, message: "Configuring fork settings..." });
+          // Step 6: Skip (fork settings are now managed manually)
+          sendStatus({ type: "info", step: 6, totalSteps: 10, message: "Fork verified, continuing..." });
+          sendStatus({ type: "success", message: "Fork configuration verified" });
 
-          try {
-            await octokit.actions.setGithubActionsPermissionsRepository({
-              owner: forkOwner,
-              repo: repoName,
-              enabled: false,
-            });
-            sendStatus({ type: "success", message: "GitHub Actions disabled on fork" });
-          } catch {
-            sendStatus({ type: "info", message: "Could not disable Actions (continuing anyway)" });
-          }
-
-          // Check for existing PR
+          // Check for existing open PR on GitHub
+          // Note: PR state can change externally (closed/merged), so we always
+          // check the GitHub API here rather than relying on potentially stale DB state.
           const branchName = `review-pr-${prNumber}`;
 
           try {
@@ -963,56 +946,43 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           const { owner: upstreamOwner, repo: repoName } = parsed;
           sendStatus({ type: "success", message: `Repository: ${upstreamOwner}/${repoName}` });
 
-          // Check/create fork
+          // Check fork exists (DB-first, then GitHub API fallback)
           sendStatus({ type: "info", step: 3, totalSteps: 10, message: "Checking for existing fork..." });
 
-          let forkExists = false;
           let forkUrl: string;
 
-          try {
-            await octokit.repos.get({
-              owner: forkOwner,
-              repo: repoName,
-            });
-            forkExists = true;
-            forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-            sendStatus({ type: "success", message: "Fork already exists" });
-          } catch {
-            sendStatus({ type: "info", message: "Creating fork..." });
-
+          // Check database first
+          const dbForkCommitMode = getFork(forkOwner, repoName);
+          if (dbForkCommitMode) {
+            console.log(`[CACHE HIT] Fork ${forkOwner}/${repoName} found in database`);
+            forkUrl = dbForkCommitMode.fork_url;
+            sendStatus({ type: "success", message: "Fork found (from database)" });
+          } else {
+            // Database miss - check GitHub API
+            console.log(`[CACHE MISS] Fork ${forkOwner}/${repoName} not in database, checking GitHub`);
             try {
               await octokit.repos.get({
-                owner: upstreamOwner,
+                owner: forkOwner,
                 repo: repoName,
               });
+              forkUrl = `https://github.com/${forkOwner}/${repoName}`;
+              console.log(`[CACHE SAVE] Saving fork ${forkOwner}/${repoName} to database`);
+              saveFork(forkOwner, repoName, forkUrl);
+              sendStatus({ type: "success", message: "Fork found on GitHub" });
             } catch {
-              sendError("Repository not accessible", `The repository ${upstreamOwner}/${repoName} does not exist or is not accessible`);
+              // Fork does not exist - require manual creation
+              console.log(`[FORK REQUIRED] Fork ${forkOwner}/${repoName} does not exist`);
+              sendError(
+                "Fork required",
+                `No fork found for ${upstreamOwner}/${repoName} in ${forkOwner}. Please create a fork manually at https://github.com/${upstreamOwner}/${repoName}/fork and select "${forkOwner}" as the owner, then try again.`
+              );
               return;
             }
-
-            await octokit.repos.createFork({
-              owner: upstreamOwner,
-              repo: repoName,
-              organization: GITHUB_ORG, // Fork to organization instead of personal account
-            });
-            forkUrl = `https://github.com/${forkOwner}/${repoName}`;
-            sendStatus({ type: "info", message: `Fork created in ${GITHUB_ORG}, waiting for it to be ready...` });
-            await wait(3000);
-            sendStatus({ type: "success", message: "Fork created" });
           }
 
-          // Disable Actions
-          sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Configuring fork..." });
-          try {
-            await octokit.actions.setGithubActionsPermissionsRepository({
-              owner: forkOwner,
-              repo: repoName,
-              enabled: false,
-            });
-            sendStatus({ type: "success", message: "GitHub Actions disabled" });
-          } catch {
-            sendStatus({ type: "info", message: "Could not disable Actions (continuing)" });
-          }
+          // Step 4: Skip (fork settings are now managed manually)
+          sendStatus({ type: "info", step: 4, totalSteps: 10, message: "Fork verified, continuing..." });
+          sendStatus({ type: "success", message: "Fork configuration verified" });
 
           // Get target commit
           sendStatus({ type: "info", step: 5, totalSteps: 10, message: "Getting target commit..." });
@@ -1165,7 +1135,8 @@ ${commitsToApply.map(c => `- \`${c.sha.substring(0, 7)}\`: ${c.message}`).join("
           const shortHash = getShortHash(targetCommit);
           const branchName = `review-${shortHash}`;
 
-          // Check existing PR
+          // Check existing PR (commit mode uses dynamic branch names, so GitHub API is needed)
+          console.log(`[CACHE MISS] Commit mode: checking GitHub for existing PR on branch ${branchName}`);
           try {
             const { data: existingPRs } = await octokit.pulls.list({
               owner: forkOwner,
