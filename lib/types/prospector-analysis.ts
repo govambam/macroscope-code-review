@@ -72,6 +72,31 @@ export interface EmailGenerationResponse {
   emailId?: number;
 }
 
+// ── CTO Perspective types ────────────────────────────────────────────────
+
+export interface CTOPerspective {
+  outreach_score: 1 | 2 | 3 | 4 | 5;  // 5 = perfect for outreach
+  outreach_reasoning: string;          // Why this score
+  cto_would_care: boolean;             // Would a CTO want to know about this?
+  talking_point: string;               // How to frame in conversation
+  is_recommended: boolean;             // This is the best bug for outreach
+  recommendation_summary?: string;     // Why this bug over others (only on recommended)
+}
+
+export interface CTOAnalysisResult {
+  perspectives: Record<number, CTOPerspective>;  // Keyed by comment index
+  best_bug_index: number | null;
+  overall_recommendation: string;  // Guidance for rep
+  analysis_timestamp: string;
+}
+
+export interface CTOAnalysisApiResponse {
+  success: boolean;
+  result?: CTOAnalysisResult;
+  error?: string;
+  cached?: boolean;
+}
+
 export type EmailTabKey = "variables" | "email_1" | "email_2" | "email_3" | "email_4";
 
 // ── Display constants ───────────────────────────────────────────────────

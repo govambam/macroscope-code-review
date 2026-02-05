@@ -295,6 +295,9 @@ function initializeSchema(db: Database.Database): void {
   if (!analysisColumnNames.includes("schema_version")) {
     db.exec("ALTER TABLE pr_analyses ADD COLUMN schema_version INTEGER DEFAULT 1");
   }
+  if (!analysisColumnNames.includes("cto_perspective_json")) {
+    db.exec("ALTER TABLE pr_analyses ADD COLUMN cto_perspective_json TEXT");
+  }
 
   // Create generated emails table
   db.exec(`
@@ -782,6 +785,47 @@ export function getAnalysisByPRUrl(forkedPrUrl: string): PRAnalysisRecord | null
   `);
 
   return stmt.get(forkedPrUrl) as PRAnalysisRecord | null;
+}
+
+/**
+ * Save CTO perspective for an analysis.
+ */
+export function saveCTOPerspective(analysisId: number, perspectiveJson: string): void {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    UPDATE pr_analyses SET cto_perspective_json = ? WHERE id = ?
+  `);
+
+  stmt.run(perspectiveJson, analysisId);
+}
+
+/**
+ * Get CTO perspective for an analysis.
+ * Returns null if not found.
+ */
+export function getCTOPerspective(analysisId: number): string | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT cto_perspective_json FROM pr_analyses WHERE id = ?
+  `);
+
+  const result = stmt.get(analysisId) as { cto_perspective_json: string | null } | undefined;
+  return result?.cto_perspective_json ?? null;
+}
+
+/**
+ * Get an analysis by its ID.
+ */
+export function getAnalysisById(analysisId: number): PRAnalysisRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM pr_analyses WHERE id = ?
+  `);
+
+  return stmt.get(analysisId) as PRAnalysisRecord | null;
 }
 
 /**
