@@ -204,28 +204,43 @@ export function AnalysisSection({
 
   // Auto-fetch CTO perspective from cache when cached analysis loads
   // Uses cacheOnly mode to avoid triggering LLM for users who never requested it
-  const ctoAutoFetchDone = useRef(false);
+  const ctoAutoFetchDone = useRef<number | null>(null);
   useEffect(() => {
-    if (currentAnalysisId && analysisResult?.success && !ctoPerspective && !ctoLoading && isViewingCached && !ctoAutoFetchDone.current) {
-      ctoAutoFetchDone.current = true;
-      // Fetch from cache only - won't run LLM if not previously generated
-      (async () => {
-        try {
-          const res = await fetch("/api/cto-perspective", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ analysisId: currentAnalysisId, cacheOnly: true }),
-          });
-          const data: CTOAnalysisApiResponse = await res.json();
-          if (data.success && data.result) {
-            setCTOPerspective(data.result);
-          }
-          // If no cached result, do nothing - user can click "Get CTO Perspective" to generate
-        } catch {
-          // Silently fail - user can manually request CTO perspective
-        }
-      })();
+    // Skip if already fetched for this analysis, or conditions not met
+    if (!currentAnalysisId || !analysisResult?.success || ctoPerspective || ctoLoading || !isViewingCached) {
+      return;
     }
+    if (ctoAutoFetchDone.current === currentAnalysisId) {
+      return;
+    }
+
+    // Mark as fetched for this analysis ID
+    ctoAutoFetchDone.current = currentAnalysisId;
+    let cancelled = false;
+
+    // Fetch from cache only - won't run LLM if not previously generated
+    (async () => {
+      try {
+        const res = await fetch("/api/cto-perspective", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ analysisId: currentAnalysisId, cacheOnly: true }),
+        });
+        const data: CTOAnalysisApiResponse = await res.json();
+        // Only update state if not cancelled (component still mounted, same analysisId)
+        if (!cancelled && data.success && data.result) {
+          setCTOPerspective(data.result);
+        }
+        // If no cached result, do nothing - user can click "Get CTO Perspective" to generate
+      } catch {
+        // Silently fail - user can manually request CTO perspective
+      }
+    })();
+
+    // Cleanup: mark as cancelled if effect re-runs or component unmounts
+    return () => {
+      cancelled = true;
+    };
   }, [currentAnalysisId, analysisResult?.success, ctoPerspective, ctoLoading, isViewingCached]);
 
   function handleBugSelect(bugIndex: number) {
