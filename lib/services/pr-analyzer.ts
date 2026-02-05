@@ -244,28 +244,95 @@ export function extractTitleFromBody(body: string): string {
 }
 
 /**
- * Extracts a code suggestion from a Macroscope comment body.
- * Looks for ```suggestion blocks first (GitHub suggestion syntax),
- * then falls back to the last fenced code block.
+ * Extracts the raw suggestion content from a Macroscope comment body.
+ * Returns the content of the ```suggestion block if present, null otherwise.
  */
-export function extractCodeSuggestion(body: string): string | null {
-  // Match all fenced code blocks: ```lang\ncode\n```
+function extractRawSuggestion(body: string): string | null {
+  const suggestionRegex = /```suggestion\r?\n([\s\S]*?)```/;
+  const match = body.match(suggestionRegex);
+  return match ? match[1].trimEnd() : null;
+}
+
+/**
+ * Extracts the lines from a diff_hunk that would be replaced by a suggestion.
+ * GitHub suggestions replace the "+" lines in the diff hunk (the new code being added).
+ * Returns the lines without the leading "+"/"-"/" " markers.
+ */
+function extractOriginalLinesFromHunk(diffHunk: string): string[] {
+  const lines = diffHunk.split("\n");
+  const originalLines: string[] = [];
+
+  for (const line of lines) {
+    // Skip the @@ hunk header
+    if (line.startsWith("@@")) continue;
+    // Capture "+" lines (the new code that the suggestion will replace)
+    if (line.startsWith("+")) {
+      originalLines.push(line.slice(1));
+    }
+  }
+
+  return originalLines;
+}
+
+/**
+ * Builds a unified diff from original lines and replacement lines.
+ * Creates proper -/+ format for display.
+ */
+function buildUnifiedDiff(originalLines: string[], replacementLines: string[]): string {
+  const diffLines: string[] = [];
+
+  // Add original lines as removals
+  for (const line of originalLines) {
+    diffLines.push("-" + line);
+  }
+
+  // Add replacement lines as additions
+  for (const line of replacementLines) {
+    diffLines.push("+" + line);
+  }
+
+  return diffLines.join("\n");
+}
+
+/**
+ * Extracts a code suggestion from a Macroscope comment body and diff hunk.
+ * For ```suggestion blocks, builds a proper unified diff showing what's
+ * being removed (-) and added (+), matching GitHub's "Suggested change" UI.
+ * Falls back to the last fenced code block if no suggestion block exists.
+ */
+export function extractCodeSuggestion(body: string, diffHunk?: string): string | null {
+  // First, try to extract a GitHub-style suggestion block
+  const suggestionContent = extractRawSuggestion(body);
+
+  if (suggestionContent !== null && diffHunk) {
+    // Build a unified diff from the diff hunk and suggestion
+    const originalLines = extractOriginalLinesFromHunk(diffHunk);
+    const replacementLines = suggestionContent.split("\n");
+
+    // Only build diff if we have original lines to show
+    if (originalLines.length > 0) {
+      return buildUnifiedDiff(originalLines, replacementLines);
+    }
+
+    // If no original lines (pure addition), just prefix all with +
+    return replacementLines.map(line => "+" + line).join("\n");
+  }
+
+  // Fall back to extracting any code block (for non-suggestion code snippets)
   const codeBlockRegex = /```([^\n\r]*)\r?\n([\s\S]*?)```/g;
   let match;
-  let suggestionBlock: string | null = null;
   let lastBlock: string | null = null;
 
   while ((match = codeBlockRegex.exec(body)) !== null) {
     const lang = match[1].toLowerCase();
     const code = match[2].trimEnd();
-    if (lang === "suggestion") {
-      suggestionBlock = code;
+    // Skip suggestion blocks in fallback (we already handled them)
+    if (lang !== "suggestion") {
+      lastBlock = code;
     }
-    lastBlock = code;
   }
 
-  // Prefer suggestion blocks, then fall back to last code block
-  return suggestionBlock || lastBlock;
+  return lastBlock;
 }
 
 /**
@@ -285,7 +352,7 @@ export function convertMacroscopeCommentsToV2(
     explanation: comment.body,
     explanation_short: null,
     impact_scenario: null,
-    code_suggestion: extractCodeSuggestion(comment.body),
+    code_suggestion: extractCodeSuggestion(comment.body, comment.diff_hunk),
     code_snippet_image_url: null,
     is_meaningful_bug: true,
     outreach_ready: true,
