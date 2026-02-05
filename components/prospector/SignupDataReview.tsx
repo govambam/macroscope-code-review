@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { ParsedSignupData } from "@/lib/types/signup-lead";
+import type { WorkHistoryEntry, ConnectionMatch } from "@/lib/constants/macroscope-team";
+import { findConnectionMatches } from "@/lib/constants/macroscope-team";
 
 interface SignupDataReviewProps {
   initialData: ParsedSignupData;
@@ -13,9 +15,71 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
   const [data, setData] = useState<ParsedSignupData>(initialData);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // LinkedIn profile parsing state
+  const [linkedinProfileText, setLinkedinProfileText] = useState("");
+  const [workHistory, setWorkHistory] = useState<WorkHistoryEntry[]>([]);
+  const [connectionMatches, setConnectionMatches] = useState<ConnectionMatch[]>([]);
+  const [linkedinParsing, setLinkedinParsing] = useState(false);
+  const [linkedinError, setLinkedinError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     setHasChanges(JSON.stringify(data) !== JSON.stringify(initialData));
   }, [data, initialData]);
+
+  async function parseLinkedInProfile(content: string | File) {
+    setLinkedinParsing(true);
+    setLinkedinError(null);
+
+    try {
+      let res: Response;
+
+      if (content instanceof File) {
+        // Upload PDF
+        const formData = new FormData();
+        formData.append("file", content);
+        res = await fetch("/api/parse-linkedin-profile", {
+          method: "POST",
+          body: formData,
+        });
+      } else {
+        // Send text content
+        res = await fetch("/api/parse-linkedin-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: content }),
+        });
+      }
+
+      const result = await res.json();
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to parse LinkedIn profile");
+      }
+
+      const history = result.workHistory || [];
+      setWorkHistory(history);
+
+      // Find connection matches with Macroscope team
+      const matches = findConnectionMatches(history);
+      setConnectionMatches(matches);
+    } catch (err) {
+      setLinkedinError(err instanceof Error ? err.message : "Failed to parse profile");
+    } finally {
+      setLinkedinParsing(false);
+    }
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      parseLinkedInProfile(file);
+    }
+    // Reset input so same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
 
   function updateField<K extends keyof ParsedSignupData>(field: K, value: ParsedSignupData[K]) {
     setData((prev) => ({ ...prev, [field]: value }));
@@ -150,6 +214,133 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
             />
           </div>
         </div>
+      </fieldset>
+
+      {/* LinkedIn Connection Matching */}
+      <fieldset className="border border-purple-200 bg-purple-50/30 rounded-lg p-4">
+        <legend className="text-sm font-semibold text-purple-800 px-2">LinkedIn Connection Matching</legend>
+        <p className="text-xs text-text-secondary mb-3">
+          Paste the prospect&apos;s LinkedIn work history or upload their profile PDF to find connections with the Macroscope team.
+        </p>
+
+        {/* Input section */}
+        <div className="space-y-3">
+          <textarea
+            value={linkedinProfileText}
+            onChange={(e) => setLinkedinProfileText(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 text-sm border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y bg-white"
+            placeholder="Paste LinkedIn work history here (copy from the Experience section)..."
+          />
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => parseLinkedInProfile(linkedinProfileText)}
+              disabled={linkedinParsing || linkedinProfileText.trim().length < 20}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
+            >
+              {linkedinParsing ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Parsing...
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  Parse Text
+                </>
+              )}
+            </button>
+
+            <span className="text-xs text-text-muted">or</span>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept=".pdf"
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={linkedinParsing}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-purple-700 bg-white border border-purple-300 hover:bg-purple-50 disabled:bg-gray-100 disabled:cursor-not-allowed rounded-lg transition-colors"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              Upload PDF
+            </button>
+          </div>
+        </div>
+
+        {/* Error message */}
+        {linkedinError && (
+          <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            {linkedinError}
+          </div>
+        )}
+
+        {/* Work History Results */}
+        {workHistory.length > 0 && (
+          <div className="mt-4 space-y-3">
+            <h4 className="text-xs font-semibold text-purple-800 uppercase tracking-wide">
+              Extracted Work History ({workHistory.length} positions)
+            </h4>
+            <div className="bg-white border border-purple-200 rounded-lg divide-y divide-purple-100 max-h-48 overflow-y-auto">
+              {workHistory.map((entry, idx) => (
+                <div key={idx} className="px-3 py-2 text-sm">
+                  <div className="font-medium text-accent">{entry.company}</div>
+                  <div className="text-text-secondary">{entry.title}</div>
+                  <div className="text-xs text-text-muted">{entry.startDate} - {entry.endDate}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Connection Matches */}
+        {connectionMatches.length > 0 && (
+          <div className="mt-4 space-y-3">
+            <h4 className="text-xs font-semibold text-green-800 uppercase tracking-wide flex items-center gap-2">
+              <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Connection Matches Found ({connectionMatches.length})
+            </h4>
+            <div className="space-y-2">
+              {connectionMatches.map((match, idx) => (
+                <div key={idx} className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-green-800">
+                      {match.teamMember} ({match.teamMemberRole})
+                    </span>
+                    <span className="text-xs text-green-600">
+                      via {match.prospectCompany}
+                    </span>
+                  </div>
+                  <p className="text-sm text-green-900 italic">&quot;{match.blurb}&quot;</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* No matches message */}
+        {workHistory.length > 0 && connectionMatches.length === 0 && (
+          <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-sm text-text-secondary">
+              No connection matches found with the Macroscope team. The prospect&apos;s work history doesn&apos;t overlap with Twitter, Blackboard, Airbnb, Apple, UnitedMasters, or HotelTonight.
+            </p>
+          </div>
+        )}
       </fieldset>
 
       {/* Company Information */}
