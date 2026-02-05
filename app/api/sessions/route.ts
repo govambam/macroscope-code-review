@@ -5,6 +5,7 @@ import {
   createProspectingSession,
   getAllProspectingSessions,
   ProspectingSessionStatus,
+  ProspectorWorkflowType,
 } from "@/lib/services/database";
 
 /**
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
     const createdBy = session?.user?.name || session?.user?.email || "unknown";
 
     const body = await request.json();
-    const { company_name, github_org, github_repo, notes } = body;
+    const { company_name, github_org, github_repo, notes, workflow_type } = body;
 
     if (!company_name || typeof company_name !== "string" || !company_name.trim()) {
       return NextResponse.json(
@@ -76,10 +77,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate workflow_type if provided
+    const validWorkflowTypes = ['pr-analysis', 'signup-outreach'];
+    const workflowType = validWorkflowTypes.includes(workflow_type) ? workflow_type as ProspectorWorkflowType : 'pr-analysis';
+
     const id = createProspectingSession(company_name.trim(), createdBy, {
       githubOrg: typeof github_org === "string" ? github_org.trim() || null : null,
       githubRepo: typeof github_repo === "string" ? github_repo.trim() || null : null,
       notes: typeof notes === "string" ? notes.trim() || null : null,
+      workflowType,
     });
 
     return NextResponse.json({

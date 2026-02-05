@@ -106,6 +106,8 @@ export interface OrgMetricsRecord {
 // Prospecting session types
 export type ProspectingSessionStatus = 'in_progress' | 'completed';
 
+export type ProspectorWorkflowType = 'pr-analysis' | 'signup-outreach';
+
 export interface ProspectingSessionRecord {
   id: number;
   company_name: string;
@@ -116,6 +118,7 @@ export interface ProspectingSessionRecord {
   updated_at: string;
   status: ProspectingSessionStatus;
   notes: string | null;
+  workflow_type: ProspectorWorkflowType;
 }
 
 export interface ProspectingSessionWithStats extends ProspectingSessionRecord {
@@ -413,6 +416,14 @@ function initializeSchema(db: Database.Database): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_prs_session_id ON prs(session_id)
   `);
+
+  // Migration: Add workflow_type column to prospecting_sessions
+  const sessionColumns = db.prepare("PRAGMA table_info(prospecting_sessions)").all() as { name: string }[];
+  const sessionColumnNames = sessionColumns.map(c => c.name);
+  if (!sessionColumnNames.includes("workflow_type")) {
+    db.exec("ALTER TABLE prospecting_sessions ADD COLUMN workflow_type TEXT DEFAULT 'pr-analysis'");
+    console.log("Added workflow_type column to prospecting_sessions table");
+  }
 
   // Create index for org-based PR lookups (used by Prospector existing PRs)
   db.exec(`
@@ -1478,14 +1489,15 @@ export function createProspectingSession(
     githubOrg?: string | null;
     githubRepo?: string | null;
     notes?: string | null;
+    workflowType?: ProspectorWorkflowType;
   } = {}
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prospecting_sessions (company_name, github_org, github_repo, created_by, created_at, updated_at, status, notes)
-    VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?)
+    INSERT INTO prospecting_sessions (company_name, github_org, github_repo, created_by, created_at, updated_at, status, notes, workflow_type)
+    VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?)
     RETURNING id
   `);
 
@@ -1496,7 +1508,8 @@ export function createProspectingSession(
     createdBy,
     now,
     now,
-    options.notes ?? null
+    options.notes ?? null,
+    options.workflowType ?? 'pr-analysis'
   ) as { id: number };
 
   return result.id;
