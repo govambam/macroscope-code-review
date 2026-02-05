@@ -10,6 +10,7 @@ export interface MacroscopeComment {
   id: number;
   path: string;
   line: number | null;
+  start_line: number | null; // For multi-line comments
   body: string;
   diff_hunk: string;
   created_at: string;
@@ -208,6 +209,7 @@ export async function fetchMacroscopeComments(
       id: comment.id,
       path: comment.path,
       line: comment.line || comment.original_line || null,
+      start_line: comment.start_line || comment.original_start_line || null,
       body: comment.body,
       diff_hunk: comment.diff_hunk,
       created_at: comment.created_at,
@@ -256,18 +258,64 @@ function extractRawSuggestion(body: string): string | null {
 /**
  * Extracts the lines from a diff_hunk that would be replaced by a suggestion.
  * GitHub suggestions replace the "+" lines in the diff hunk (the new code being added).
+ * Only extracts lines within the specified line range (matching GitHub's comment range).
  * Returns the lines without the leading "+"/"-"/" " markers.
+ *
+ * @param diffHunk - The raw diff hunk from GitHub
+ * @param startLine - First line number of the comment range (or null for single-line)
+ * @param endLine - Last line number of the comment range (or null for single-line)
  */
-function extractOriginalLinesFromHunk(diffHunk: string): string[] {
+function extractOriginalLinesFromHunk(
+  diffHunk: string,
+  startLine: number | null,
+  endLine: number | null
+): string[] {
   const lines = diffHunk.split("\n");
   const originalLines: string[] = [];
+
+  // Parse hunk header to get starting line number in the new file
+  // Format: @@ -oldStart,oldCount +newStart,newCount @@
+  const hunkHeaderMatch = diffHunk.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+  if (!hunkHeaderMatch) {
+    // Fallback: if we can't parse header, extract all + lines
+    for (const line of lines) {
+      if (line.startsWith("@@")) continue;
+      if (line.startsWith("+")) {
+        originalLines.push(line.slice(1));
+      }
+    }
+    return originalLines;
+  }
+
+  const newStartLine = parseInt(hunkHeaderMatch[1], 10);
+  let currentNewLine = newStartLine;
+
+  // Determine the effective range
+  // If startLine is null, it's a single-line comment on endLine
+  const rangeStart = startLine ?? endLine;
+  const rangeEnd = endLine;
 
   for (const line of lines) {
     // Skip the @@ hunk header
     if (line.startsWith("@@")) continue;
-    // Capture "+" lines (the new code that the suggestion will replace)
+
     if (line.startsWith("+")) {
-      originalLines.push(line.slice(1));
+      // Only include this line if it's within the comment's range
+      if (rangeStart !== null && rangeEnd !== null) {
+        if (currentNewLine >= rangeStart && currentNewLine <= rangeEnd) {
+          originalLines.push(line.slice(1));
+        }
+      } else {
+        // No range specified, include all + lines (fallback)
+        originalLines.push(line.slice(1));
+      }
+      currentNewLine++;
+    } else if (line.startsWith("-")) {
+      // Removed lines don't count toward new file line numbers
+      // (they exist only in the old file)
+    } else {
+      // Context lines (space prefix or no prefix) exist in both files
+      currentNewLine++;
     }
   }
 
@@ -299,14 +347,28 @@ function buildUnifiedDiff(originalLines: string[], replacementLines: string[]): 
  * For ```suggestion blocks, builds a proper unified diff showing what's
  * being removed (-) and added (+), matching GitHub's "Suggested change" UI.
  * Falls back to the last fenced code block if no suggestion block exists.
+ *
+ * @param body - The comment body text
+ * @param diffHunk - The raw diff hunk from GitHub
+ * @param startLine - First line number of the comment range (for multi-line comments)
+ * @param endLine - Last line number of the comment range
  */
-export function extractCodeSuggestion(body: string, diffHunk?: string): string | null {
+export function extractCodeSuggestion(
+  body: string,
+  diffHunk?: string,
+  startLine?: number | null,
+  endLine?: number | null
+): string | null {
   // First, try to extract a GitHub-style suggestion block
   const suggestionContent = extractRawSuggestion(body);
 
   if (suggestionContent !== null && diffHunk) {
     // Build a unified diff from the diff hunk and suggestion
-    const originalLines = extractOriginalLinesFromHunk(diffHunk);
+    const originalLines = extractOriginalLinesFromHunk(
+      diffHunk,
+      startLine ?? null,
+      endLine ?? null
+    );
     const replacementLines = suggestionContent.split("\n");
 
     // Only build diff if we have original lines to show
@@ -352,7 +414,12 @@ export function convertMacroscopeCommentsToV2(
     explanation: comment.body,
     explanation_short: null,
     impact_scenario: null,
-    code_suggestion: extractCodeSuggestion(comment.body, comment.diff_hunk),
+    code_suggestion: extractCodeSuggestion(
+      comment.body,
+      comment.diff_hunk,
+      comment.start_line,
+      comment.line
+    ),
     code_snippet_image_url: null,
     is_meaningful_bug: true,
     outreach_ready: true,
