@@ -330,7 +330,7 @@ export async function generateCodeImage(
       await page.setViewport({
         width: 700,
         height: 800,
-        deviceScaleFactor: 1,
+        deviceScaleFactor: 2,
       });
 
       // Load the HTML content
