@@ -1788,7 +1788,7 @@ export function getSignupLeadForSession(sessionId: number): SignupLeadRecord | n
     LIMIT 1
   `);
 
-  return stmt.get(sessionId) as SignupLeadRecord | null;
+  return (stmt.get(sessionId) as SignupLeadRecord | undefined) ?? null;
 }
 
 /**
