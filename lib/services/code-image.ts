@@ -328,7 +328,7 @@ export async function generateCodeImage(
       const page = await browser.newPage();
 
       await page.setViewport({
-        width: 500,  // Slightly larger than container (450px) to allow for padding
+        width: 620,  // Slightly larger than container (580px) to allow for padding
         height: 800,
         deviceScaleFactor: 2,
       });
