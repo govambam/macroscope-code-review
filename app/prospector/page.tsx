@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserMenu } from "@/components/UserMenu";
 import { MobileMenu } from "@/components/MobileMenu";
 
 type SessionStatus = "all" | "in_progress" | "completed";
 type SortBy = "updated_at" | "created_at" | "company_name";
+type WorkflowType = "pr-analysis" | "signup-outreach";
 
 interface SessionWithStats {
   id: number;
@@ -20,17 +21,26 @@ interface SessionWithStats {
   updated_at: string;
   status: "in_progress" | "completed";
   notes: string | null;
+  workflow_type: WorkflowType;
   pr_count: number;
   bugs_found: number;
   emails_sent: number;
 }
 
+const WORKFLOW_LABELS: Record<WorkflowType, string> = {
+  "pr-analysis": "PR Analysis",
+  "signup-outreach": "New Signup",
+};
+
 export default function ProspectorPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<SessionStatus>("all");
   const [sortBy, setSortBy] = useState<SortBy>("updated_at");
+  const [deleteConfirm, setDeleteConfirm] = useState<SessionWithStats | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Debounce search input
   useEffect(() => {
@@ -80,6 +90,28 @@ export default function ProspectorPage() {
       day: "numeric",
       year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
     });
+  };
+
+  const getSessionDisplayName = (session: SessionWithStats) => {
+    const workflowLabel = WORKFLOW_LABELS[session.workflow_type] || "PR Analysis";
+    return `${session.company_name} - ${workflowLabel}`;
+  };
+
+  const handleDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/sessions/${deleteConfirm.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
+        setDeleteConfirm(null);
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -243,13 +275,14 @@ export default function ProspectorPage() {
             ) : (
               <>
                 {/* Table Header */}
-                <div className="hidden md:grid grid-cols-[1fr_120px_100px_100px_140px_120px] gap-4 px-6 py-3 bg-gray-50 border-b border-border text-xs font-medium text-text-muted uppercase tracking-wide">
-                  <div>Company</div>
+                <div className="hidden md:grid grid-cols-[1fr_120px_100px_100px_140px_120px_50px] gap-4 px-6 py-3 bg-gray-50 border-b border-border text-xs font-medium text-text-muted uppercase tracking-wide">
+                  <div>Session</div>
                   <div>Status</div>
                   <div className="text-center">PRs</div>
                   <div className="text-center">Bugs</div>
                   <div>Last Updated</div>
                   <div>Created By</div>
+                  <div></div>
                 </div>
 
                 {/* Session Rows */}
@@ -257,11 +290,11 @@ export default function ProspectorPage() {
                   <div
                     key={session.id}
                     onClick={() => router.push(`/prospector/${session.id}`)}
-                    className="grid grid-cols-1 md:grid-cols-[1fr_120px_100px_100px_140px_120px] gap-2 md:gap-4 px-6 py-4 border-b border-border last:border-b-0 hover:bg-bg-subtle cursor-pointer transition-colors"
+                    className="grid grid-cols-1 md:grid-cols-[1fr_120px_100px_100px_140px_120px_50px] gap-2 md:gap-4 px-6 py-4 border-b border-border last:border-b-0 hover:bg-bg-subtle cursor-pointer transition-colors"
                   >
-                    {/* Company Name */}
+                    {/* Session Name */}
                     <div className="flex flex-col min-w-0">
-                      <span className="font-medium text-accent truncate">{session.company_name}</span>
+                      <span className="font-medium text-accent truncate">{getSessionDisplayName(session)}</span>
                       {(session.github_org || session.github_repo) && (
                         <span className="text-xs text-text-muted truncate mt-0.5">
                           {session.github_org
@@ -307,6 +340,22 @@ export default function ProspectorPage() {
                     <div className="flex items-center">
                       <span className="text-sm text-text-muted truncate">{session.created_by}</span>
                     </div>
+
+                    {/* Delete Button */}
+                    <div className="flex items-center justify-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirm(session);
+                        }}
+                        className="p-1.5 text-text-muted hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Delete session"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </>
@@ -314,6 +363,42 @@ export default function ProspectorPage() {
           </div>
         </div>
       </main>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-border">
+              <h2 className="text-lg font-semibold text-accent">Delete Session</h2>
+            </div>
+            <div className="px-6 py-5 text-sm text-text-secondary">
+              <p>Are you sure you want to delete this session?</p>
+              <p className="mt-2 font-medium text-accent">{getSessionDisplayName(deleteConfirm)}</p>
+              <p className="mt-3 text-xs text-text-muted">
+                This will permanently delete the session. Associated PRs will be unlinked but not deleted.
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-border flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent border border-border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
