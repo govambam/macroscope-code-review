@@ -54,6 +54,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    if (domain !== undefined && typeof domain !== "string") {
+      return NextResponse.json<ApolloCreateResponse>(
+        { success: false, error: "domain must be a string if provided" },
+        { status: 400 }
+      );
+    }
+
     // Create account using Apollo API
     // API docs: https://apolloio.github.io/apollo-api-docs/#tag/Accounts/operation/create_account
     const response = await fetch("https://api.apollo.io/api/v1/accounts", {
