@@ -116,3 +116,11 @@ export interface SignupLeadApiResponse {
  * Workflow type for prospector sessions.
  */
 export type ProspectorWorkflowType = "pr-analysis" | "signup-outreach";
+
+/**
+ * Re-export work history types from macroscope-team constants.
+ */
+export type {
+  WorkHistoryEntry,
+  ConnectionMatch,
+} from "@/lib/constants/macroscope-team";
