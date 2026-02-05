@@ -119,6 +119,7 @@ export interface ProspectingSessionRecord {
   status: ProspectingSessionStatus;
   notes: string | null;
   workflow_type: ProspectorWorkflowType;
+  apollo_account_id: string | null;
 }
 
 export interface ProspectingSessionWithStats extends ProspectingSessionRecord {
@@ -423,6 +424,10 @@ function initializeSchema(db: Database.Database): void {
   if (!sessionColumnNames.includes("workflow_type")) {
     db.exec("ALTER TABLE prospecting_sessions ADD COLUMN workflow_type TEXT DEFAULT 'pr-analysis'");
     console.log("Added workflow_type column to prospecting_sessions table");
+  }
+  if (!sessionColumnNames.includes("apollo_account_id")) {
+    db.exec("ALTER TABLE prospecting_sessions ADD COLUMN apollo_account_id TEXT");
+    console.log("Added apollo_account_id column to prospecting_sessions table");
   }
 
   // Create index for org-based PR lookups (used by Prospector existing PRs)
@@ -1509,14 +1514,15 @@ export function createProspectingSession(
     githubRepo?: string | null;
     notes?: string | null;
     workflowType?: ProspectorWorkflowType;
+    apolloAccountId?: string | null;
   } = {}
 ): number {
   const db = getDatabase();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO prospecting_sessions (company_name, github_org, github_repo, created_by, created_at, updated_at, status, notes, workflow_type)
-    VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?)
+    INSERT INTO prospecting_sessions (company_name, github_org, github_repo, created_by, created_at, updated_at, status, notes, workflow_type, apollo_account_id)
+    VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?)
     RETURNING id
   `);
 
@@ -1528,7 +1534,8 @@ export function createProspectingSession(
     now,
     now,
     options.notes ?? null,
-    options.workflowType ?? 'pr-analysis'
+    options.workflowType ?? 'pr-analysis',
+    options.apolloAccountId ?? null
   ) as { id: number };
 
   return result.id;

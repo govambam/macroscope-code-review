@@ -6,6 +6,13 @@ import Link from "next/link";
 import { MobileMenu } from "@/components/MobileMenu";
 import { UserMenu } from "@/components/UserMenu";
 
+interface ApolloAccount {
+  id: string;
+  name: string;
+  domain: string | null;
+  website_url: string | null;
+}
+
 export default function NewSessionPage() {
   const router = useRouter();
   const [companyName, setCompanyName] = useState("");
@@ -15,11 +22,97 @@ export default function NewSessionPage() {
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
 
+  // Apollo integration state
+  const [apolloAccounts, setApolloAccounts] = useState<ApolloAccount[]>([]);
+  const [apolloSearching, setApolloSearching] = useState(false);
+  const [apolloSearched, setApolloSearched] = useState(false);
+  const [selectedApolloAccount, setSelectedApolloAccount] = useState<ApolloAccount | null>(null);
+  const [showCreateApolloModal, setShowCreateApolloModal] = useState(false);
+  const [newAccountDomain, setNewAccountDomain] = useState("");
+  const [creatingApolloAccount, setCreatingApolloAccount] = useState(false);
+  const apolloDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Org autocomplete state
   const [orgSuggestions, setOrgSuggestions] = useState<Array<{ org: string; prCount: number }>>([]);
   const [showOrgDropdown, setShowOrgDropdown] = useState(false);
   const orgDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orgContainerRef = useRef<HTMLDivElement>(null);
+
+  // Handle company name change with Apollo search
+  function handleCompanyNameChange(value: string) {
+    setCompanyName(value);
+    if (fieldError) setFieldError(null);
+
+    // Reset Apollo state when company name changes
+    setSelectedApolloAccount(null);
+    setApolloSearched(false);
+
+    // Debounce Apollo search
+    if (apolloDebounceRef.current) clearTimeout(apolloDebounceRef.current);
+
+    if (!value.trim() || value.trim().length < 2) {
+      setApolloAccounts([]);
+      return;
+    }
+
+    apolloDebounceRef.current = setTimeout(async () => {
+      setApolloSearching(true);
+      try {
+        const res = await fetch("/api/apollo/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: value.trim() }),
+        });
+        const data = await res.json();
+        if (data.success && data.accounts) {
+          setApolloAccounts(data.accounts);
+        } else {
+          setApolloAccounts([]);
+        }
+      } catch {
+        setApolloAccounts([]);
+      } finally {
+        setApolloSearching(false);
+        setApolloSearched(true);
+      }
+    }, 500);
+  }
+
+  function handleSelectApolloAccount(account: ApolloAccount) {
+    setSelectedApolloAccount(account);
+  }
+
+  function handleSkipApollo() {
+    setSelectedApolloAccount(null);
+  }
+
+  async function handleCreateApolloAccount() {
+    if (!newAccountDomain.trim()) return;
+
+    setCreatingApolloAccount(true);
+    try {
+      const res = await fetch("/api/apollo/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: companyName.trim(),
+          domain: newAccountDomain.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.account) {
+        setSelectedApolloAccount(data.account);
+        setShowCreateApolloModal(false);
+        setNewAccountDomain("");
+      } else {
+        setError(data.error || "Failed to create Apollo account");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create Apollo account");
+    } finally {
+      setCreatingApolloAccount(false);
+    }
+  }
 
   function handleOrgChange(value: string) {
     setGithubOrg(value);
@@ -64,10 +157,11 @@ export default function NewSessionPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Cleanup debounce timeout on unmount
+  // Cleanup debounce timeouts on unmount
   useEffect(() => {
     return () => {
       if (orgDebounceRef.current) clearTimeout(orgDebounceRef.current);
+      if (apolloDebounceRef.current) clearTimeout(apolloDebounceRef.current);
     };
   }, []);
 
@@ -104,6 +198,7 @@ export default function NewSessionPage() {
           company_name: companyName.trim(),
           github_org: githubOrg.trim() || undefined,
           notes: notes.trim() || undefined,
+          apollo_account_id: selectedApolloAccount?.id || undefined,
         }),
       });
 
@@ -201,25 +296,127 @@ export default function NewSessionPage() {
                 <label htmlFor="company-name" className="block text-sm font-medium text-accent mb-1">
                   Company Name <span className="text-red-500">*</span>
                 </label>
-                <input
-                  id="company-name"
-                  type="text"
-                  value={companyName}
-                  onChange={(e) => {
-                    setCompanyName(e.target.value);
-                    if (fieldError) setFieldError(null);
-                  }}
-                  placeholder="e.g., Astronomer, Vercel, Netlify"
-                  autoCapitalize="words"
-                  autoFocus
-                  className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-primary ${
-                    fieldError ? "border-red-400" : "border-border"
-                  }`}
-                />
+                <div className="relative">
+                  <input
+                    id="company-name"
+                    type="text"
+                    value={companyName}
+                    onChange={(e) => handleCompanyNameChange(e.target.value)}
+                    placeholder="e.g., Astronomer, Vercel, Netlify"
+                    autoCapitalize="words"
+                    autoFocus
+                    className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-primary ${
+                      fieldError ? "border-red-400" : "border-border"
+                    }`}
+                  />
+                  {apolloSearching && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <svg className="animate-spin h-4 w-4 text-primary" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    </div>
+                  )}
+                </div>
                 {fieldError && (
                   <p className="mt-1 text-xs text-red-600">{fieldError}</p>
                 )}
               </div>
+
+              {/* Apollo Account Linking */}
+              {apolloSearched && companyName.trim().length >= 2 && (
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 bg-gray-50 border-b border-border">
+                    <div className="flex items-center gap-2">
+                      <svg className="h-4 w-4 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                      </svg>
+                      <span className="text-sm font-medium text-accent">Apollo CRM</span>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    {selectedApolloAccount ? (
+                      <div className="flex items-center justify-between p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center w-8 h-8 bg-purple-100 rounded-full">
+                            <svg className="h-4 w-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-purple-900">{selectedApolloAccount.name}</p>
+                            {selectedApolloAccount.domain && (
+                              <p className="text-xs text-purple-600">{selectedApolloAccount.domain}</p>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedApolloAccount(null)}
+                          className="text-xs text-purple-600 hover:text-purple-800"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    ) : apolloAccounts.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs text-text-muted mb-2">Found {apolloAccounts.length} matching account{apolloAccounts.length !== 1 ? 's' : ''} in Apollo:</p>
+                        {apolloAccounts.slice(0, 5).map((account) => (
+                          <button
+                            key={account.id}
+                            type="button"
+                            onClick={() => handleSelectApolloAccount(account)}
+                            className="w-full flex items-center justify-between p-3 border border-border rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors text-left"
+                          >
+                            <div>
+                              <p className="text-sm font-medium text-accent">{account.name}</p>
+                              {account.domain && (
+                                <p className="text-xs text-text-muted">{account.domain}</p>
+                              )}
+                            </div>
+                            <span className="text-xs text-purple-600">Select</span>
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setShowCreateApolloModal(true)}
+                          className="w-full flex items-center justify-center gap-2 p-3 border border-dashed border-border rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors text-sm text-text-secondary"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                          </svg>
+                          Create new account in Apollo
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-amber-600">
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <span className="text-sm">No matching accounts found in Apollo</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateApolloModal(true)}
+                            className="flex-1 px-3 py-2 text-sm font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                          >
+                            Create in Apollo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSkipApollo}
+                            className="flex-1 px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            Skip for now
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* GitHub Organization */}
               <div ref={orgContainerRef} className="relative">
@@ -300,6 +497,67 @@ export default function NewSessionPage() {
           </div>
         </div>
       </main>
+
+      {/* Create Apollo Account Modal */}
+      {showCreateApolloModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreateApolloModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-border">
+              <h2 className="text-lg font-semibold text-accent">Create Apollo Account</h2>
+              <p className="text-sm text-text-secondary mt-1">Add a company domain to create the account in Apollo.</p>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-accent mb-1">Company Name</label>
+                <input
+                  type="text"
+                  value={companyName}
+                  disabled
+                  className="w-full px-3 py-2 bg-gray-50 border border-border rounded-lg text-sm text-text-muted"
+                />
+              </div>
+              <div>
+                <label htmlFor="apollo-domain" className="block text-sm font-medium text-accent mb-1">
+                  Company Domain <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="apollo-domain"
+                  type="text"
+                  value={newAccountDomain}
+                  onChange={(e) => setNewAccountDomain(e.target.value)}
+                  placeholder="e.g., vercel.com"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-white border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+                />
+                <p className="mt-1 text-xs text-text-muted">
+                  Enter the company&apos;s website domain (without https://)
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-border flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateApolloModal(false);
+                  setNewAccountDomain("");
+                }}
+                disabled={creatingApolloAccount}
+                className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-accent border border-border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateApolloAccount}
+                disabled={creatingApolloAccount || !newAccountDomain.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {creatingApolloAccount ? "Creating..." : "Create Account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

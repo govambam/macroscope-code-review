@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     const createdBy = session?.user?.name || session?.user?.email || "unknown";
 
     const body = await request.json();
-    const { company_name, github_org, github_repo, notes, workflow_type } = body;
+    const { company_name, github_org, github_repo, notes, workflow_type, apollo_account_id } = body;
 
     if (!company_name || typeof company_name !== "string" || !company_name.trim()) {
       return NextResponse.json(
@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
       githubRepo: typeof github_repo === "string" ? github_repo.trim() || null : null,
       notes: typeof notes === "string" ? notes.trim() || null : null,
       workflowType,
+      apolloAccountId: typeof apollo_account_id === "string" ? apollo_account_id.trim() || null : null,
     });
 
     return NextResponse.json({
