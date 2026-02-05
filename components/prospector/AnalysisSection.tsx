@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   type AnalysisApiResponse,
   type PRAnalysisResultV2,
@@ -190,8 +190,10 @@ export function AnalysisSection({
 
       if (data.success && data.result) {
         setCTOPerspective(data.result);
-      } else {
-        setCTOError(data.error || "Failed to get CTO perspective");
+      } else if (!data.success && data.error) {
+        // Only show error for non-cache-miss failures
+        // A cache miss (no cached CTO perspective) is not an error
+        setCTOError(data.error);
       }
     } catch (error) {
       setCTOError(error instanceof Error ? error.message : "Failed to get CTO perspective");
@@ -199,6 +201,32 @@ export function AnalysisSection({
       setCTOLoading(false);
     }
   }, [currentAnalysisId]);
+
+  // Auto-fetch CTO perspective from cache when cached analysis loads
+  // Uses cacheOnly mode to avoid triggering LLM for users who never requested it
+  const ctoAutoFetchDone = useRef(false);
+  useEffect(() => {
+    if (currentAnalysisId && analysisResult?.success && !ctoPerspective && !ctoLoading && isViewingCached && !ctoAutoFetchDone.current) {
+      ctoAutoFetchDone.current = true;
+      // Fetch from cache only - won't run LLM if not previously generated
+      (async () => {
+        try {
+          const res = await fetch("/api/cto-perspective", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ analysisId: currentAnalysisId, cacheOnly: true }),
+          });
+          const data: CTOAnalysisApiResponse = await res.json();
+          if (data.success && data.result) {
+            setCTOPerspective(data.result);
+          }
+          // If no cached result, do nothing - user can click "Get CTO Perspective" to generate
+        } catch {
+          // Silently fail - user can manually request CTO perspective
+        }
+      })();
+    }
+  }, [currentAnalysisId, analysisResult?.success, ctoPerspective, ctoLoading, isViewingCached]);
 
   function handleBugSelect(bugIndex: number) {
     setSelectedBugIndex(bugIndex);

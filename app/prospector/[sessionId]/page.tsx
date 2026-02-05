@@ -632,7 +632,17 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     selectedBugIndex: number | null;
   }) => {
     setAnalysisData(data);
-  }, []);
+
+    // If analysis has cached email data, automatically advance to email section
+    // This ensures returning users see their previously generated emails
+    if (data.analysisResult.cachedEmail) {
+      workflow.markStepComplete(3);
+      // Only advance to step 4 if not already past it
+      if (workflow.currentStep <= 3) {
+        workflow.advanceToStep(4);
+      }
+    }
+  }, [workflow]);
 
   function handleGenerateEmailClick() {
     workflow.markStepComplete(3);
