@@ -39,9 +39,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const formData = await request.formData();
       const file = formData.get("file") as File | null;
 
-      if (!file) {
+      if (!file || !(file instanceof File)) {
         return NextResponse.json<ParseLinkedInResponse>(
-          { success: false, error: "No file provided" },
+          { success: false, error: "No file provided or invalid file field" },
           { status: 400 }
         );
       }
@@ -145,7 +145,7 @@ Return ONLY valid JSON with no additional text:
       });
     } else {
       // For text content, use the prompt template
-      const prompt = promptTemplate.replace("{PROFILE_CONTENT}", profileContent);
+      const prompt = promptTemplate.replace("{PROFILE_CONTENT}", () => profileContent);
 
       // Extract just the user prompt part (after the ---)
       const promptParts = prompt.split("---");

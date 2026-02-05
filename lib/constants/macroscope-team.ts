@@ -164,11 +164,14 @@ export function findConnectionMatches(
   for (const entry of prospectHistory) {
     const normalizedCompany = normalizeCompanyName(entry.company);
 
+    // Skip empty normalized names
+    if (!normalizedCompany) continue;
+
     // Check each team member
     for (const member of MACROSCOPE_TEAM) {
       for (const memberCompany of member.companies) {
-        if (normalizedCompany.includes(memberCompany.normalizedCompany) ||
-            memberCompany.normalizedCompany.includes(normalizedCompany)) {
+        // Use exact match instead of includes to avoid partial matches like "app" vs "apple"
+        if (normalizedCompany === memberCompany.normalizedCompany) {
 
           // Parse prospect dates
           const prospectStart = parseYear(entry.startDate);
