@@ -14,8 +14,14 @@ interface ParseSlackThreadRequest {
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: ParseSlackThreadRequest = await request.json();
-    const { rawThread } = body;
+    const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json<ParseSlackThreadResponse>(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
+    const { rawThread } = body as ParseSlackThreadRequest;
 
     if (!rawThread || typeof rawThread !== "string") {
       return NextResponse.json<ParseSlackThreadResponse>(

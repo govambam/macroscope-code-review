@@ -125,7 +125,7 @@ export function renderSignupEmailSequence(variables: SignupEmailVariables): Sign
   const replaceVariables = (text: string): string => {
     let result = text;
     for (const [key, value] of Object.entries(variables)) {
-      if (value) {
+      if (value !== undefined && value !== null) {
         result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
       }
     }
@@ -161,8 +161,8 @@ export function renderSignupEmailSequence(variables: SignupEmailVariables): Sign
  */
 export function parsedDataToVariables(data: import("@/lib/types/signup-lead").ParsedSignupData): SignupEmailVariables {
   return {
-    FIRST_NAME: data.firstName || "",
-    REPO_NAME: data.repositoryName || "",
+    FIRST_NAME: data.firstName || "there",
+    REPO_NAME: data.repositoryName || "your repo",
     FULL_NAME: data.fullName,
     GITHUB_USERNAME: data.githubUsername,
     LINKEDIN_URL: data.linkedinUrl,

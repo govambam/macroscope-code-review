@@ -32,8 +32,14 @@ interface GetSignupLeadRequest {
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: CreateSignupLeadRequest = await request.json();
-    const { sessionId, rawSlackThread, parsedData, emailVariables } = body;
+    const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json<SignupLeadApiResponse>(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
+    const { sessionId, rawSlackThread, parsedData, emailVariables } = body as CreateSignupLeadRequest;
 
     if (!sessionId || typeof sessionId !== "number") {
       return NextResponse.json<SignupLeadApiResponse>(
@@ -130,8 +136,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
  */
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: UpdateSignupLeadRequest = await request.json();
-    const { leadId, parsedData, emailVariables } = body;
+    const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json<SignupLeadApiResponse>(
+        { success: false, error: "Request body must be a JSON object" },
+        { status: 400 }
+      );
+    }
+    const { leadId, parsedData, emailVariables } = body as UpdateSignupLeadRequest;
 
     if (!leadId || typeof leadId !== "number") {
       return NextResponse.json<SignupLeadApiResponse>(
