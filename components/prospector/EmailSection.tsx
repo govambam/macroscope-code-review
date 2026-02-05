@@ -241,6 +241,21 @@ export function EmailSection({
         if (variables) {
           onEmailEdited(renderEmailSequence({ ...variables, ...updated }));
         }
+        // Persist updated dbVariables to DB immediately
+        if (variables && currentAnalysisId) {
+          try {
+            await fetch("/api/emails/update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                analysisId: currentAnalysisId,
+                emailContent: JSON.stringify({ variables, dbVariables: updated }),
+              }),
+            });
+          } catch {
+            // Save failed — will still be in local state
+          }
+        }
       }
     } catch {
       // Silently fail — user can retry
