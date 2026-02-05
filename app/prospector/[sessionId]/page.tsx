@@ -19,8 +19,13 @@ import { AnalysisSection } from "@/components/prospector/AnalysisSection";
 import { EmailSection } from "@/components/prospector/EmailSection";
 import { ApolloSection } from "@/components/prospector/AttioSection";
 import { ExistingPRsSelector, type OrgPR } from "@/components/prospector/ExistingPRsSelector";
+import { WorkflowSelector } from "@/components/prospector/WorkflowSelector";
+import { SlackThreadInput } from "@/components/prospector/SlackThreadInput";
+import { SignupDataReview } from "@/components/prospector/SignupDataReview";
+import { SignupEmailSection } from "@/components/prospector/SignupEmailSection";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
 import type { AnalysisApiResponse, EmailSequence } from "@/lib/types/prospector-analysis";
+import type { ProspectorWorkflowType, ParsedSignupData, SignupEmailVariables } from "@/lib/types/signup-lead";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
 
 interface SessionData {
@@ -147,6 +152,16 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   // Existing PRs for org (Step 1 option)
   const [existingOrgPRsAvailable, setExistingOrgPRsAvailable] = useState<boolean | null>(null);
+
+  // ── Workflow Type State ──────────────────────────────────────────
+  const [workflowType, setWorkflowType] = useState<ProspectorWorkflowType | null>(null);
+
+  // ── Signup Outreach State ────────────────────────────────────────
+  const [signupRawThread, setSignupRawThread] = useState<string>("");
+  const [signupParsedData, setSignupParsedData] = useState<ParsedSignupData | null>(null);
+  const [signupLeadId, setSignupLeadId] = useState<number | null>(null);
+  const [signupEmailVariables, setSignupEmailVariables] = useState<SignupEmailVariables | null>(null);
+  const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4>(1); // 1=Paste, 2=Review, 3=Email, 4=Apollo
 
   const {
     data,
@@ -677,6 +692,79 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     workflow.advanceToStep(1);
   }
 
+  // ── Signup Outreach Handlers ─────────────────────────────────
+
+  function handleWorkflowSelect(type: ProspectorWorkflowType) {
+    setWorkflowType(type);
+    if (type === "signup-outreach") {
+      setSignupStep(1);
+    }
+  }
+
+  async function handleSlackThreadParsed(data: ParsedSignupData, rawThread: string) {
+    setSignupRawThread(rawThread);
+    setSignupParsedData(data);
+    setSignupStep(2);
+
+    // Save to database
+    try {
+      const res = await fetch("/api/signup-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: parseInt(sessionId, 10),
+          rawSlackThread: rawThread,
+          parsedData: data,
+        }),
+      });
+      const result = await res.json();
+      if (result.success && result.lead) {
+        setSignupLeadId(result.lead.id);
+      }
+    } catch {
+      // Continue without saving - user can still proceed
+    }
+  }
+
+  async function handleSignupDataSaved(data: ParsedSignupData) {
+    setSignupParsedData(data);
+    setSignupStep(3);
+
+    // Update in database if we have a lead ID
+    if (signupLeadId) {
+      try {
+        await fetch("/api/signup-lead", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leadId: signupLeadId, parsedData: data }),
+        });
+      } catch {
+        // Continue without saving
+      }
+    }
+  }
+
+  function handleSignupBackToThread() {
+    setSignupStep(1);
+  }
+
+  function handleSignupEmailVariablesGenerated(variables: SignupEmailVariables) {
+    setSignupEmailVariables(variables);
+  }
+
+  function handleSignupContinueToApollo() {
+    setSignupStep(4);
+  }
+
+  function handleSignupApolloComplete() {
+    setSessionCompleted(true);
+    fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "completed" }),
+    }).catch(() => {});
+  }
+
   // ── Session helpers ──────────────────────────────────────────
 
   function updateSessionRepo(owner: string, repo: string) {
@@ -783,6 +871,163 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
       {/* Workflow Sections */}
       <div className="max-w-5xl mx-auto px-4 md:px-8 py-6 space-y-6">
 
+        {/* ── Workflow Type Selector ───────────────────────────── */}
+        {!workflowType && (
+          <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-border bg-bg-subtle">
+              <h2 className="text-base font-semibold text-accent">Choose Outreach Type</h2>
+            </div>
+            <div className="p-5">
+              <WorkflowSelector
+                selectedWorkflow={workflowType}
+                onSelectWorkflow={handleWorkflowSelect}
+              />
+            </div>
+          </section>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════
+            SIGNUP OUTREACH FLOW
+            ══════════════════════════════════════════════════════════ */}
+        {workflowType === "signup-outreach" && (
+          <>
+            {/* Step 1: Paste Slack Thread */}
+            <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-border bg-bg-subtle flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                    signupStep === 1 ? "bg-primary text-white" : signupStep > 1 ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"
+                  }`}>
+                    {signupStep > 1 ? "✓" : "1"}
+                  </span>
+                  <h2 className="text-base font-semibold text-accent">Paste Slack Thread</h2>
+                </div>
+                {signupStep > 1 && (
+                  <button
+                    onClick={() => setSignupStep(1)}
+                    className="text-xs text-primary hover:text-primary-hover font-medium"
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
+              {signupStep === 1 && (
+                <div className="p-5">
+                  <SlackThreadInput
+                    onParsed={handleSlackThreadParsed}
+                    initialThread={signupRawThread}
+                  />
+                </div>
+              )}
+              {signupStep > 1 && signupParsedData && (
+                <div className="p-4 bg-green-50 border-t border-green-200">
+                  <p className="text-sm text-green-800">
+                    <span className="font-medium">Parsed:</span>{" "}
+                    {signupParsedData.fullName || signupParsedData.firstName || "Unknown"}
+                    {signupParsedData.companyName && ` at ${signupParsedData.companyName}`}
+                    {signupParsedData.repositoryName && ` • ${signupParsedData.repositoryName}`}
+                  </p>
+                </div>
+              )}
+            </section>
+
+            {/* Step 2: Review & Edit Data */}
+            {signupStep >= 2 && signupParsedData && (
+              <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-border bg-bg-subtle flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                      signupStep === 2 ? "bg-primary text-white" : signupStep > 2 ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"
+                    }`}>
+                      {signupStep > 2 ? "✓" : "2"}
+                    </span>
+                    <h2 className="text-base font-semibold text-accent">Review Lead Information</h2>
+                  </div>
+                  {signupStep > 2 && (
+                    <button
+                      onClick={() => setSignupStep(2)}
+                      className="text-xs text-primary hover:text-primary-hover font-medium"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {signupStep === 2 && (
+                  <div className="p-5">
+                    <SignupDataReview
+                      initialData={signupParsedData}
+                      onSave={handleSignupDataSaved}
+                      onBack={handleSignupBackToThread}
+                    />
+                  </div>
+                )}
+                {signupStep > 2 && (
+                  <div className="p-4 bg-green-50 border-t border-green-200">
+                    <p className="text-sm text-green-800">
+                      <span className="font-medium">Confirmed:</span>{" "}
+                      {signupParsedData.firstName} • {signupParsedData.repositoryName}
+                      {signupParsedData.companyName && ` • ${signupParsedData.companyName}`}
+                    </p>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Step 3: Email Variables & Preview */}
+            {signupStep >= 3 && signupParsedData && (
+              <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-border bg-bg-subtle flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                      signupStep === 3 ? "bg-primary text-white" : signupStep > 3 ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"
+                    }`}>
+                      {signupStep > 3 ? "✓" : "3"}
+                    </span>
+                    <h2 className="text-base font-semibold text-accent">Email Sequence</h2>
+                  </div>
+                </div>
+                {signupStep === 3 && (
+                  <div className="p-5">
+                    <SignupEmailSection
+                      parsedData={signupParsedData}
+                      leadId={signupLeadId}
+                      onVariablesGenerated={handleSignupEmailVariablesGenerated}
+                      onContinueToSend={handleSignupContinueToApollo}
+                    />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Step 4: Send to Apollo */}
+            {signupStep >= 4 && signupEmailVariables && (
+              <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-border bg-bg-subtle flex items-center gap-3">
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                    signupStep === 4 ? "bg-primary text-white" : "bg-gray-200 text-gray-600"
+                  }`}>
+                    4
+                  </span>
+                  <h2 className="text-base font-semibold text-accent">Send to Apollo</h2>
+                </div>
+                <div className="p-5">
+                  <ApolloSection
+                    variables={signupEmailVariables as unknown as Record<string, string>}
+                    defaultSearchQuery={session?.company_name ?? signupParsedData?.companyName ?? ""}
+                    currentAnalysisId={null}
+                    onSendComplete={handleSignupApolloComplete}
+                  />
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════
+            PR ANALYSIS FLOW (existing)
+            ══════════════════════════════════════════════════════════ */}
+        {workflowType === "pr-analysis" && (
+          <>
         {/* ── Section 1: Select PR ─────────────────────────────── */}
         <section id="select-pr" className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
           <SectionHeader
@@ -1262,6 +1507,29 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
             </div>
           )}
         </section>
+          </>
+        )}
+
+        {/* ── Change Workflow Type ─────────────────────────────── */}
+        {workflowType && (
+          <div className="flex justify-center pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setWorkflowType(null);
+                // Reset signup flow state when changing workflow
+                setSignupStep(1);
+                setSignupRawThread("");
+                setSignupParsedData(null);
+                setSignupLeadId(null);
+                setSignupEmailVariables(null);
+              }}
+              className="text-sm text-text-muted hover:text-text-secondary transition-colors"
+            >
+              ← Change outreach type
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Modals ─────────────────────────────────────────────── */}
