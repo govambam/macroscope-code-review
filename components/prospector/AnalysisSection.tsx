@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   type AnalysisApiResponse,
   type PRAnalysisResultV2,
@@ -58,6 +58,44 @@ export function AnalysisSection({
   const [analysisOriginalUrl, setAnalysisOriginalUrl] = useState("");
   const [pendingForceRefresh, setPendingForceRefresh] = useState(false);
   const [hasRun, setHasRun] = useState(false);
+  const [cacheChecked, setCacheChecked] = useState(false);
+
+  // Auto-check DB cache on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function checkCache() {
+      try {
+        const res = await fetch("/api/get-macroscope-review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ forkedPrUrl, cacheOnly: true }),
+        });
+        if (cancelled) return;
+        const data: AnalysisApiResponse = await res.json();
+        if (data.noCache) {
+          setCacheChecked(true);
+          return;
+        }
+        if (data.success && data.result) {
+          setAnalysisResult(data);
+          if (data.analysisId) setCurrentAnalysisId(data.analysisId);
+          setIsViewingCached(true);
+          setHasRun(true);
+          onAnalysisComplete({
+            analysisResult: data,
+            analysisId: data.analysisId ?? null,
+            selectedBugIndex: null,
+          });
+        }
+      } catch {
+        // Ignore errors — fall through to manual button
+      } finally {
+        if (!cancelled) setCacheChecked(true);
+      }
+    }
+    checkCache();
+    return () => { cancelled = true; };
+  }, [forkedPrUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runAnalysis = useCallback(
     async (forceRefresh = false) => {
@@ -248,6 +286,19 @@ export function AnalysisSection({
   // ── Not yet run ──────────────────────────────────────────────────────
 
   if (!hasRun && !analysisResult) {
+    // Still checking for cached analysis in DB
+    if (!cacheChecked) {
+      return (
+        <div className="flex items-center gap-3 py-6 justify-center">
+          <svg className="animate-spin h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          <span className="text-sm text-text-secondary">Checking for cached analysis...</span>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-5">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -353,7 +404,7 @@ export function AnalysisSection({
             onClick={() => runAnalysis(true)}
             className="text-sm text-blue-700 hover:text-blue-800 font-medium underline"
           >
-            Regenerate
+            Refresh
           </button>
         </div>
       )}

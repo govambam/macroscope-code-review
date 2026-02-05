@@ -378,6 +378,25 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     }
   }, [workflow.selectedPRs]);
 
+  // Compute active forked PR URL for downstream reset
+  const activeForkedPrUrl = completedSims.find((s) => s.success)?.forkedPrUrl ?? null;
+
+  // Reset downstream sections when the active forked PR changes
+  const prevActiveForkedPrUrlRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (activeForkedPrUrl === null) return;
+    if (prevActiveForkedPrUrlRef.current === null) {
+      prevActiveForkedPrUrlRef.current = activeForkedPrUrl;
+      return;
+    }
+    if (prevActiveForkedPrUrlRef.current !== activeForkedPrUrl) {
+      prevActiveForkedPrUrlRef.current = activeForkedPrUrl;
+      setAnalysisData(null);
+      setEmailData(null);
+      setSessionCompleted(false);
+    }
+  }, [activeForkedPrUrl]);
+
   // Auto-check fork when entering Section 2 (also runs during simulation to populate existingPRs)
   React.useEffect(() => {
     if (
@@ -607,13 +626,13 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   // ── Section 3-5 handlers ────────────────────────────────────
 
-  function handleAnalysisComplete(data: {
+  const handleAnalysisComplete = useCallback((data: {
     analysisResult: AnalysisApiResponse;
     analysisId: number | null;
     selectedBugIndex: number | null;
-  }) {
+  }) => {
     setAnalysisData(data);
-  }
+  }, []);
 
   function handleGenerateEmailClick() {
     workflow.markStepComplete(3);
@@ -1163,6 +1182,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
               {(sectionStates[2].isActive || sectionStates[2].isCompleted) &&
               completedSims.find((s) => s.success)?.forkedPrUrl ? (
                 <AnalysisSection
+                  key={completedSims.find((s) => s.success)?.forkedPrUrl}
                   forkedPrUrl={completedSims.find((s) => s.success)!.forkedPrUrl!}
                   onAnalysisComplete={handleAnalysisComplete}
                   onGenerateEmailClick={handleGenerateEmailClick}
