@@ -6,6 +6,8 @@ import {
   type PRAnalysisResultV2,
   type MeaningfulBugsResult,
   type NoMeaningfulBugsResult,
+  type CTOAnalysisResult,
+  type CTOAnalysisApiResponse,
   isV2Result,
   resultHasMeaningfulBugs,
   CATEGORY_COLORS,
@@ -59,6 +61,11 @@ export function AnalysisSection({
   const [pendingForceRefresh, setPendingForceRefresh] = useState(false);
   const [hasRun, setHasRun] = useState(false);
   const [cacheChecked, setCacheChecked] = useState(false);
+
+  // CTO Perspective state
+  const [ctoPerspective, setCTOPerspective] = useState<CTOAnalysisResult | null>(null);
+  const [ctoLoading, setCTOLoading] = useState(false);
+  const [ctoError, setCTOError] = useState<string | null>(null);
 
   // Auto-check DB cache on mount
   useEffect(() => {
@@ -164,6 +171,34 @@ export function AnalysisSection({
     setShowUrlPrompt(false);
     runAnalysis(pendingForceRefresh);
   }
+
+  // Fetch CTO Perspective analysis
+  const fetchCTOPerspective = useCallback(async (forceRefresh = false) => {
+    if (!currentAnalysisId) return;
+
+    setCTOLoading(true);
+    setCTOError(null);
+
+    try {
+      const res = await fetch("/api/cto-perspective", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId: currentAnalysisId, forceRefresh }),
+      });
+
+      const data: CTOAnalysisApiResponse = await res.json();
+
+      if (data.success && data.result) {
+        setCTOPerspective(data.result);
+      } else {
+        setCTOError(data.error || "Failed to get CTO perspective");
+      }
+    } catch (error) {
+      setCTOError(error instanceof Error ? error.message : "Failed to get CTO perspective");
+    } finally {
+      setCTOLoading(false);
+    }
+  }, [currentAnalysisId]);
 
   function handleBugSelect(bugIndex: number) {
     setSelectedBugIndex(bugIndex);
@@ -441,7 +476,60 @@ export function AnalysisSection({
                     <span className="font-medium">Recommendation:</span> {result.summary.recommendation}
                   </p>
                 )}
+
+                {/* CTO Perspective button */}
+                {result.meaningful_bugs_count > 0 && (
+                  <div className="mt-3 pt-3 border-t border-amber-200 flex items-center gap-3">
+                    <button
+                      onClick={() => fetchCTOPerspective()}
+                      disabled={ctoLoading || !currentAnalysisId}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-indigo-700 bg-indigo-100 hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                    >
+                      {ctoLoading ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Analyzing...
+                        </>
+                      ) : ctoPerspective ? (
+                        <>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Refresh CTO Perspective
+                        </>
+                      ) : (
+                        <>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                          </svg>
+                          Get CTO Perspective
+                        </>
+                      )}
+                    </button>
+                    {ctoError && (
+                      <span className="text-xs text-red-600">{ctoError}</span>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* CTO Overall Recommendation Banner */}
+              {ctoPerspective && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <svg className="h-5 w-5 text-indigo-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    <div>
+                      <h4 className="text-sm font-medium text-indigo-900">CTO Perspective</h4>
+                      <p className="text-sm text-indigo-800 mt-1">{ctoPerspective.overall_recommendation}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Comment cards */}
               <div className="space-y-4">
@@ -512,6 +600,37 @@ export function AnalysisSection({
                             <span className="font-medium">Impact:</span> {comment.impact_scenario}
                           </p>
                         )}
+
+                        {/* CTO Perspective for this comment */}
+                        {ctoPerspective?.perspectives[comment.index] && (
+                          <div className="mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-xs font-medium text-indigo-800">CTO Perspective</span>
+                              {ctoPerspective.perspectives[comment.index].is_recommended && (
+                                <span className="px-2 py-0.5 text-xs font-medium bg-indigo-600 text-white rounded-full">
+                                  Recommended for Outreach
+                                </span>
+                              )}
+                              <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                                ctoPerspective.perspectives[comment.index].outreach_score >= 4
+                                  ? "bg-green-100 text-green-800"
+                                  : ctoPerspective.perspectives[comment.index].outreach_score >= 3
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-gray-100 text-gray-600"
+                              }`}>
+                                Score: {ctoPerspective.perspectives[comment.index].outreach_score}/5
+                              </span>
+                            </div>
+                            <p className="text-sm text-indigo-900">{ctoPerspective.perspectives[comment.index].talking_point}</p>
+                            <p className="text-xs text-indigo-600 mt-1">{ctoPerspective.perspectives[comment.index].outreach_reasoning}</p>
+                            {ctoPerspective.perspectives[comment.index].recommendation_summary && (
+                              <p className="text-xs text-indigo-700 mt-1 italic">
+                                {ctoPerspective.perspectives[comment.index].recommendation_summary}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
                         {comment.code_suggestion ? (
                           <div className="mb-3">
                             <p className="text-xs text-text-muted mb-1">Suggested fix:</p>
