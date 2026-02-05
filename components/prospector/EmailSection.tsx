@@ -84,6 +84,7 @@ export function EmailSection({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailCopied, setEmailCopied] = useState(false);
   const [emailSaving, setEmailSaving] = useState(false);
+  const [imageRegenerating, setImageRegenerating] = useState(false);
   const [activeEmailTab, setActiveEmailTab] = useState<EmailTabKey>("variables");
   const hasTriggeredRef = useRef(false);
 
@@ -215,6 +216,51 @@ export function EmailSection({
       return false;
     } finally {
       setEmailSaving(false);
+    }
+  }
+
+  async function regenerateCodeImage() {
+    if (!analysisResult?.result || !dbVariables) return;
+    const bestBug = getBestBugForEmail(analysisResult.result, selectedBugIndex);
+    if (!bestBug?.code_suggestion) return;
+
+    setImageRegenerating(true);
+    try {
+      const res = await fetch("/api/generate-code-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codeSuggestion: bestBug.code_suggestion,
+          filePath: bestBug.file_path,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        const updated = { ...dbVariables, BUG_FIX_URL: data.url };
+        setDbVariables(updated);
+        if (variables) {
+          onEmailEdited(renderEmailSequence({ ...variables, ...updated }));
+        }
+        // Persist updated dbVariables to DB immediately
+        if (variables && currentAnalysisId) {
+          try {
+            await fetch("/api/emails/update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                analysisId: currentAnalysisId,
+                emailContent: JSON.stringify({ variables, dbVariables: updated }),
+              }),
+            });
+          } catch {
+            // Save failed — will still be in local state
+          }
+        }
+      }
+    } catch {
+      // Silently fail — user can retry
+    } finally {
+      setImageRegenerating(false);
     }
   }
 
@@ -431,9 +477,28 @@ export function EmailSection({
                     <span className="text-xs font-medium text-text-muted shrink-0 pt-1 w-36">
                       {VARIABLE_LABELS[key]}
                     </span>
-                    <span className="text-sm text-text-secondary break-all">
+                    <span className="text-sm text-text-secondary break-all flex-1">
                       {dbVariables[key] || <span className="italic text-text-muted">empty</span>}
                     </span>
+                    {key === "BUG_FIX_URL" && (
+                      <button
+                        onClick={regenerateCodeImage}
+                        disabled={imageRegenerating}
+                        title="Regenerate code image"
+                        className="shrink-0 p-1 text-text-muted hover:text-primary transition-colors disabled:opacity-50"
+                      >
+                        {imageRegenerating ? (
+                          <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                        ) : (
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
