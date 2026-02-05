@@ -419,6 +419,25 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_forks_original_org ON forks(original_org)
   `);
 
+  // Create signup_leads table for new signup outreach workflow
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS signup_leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      raw_slack_thread TEXT,
+      parsed_data_json TEXT,
+      email_variables_json TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (session_id) REFERENCES prospecting_sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create index for signup leads by session
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_signup_leads_session_id ON signup_leads(session_id)
+  `);
+
   console.log("Database initialized successfully at:", DB_PATH);
 }
 
@@ -1704,6 +1723,116 @@ export function unlinkPRFromSession(prId: number): boolean {
   `);
 
   const result = stmt.run(now, prId);
+  return result.changes > 0;
+}
+
+// ── Signup Leads ─────────────────────────────────────────────────────────────
+
+/**
+ * Signup lead record from database.
+ */
+export interface SignupLeadRecord {
+  id: number;
+  session_id: number;
+  raw_slack_thread: string | null;
+  parsed_data_json: string | null;
+  email_variables_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Save a new signup lead.
+ * Returns the lead ID.
+ */
+export function saveSignupLead(
+  sessionId: number,
+  rawSlackThread: string | null,
+  parsedDataJson: string | null,
+  emailVariablesJson: string | null
+): number {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO signup_leads (session_id, raw_slack_thread, parsed_data_json, email_variables_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    RETURNING id
+  `);
+
+  const result = stmt.get(sessionId, rawSlackThread, parsedDataJson, emailVariablesJson, now, now) as { id: number };
+  return result.id;
+}
+
+/**
+ * Get a signup lead by ID.
+ */
+export function getSignupLeadById(id: number): SignupLeadRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`SELECT * FROM signup_leads WHERE id = ?`);
+  return stmt.get(id) as SignupLeadRecord | null;
+}
+
+/**
+ * Get signup lead for a session.
+ * Returns the most recent lead for the session.
+ */
+export function getSignupLeadForSession(sessionId: number): SignupLeadRecord | null {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`
+    SELECT * FROM signup_leads
+    WHERE session_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+
+  return (stmt.get(sessionId) as SignupLeadRecord | undefined) ?? null;
+}
+
+/**
+ * Update a signup lead's parsed data.
+ */
+export function updateSignupLeadParsedData(id: number, parsedDataJson: string): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE signup_leads
+    SET parsed_data_json = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(parsedDataJson, now, id);
+  return result.changes > 0;
+}
+
+/**
+ * Update a signup lead's email variables.
+ */
+export function updateSignupLeadEmailVariables(id: number, emailVariablesJson: string): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE signup_leads
+    SET email_variables_json = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(emailVariablesJson, now, id);
+  return result.changes > 0;
+}
+
+/**
+ * Delete a signup lead.
+ */
+export function deleteSignupLead(id: number): boolean {
+  const db = getDatabase();
+
+  const stmt = db.prepare(`DELETE FROM signup_leads WHERE id = ?`);
+  const result = stmt.run(id);
   return result.changes > 0;
 }
 
