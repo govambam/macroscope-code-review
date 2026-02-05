@@ -11,6 +11,7 @@ import type { CTOAnalysisResult, CTOAnalysisApiResponse } from "@/lib/types/pros
 interface CTOPerspectiveRequest {
   analysisId: number;
   forceRefresh?: boolean;
+  cacheOnly?: boolean;
 }
 
 /**
@@ -22,7 +23,7 @@ interface CTOPerspectiveRequest {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body: CTOPerspectiveRequest = await request.json();
-    const { analysisId, forceRefresh } = body;
+    const { analysisId, forceRefresh, cacheOnly } = body;
 
     if (!analysisId || typeof analysisId !== "number") {
       return NextResponse.json<CTOAnalysisApiResponse>(
@@ -47,6 +48,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           console.warn("Invalid cached CTO perspective, regenerating");
         }
       }
+    }
+
+    // If cacheOnly mode, return success with no result (not an error)
+    if (cacheOnly) {
+      return NextResponse.json<CTOAnalysisApiResponse>({
+        success: true,
+        cached: false,
+      });
     }
 
     // Get the analysis to access comments
