@@ -328,7 +328,7 @@ export async function generateCodeImage(
       const page = await browser.newPage();
 
       await page.setViewport({
-        width: 700,
+        width: 500,  // Slightly larger than container (450px) to allow for padding
         height: 800,
         deviceScaleFactor: 2,
       });
@@ -348,12 +348,13 @@ export async function generateCodeImage(
       }
 
       // Take screenshot of just the container
+      // Container has fixed width of 450px for consistent image sizing
       const screenshotResult = await page.screenshot({
         type: "png",
         clip: {
           x: boundingBox.x,
           y: boundingBox.y,
-          width: Math.min(boundingBox.width, 660),
+          width: boundingBox.width,
           height: boundingBox.height,
         },
         omitBackground: true,
