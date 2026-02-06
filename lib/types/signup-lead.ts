@@ -60,6 +60,28 @@ export interface SignupEmailVariables {
   COMPANY_URL?: string;
   ACCOUNT_TYPE?: string;
   REPO_LANGUAGE?: string;
+  // LLM-generated personalization fields
+  CONNECTION_BLURB?: string;
+  LOCATION_INVITE?: string;
+  SWAG_OFFER?: string;
+}
+
+/**
+ * LLM-generated personalization fields for signup emails.
+ */
+export interface SignupLLMFields {
+  CONNECTION_BLURB?: string;
+  LOCATION_INVITE?: string;
+  SWAG_OFFER?: string;
+}
+
+/**
+ * API response for generating signup email personalization.
+ */
+export interface GenerateSignupEmailResponse {
+  success: boolean;
+  fields?: SignupLLMFields;
+  error?: string;
 }
 
 /**

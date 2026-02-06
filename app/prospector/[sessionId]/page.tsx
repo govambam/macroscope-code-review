@@ -26,6 +26,7 @@ import { SignupEmailSection } from "@/components/prospector/SignupEmailSection";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
 import type { AnalysisApiResponse, EmailSequence } from "@/lib/types/prospector-analysis";
 import type { ProspectorWorkflowType, ParsedSignupData, SignupEmailVariables } from "@/lib/types/signup-lead";
+import type { ConnectionMatch } from "@/lib/constants/macroscope-team";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
 
 interface SessionData {
@@ -163,6 +164,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [signupEmailVariables, setSignupEmailVariables] = useState<SignupEmailVariables | null>(null);
   const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4>(1); // 1=Paste, 2=Review, 3=Email, 4=Apollo
   const [signupApolloContactId, setSignupApolloContactId] = useState<string | null>(null);
+  const [signupConnectionMatches, setSignupConnectionMatches] = useState<ConnectionMatch[]>([]);
 
   const {
     data,
@@ -727,13 +729,18 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     }
   }
 
-  async function handleSignupDataSaved(data: ParsedSignupData, apolloContactId?: string | null) {
+  async function handleSignupDataSaved(data: ParsedSignupData, apolloContactId?: string | null, connectionMatches?: ConnectionMatch[]) {
     setSignupParsedData(data);
     setSignupStep(3);
 
     // Store the Apollo contact ID if provided
     if (apolloContactId) {
       setSignupApolloContactId(apolloContactId);
+    }
+
+    // Store connection matches if provided
+    if (connectionMatches) {
+      setSignupConnectionMatches(connectionMatches);
     }
 
     // Update in database if we have a lead ID
@@ -996,6 +1003,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   <div className="p-5">
                     <SignupEmailSection
                       parsedData={signupParsedData}
+                      connectionMatches={signupConnectionMatches}
                       leadId={signupLeadId}
                       onVariablesGenerated={handleSignupEmailVariablesGenerated}
                       onContinueToSend={handleSignupContinueToApollo}
