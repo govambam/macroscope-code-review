@@ -119,6 +119,7 @@ export interface ProspectingSessionRecord {
   status: ProspectingSessionStatus;
   notes: string | null;
   workflow_type: ProspectorWorkflowType;
+  apollo_account_id: string | null;
 }
 
 export interface ProspectingSessionWithStats extends ProspectingSessionRecord {

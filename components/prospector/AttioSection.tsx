@@ -9,6 +9,8 @@ interface ApolloSectionProps {
   currentAnalysisId: number | null;
   onSendComplete: () => void;
   contactId?: string | null; // Apollo contact ID for task creation
+  preSelectedAccountId?: string | null; // Pre-selected Apollo account ID from session
+  preSelectedAccountName?: string | null; // Pre-selected account name for display
 }
 
 export function ApolloSection({
@@ -17,12 +19,19 @@ export function ApolloSection({
   currentAnalysisId,
   onSendComplete,
   contactId,
+  preSelectedAccountId,
+  preSelectedAccountName,
 }: ApolloSectionProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState(defaultSearchQuery);
   const [searchResults, setSearchResults] = useState<Array<{ id: string; name: string; domain: string | null }>>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState<{ id: string; name: string } | null>(null);
+  // Initialize selectedAccount from pre-selected props if available
+  const [selectedAccount, setSelectedAccount] = useState<{ id: string; name: string } | null>(
+    preSelectedAccountId && preSelectedAccountName
+      ? { id: preSelectedAccountId, name: preSelectedAccountName }
+      : null
+  );
   const [sending, setSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -184,40 +193,47 @@ export function ApolloSection({
 
   // ── Search and send UI ────────────────────────────────────────────────
 
+  // Check if we have a pre-selected account from the session
+  const hasPreSelectedAccount = Boolean(preSelectedAccountId && preSelectedAccountName);
+
   return (
     <div className="space-y-4">
       <div>
         <h3 className="text-sm font-medium text-accent mb-1">Send to Apollo</h3>
         <p className="text-xs text-text-secondary mb-4">
-          Search for an account in Apollo and send the email variables to their custom fields.
+          {hasPreSelectedAccount && selectedAccount
+            ? "Ready to send email variables to the account selected when creating this session."
+            : "Search for an account in Apollo and send the email variables to their custom fields."}
         </p>
       </div>
 
-      {/* Search input */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Search account name..."
-          className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-        />
-        <button
-          onClick={handleSearch}
-          disabled={searchLoading || !searchQuery.trim()}
-          className="px-4 py-2 text-sm font-medium bg-bg-subtle hover:bg-gray-100 border border-border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {searchLoading ? (
-            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-          ) : (
-            "Search"
-          )}
-        </button>
-      </div>
+      {/* Search input - only show if no pre-selected account or user wants to change */}
+      {(!hasPreSelectedAccount || !selectedAccount) && (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            placeholder="Search account name..."
+            className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          />
+          <button
+            onClick={handleSearch}
+            disabled={searchLoading || !searchQuery.trim()}
+            className="px-4 py-2 text-sm font-medium bg-bg-subtle hover:bg-gray-100 border border-border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {searchLoading ? (
+              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              "Search"
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Search results */}
       {searchResults.length > 0 && (
@@ -250,23 +266,33 @@ export function ApolloSection({
               Will send email variables to account custom fields
             </div>
           </div>
-          <button
-            onClick={handleSend}
-            disabled={sending}
-            className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
-          >
-            {sending ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Sending...
-              </span>
-            ) : (
-              "Send to Apollo"
+          <div className="flex items-center gap-2">
+            {hasPreSelectedAccount && (
+              <button
+                onClick={() => setSelectedAccount(null)}
+                className="px-3 py-2 text-sm font-medium text-text-secondary hover:text-text-primary border border-border rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Change
+              </button>
             )}
-          </button>
+            <button
+              onClick={handleSend}
+              disabled={sending}
+              className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              {sending ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Sending...
+                </span>
+              ) : (
+                "Send to Apollo"
+              )}
+            </button>
+          </div>
         </div>
       )}
 

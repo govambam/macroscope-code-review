@@ -42,6 +42,7 @@ interface SessionData {
   pr_count: number;
   bugs_found: number;
   emails_sent: number;
+  apollo_account_id: string | null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -1113,6 +1114,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                     currentAnalysisId={null}
                     onSendComplete={handleSignupApolloComplete}
                     contactId={signupApolloContactId}
+                    preSelectedAccountId={session?.apollo_account_id}
+                    preSelectedAccountName={session?.company_name}
                   />
                 </div>
               </section>
@@ -1597,6 +1600,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   defaultSearchQuery={session?.company_name ?? ""}
                   currentAnalysisId={analysisData?.analysisId ?? null}
                   onSendComplete={handleApolloSendComplete}
+                  preSelectedAccountId={session?.apollo_account_id}
+                  preSelectedAccountName={session?.company_name}
                 />
               ) : (
                 <p className="text-sm text-text-muted italic">Ready to send after email generation.</p>
