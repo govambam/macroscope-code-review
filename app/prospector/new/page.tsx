@@ -81,56 +81,13 @@ export default function NewSessionPage() {
     }, 300);
   }
 
-  async function handleSelectApolloAccount(account: ApolloAccount) {
-    const savedName = account.name; // Store name to check for race condition
+  function handleSelectApolloAccount(account: ApolloAccount) {
+    // When selecting an existing account from search, just use it directly
+    // The account already exists in Apollo - no need to create a duplicate
     setCompanyName(account.name);
     setShowCompanyDropdown(false);
     setApolloAccounts([]);
-    setApolloSaving(true);
-
-    // Save the company to the user's Apollo account by calling create
-    // This ensures the company is actually saved to their CRM, not just searched
-    try {
-      const res = await fetch("/api/apollo/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: account.name,
-          domain: account.domain || undefined,
-        }),
-      });
-      const data = await res.json();
-
-      // Check if user changed the company name while we were saving (race condition)
-      // Use callback form to get current state value
-      setCompanyName((currentName) => {
-        if (currentName !== savedName) {
-          // User changed input - don't set stale selection
-          return currentName;
-        }
-        // Name still matches - safe to set the selected account
-        if (data.success && data.account) {
-          setSelectedApolloAccount(data.account);
-        } else {
-          setSelectedApolloAccount(account);
-          if (!res.ok && res.status !== 422) {
-            console.warn("Failed to save company to Apollo:", data.error);
-          }
-        }
-        return currentName;
-      });
-    } catch (err) {
-      // Check for race condition before setting fallback
-      setCompanyName((currentName) => {
-        if (currentName === savedName) {
-          setSelectedApolloAccount(account);
-        }
-        console.warn("Failed to save company to Apollo:", err);
-        return currentName;
-      });
-    } finally {
-      setApolloSaving(false);
-    }
+    setSelectedApolloAccount(account);
   }
 
   function handleOpenCreateModal() {
