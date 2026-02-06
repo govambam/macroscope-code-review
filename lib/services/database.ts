@@ -453,10 +453,10 @@ function initializeSchema(db: Database.Database): void {
   `);
 
   // Migration: Add apollo_enrichment_json column if it doesn't exist
-  try {
-    db.exec(`ALTER TABLE signup_leads ADD COLUMN apollo_enrichment_json TEXT`);
-  } catch {
-    // Column already exists
+  const signupLeadsColumns = db.prepare("PRAGMA table_info(signup_leads)").all() as { name: string }[];
+  const signupLeadsColumnNames = signupLeadsColumns.map(c => c.name);
+  if (!signupLeadsColumnNames.includes("apollo_enrichment_json")) {
+    db.exec("ALTER TABLE signup_leads ADD COLUMN apollo_enrichment_json TEXT");
   }
 
   // Create index for signup leads by session
