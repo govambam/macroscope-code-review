@@ -197,12 +197,10 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   }, [session?.created_at, workflow.validateSession]);
 
   // Initialize workflow type from session if it was previously saved
+  // Note: We don't set signupStep here - let the data loading effect determine the correct step
   React.useEffect(() => {
     if (session?.workflow_type && !workflowType) {
       setWorkflowType(session.workflow_type);
-      if (session.workflow_type === "signup-outreach") {
-        setSignupStep(1);
-      }
     }
   }, [session?.workflow_type, workflowType]);
 
@@ -722,6 +720,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
         .then((data) => {
           if (data.success && data.lead) {
             const lead = data.lead;
+            let restoredStep: 1 | 2 | 3 | 4 = 1; // Default to step 1
 
             // Restore lead ID
             setSignupLeadId(lead.id);
@@ -737,9 +736,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                 const parsedData = JSON.parse(lead.parsed_data_json);
                 setSignupParsedData(parsedData);
                 // If we have parsed data, user has at least completed step 1
-                if (lead.raw_slack_thread) {
-                  setSignupStep(2);
-                }
+                restoredStep = 2;
               } catch {
                 // Invalid JSON, ignore
               }
@@ -766,14 +763,23 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
               try {
                 const variables = JSON.parse(lead.email_variables_json);
                 setSignupEmailVariables(variables);
+                // If we have email variables, user has completed email generation (step 3)
+                restoredStep = 4;
               } catch {
                 // Invalid JSON, ignore
               }
             }
+
+            // Set the restored step
+            setSignupStep(restoredStep);
+          } else {
+            // No lead found, start at step 1
+            setSignupStep(1);
           }
         })
         .catch(() => {
           // Continue without loading - user can start fresh
+          setSignupStep(1);
         });
     }
   }, [workflowType, signupDataLoaded, sessionId]);
