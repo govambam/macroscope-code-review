@@ -41,7 +41,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json<ApolloTaskResponse>(
+        { success: false, error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
     if (!body || typeof body !== "object") {
       return NextResponse.json<ApolloTaskResponse>(
         { success: false, error: "Request body must be a JSON object" },

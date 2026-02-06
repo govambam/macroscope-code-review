@@ -237,6 +237,10 @@ function formatDate(dateStr: string | null): string | null {
 
   try {
     const date = new Date(dateStr);
+    // Check for invalid date
+    if (isNaN(date.getTime())) {
+      return dateStr;
+    }
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return `${months[date.getMonth()]} ${date.getFullYear()}`;
   } catch {
