@@ -9,12 +9,13 @@ interface SignupDataReviewProps {
   initialData: ParsedSignupData;
   initialApolloEnrichment?: ApolloEnrichmentData | null;
   leadId: number | null;
+  apolloAccountId?: string | null; // Apollo account ID to associate contacts with
   onSave: (data: ParsedSignupData, apolloContactId?: string | null, connectionMatches?: ConnectionMatch[]) => void;
   onApolloEnrichment?: (enrichment: ApolloEnrichmentData) => void;
   onBack: () => void;
 }
 
-export function SignupDataReview({ initialData, initialApolloEnrichment, leadId, onSave, onApolloEnrichment, onBack }: SignupDataReviewProps) {
+export function SignupDataReview({ initialData, initialApolloEnrichment, leadId, apolloAccountId, onSave, onApolloEnrichment, onBack }: SignupDataReviewProps) {
   const [data, setData] = useState<ParsedSignupData>(initialData);
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -82,6 +83,7 @@ export function SignupDataReview({ initialData, initialApolloEnrichment, leadId,
           first_name: data.firstName,
           last_name: data.fullName?.split(" ").slice(1).join(" "),
           organization_name: data.companyName,
+          account_id: apolloAccountId, // Associate contact with account
         }),
       });
 

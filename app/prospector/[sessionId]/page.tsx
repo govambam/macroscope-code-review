@@ -1078,6 +1078,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                       initialData={signupParsedData}
                       initialApolloEnrichment={signupApolloEnrichment}
                       leadId={signupLeadId}
+                      apolloAccountId={session?.apollo_account_id}
                       onSave={handleSignupDataSaved}
                       onApolloEnrichment={handleSignupApolloEnrichment}
                       onBack={handleSignupBackToThread}
