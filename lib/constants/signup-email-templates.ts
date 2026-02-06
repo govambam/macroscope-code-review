@@ -158,7 +158,7 @@ function processConditionals(text: string, variables: SignupEmailVariables): str
       const value = variables[varName as keyof SignupEmailVariables];
       // If the variable has a value, include the content (with the variable replaced)
       if (value !== undefined && value !== null && value !== "") {
-        return content.replace(new RegExp(`\\{\\{${varName}\\}\\}`, "g"), value);
+        return content.replace(new RegExp(`\\{\\{${varName}\\}\\}`, "g"), () => value);
       }
       // Otherwise, remove the entire block
       return "";
