@@ -7,6 +7,7 @@ import type { SignupEmailSequence, SignupEmailVariables } from "@/lib/types/sign
 
 /**
  * The signup email sequence templates with variable placeholders.
+ * Uses {{#if VAR}}...{{/if}} for conditional blocks (Apollo-style).
  */
 export const SIGNUP_EMAIL_TEMPLATES: SignupEmailSequence = {
   email_1: {
@@ -14,8 +15,14 @@ export const SIGNUP_EMAIL_TEMPLATES: SignupEmailSequence = {
     body: `Hey {{FIRST_NAME}},
 
 Saw you just added Macroscope to {{REPO_NAME}} — welcome!
+{{#if CONNECTION_BLURB}}
+
+{{CONNECTION_BLURB}}
+{{/if}}
 
 I'm Ivan, part of the founding team here. Wanted to reach out personally in case you have any questions getting set up or want a hand configuring anything.
+
+We've been tuning our code review for {{REPO_LANGUAGE}} with really positive early signals. Let us know if you have any suggestions or questions!
 
 Happy to hop on a quick call if that's easier, or feel free to just reply here.
 
@@ -42,6 +49,10 @@ Ivan`,
 Curious how things are going with Macroscope so far — any feedback, feature requests, or questions?
 
 We're still early and actively shaping the product, so this stuff is genuinely useful. If you're open to it, I'd love to set up a quick call with our product team to hear more about your experience.
+{{#if LOCATION_INVITE}}
+
+{{LOCATION_INVITE}}
+{{/if}}
 
 Ivan`,
     dayOffset: 7,
@@ -58,6 +69,10 @@ A few options depending on where you're at:
 • Loop in your team — happy to set up a demo for anyone who wasn't able to play around during the trial.
 • Chat with product leadership — if you have feedback or want to talk about where AI code review is headed, we'd love to hear from you.
 • Custom pricing — if you're thinking about a broader rollout, let me know and we can talk about what that looks like.
+{{#if SWAG_OFFER}}
+
+{{SWAG_OFFER}}
+{{/if}}
 
 If none of this is relevant right now, totally understand — appreciate you giving Macroscope a look.
 
@@ -92,11 +107,21 @@ export const SIGNUP_APOLLO_VARIABLE_KEYS: (keyof SignupEmailVariables)[] = [
 ];
 
 /**
+ * LLM-generated personalization variable keys.
+ */
+export const SIGNUP_LLM_VARIABLE_KEYS: (keyof SignupEmailVariables)[] = [
+  "CONNECTION_BLURB",
+  "LOCATION_INVITE",
+  "SWAG_OFFER",
+];
+
+/**
  * All signup variable keys.
  */
 export const ALL_SIGNUP_VARIABLE_KEYS: (keyof SignupEmailVariables)[] = [
   ...SIGNUP_TEMPLATE_VARIABLE_KEYS,
   ...SIGNUP_APOLLO_VARIABLE_KEYS,
+  ...SIGNUP_LLM_VARIABLE_KEYS,
 ];
 
 /**
@@ -116,42 +141,73 @@ export const SIGNUP_VARIABLE_LABELS: Record<keyof SignupEmailVariables, string> 
   COMPANY_URL: "Company URL",
   ACCOUNT_TYPE: "Account Type",
   REPO_LANGUAGE: "Repository Language",
+  CONNECTION_BLURB: "Connection Blurb",
+  LOCATION_INVITE: "Location Invite",
+  SWAG_OFFER: "Swag Offer",
 };
 
 /**
+ * Process conditional blocks in templates.
+ * Handles {{#if VAR}}content{{/if}} syntax.
+ */
+function processConditionals(text: string, variables: SignupEmailVariables): string {
+  // Match {{#if VAR}}...{{/if}} blocks
+  return text.replace(
+    /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,
+    (match, varName, content) => {
+      const value = variables[varName as keyof SignupEmailVariables];
+      // If the variable has a value, include the content (with the variable replaced)
+      if (value !== undefined && value !== null && value !== "") {
+        return content.replace(new RegExp(`\\{\\{${varName}\\}\\}`, "g"), () => value);
+      }
+      // Otherwise, remove the entire block
+      return "";
+    }
+  );
+}
+
+/**
  * Render the signup email sequence with actual variable values.
+ * Handles both simple {{VAR}} replacements and {{#if VAR}}...{{/if}} conditionals.
  */
 export function renderSignupEmailSequence(variables: SignupEmailVariables): SignupEmailSequence {
-  const replaceVariables = (text: string): string => {
-    let result = text;
+  const renderTemplate = (text: string): string => {
+    // First, process conditionals
+    let result = processConditionals(text, variables);
+
+    // Then replace remaining simple variables
     for (const [key, value] of Object.entries(variables)) {
       if (value !== undefined && value !== null) {
         result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
       }
     }
+
+    // Clean up multiple consecutive newlines (more than 2)
+    result = result.replace(/\n{3,}/g, "\n\n");
+
     return result;
   };
 
   return {
     email_1: {
       ...SIGNUP_EMAIL_TEMPLATES.email_1,
-      subject: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_1.subject),
-      body: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_1.body),
+      subject: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_1.subject),
+      body: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_1.body),
     },
     email_2: {
       ...SIGNUP_EMAIL_TEMPLATES.email_2,
-      subject: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_2.subject),
-      body: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_2.body),
+      subject: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_2.subject),
+      body: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_2.body),
     },
     email_3: {
       ...SIGNUP_EMAIL_TEMPLATES.email_3,
-      subject: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_3.subject),
-      body: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_3.body),
+      subject: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_3.subject),
+      body: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_3.body),
     },
     email_4: {
       ...SIGNUP_EMAIL_TEMPLATES.email_4,
-      subject: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_4.subject),
-      body: replaceVariables(SIGNUP_EMAIL_TEMPLATES.email_4.body),
+      subject: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_4.subject),
+      body: renderTemplate(SIGNUP_EMAIL_TEMPLATES.email_4.body),
     },
   };
 }

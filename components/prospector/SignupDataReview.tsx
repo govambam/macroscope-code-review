@@ -7,7 +7,7 @@ import { findConnectionMatches } from "@/lib/constants/macroscope-team";
 
 interface SignupDataReviewProps {
   initialData: ParsedSignupData;
-  onSave: (data: ParsedSignupData, apolloContactId?: string | null) => void;
+  onSave: (data: ParsedSignupData, apolloContactId?: string | null, connectionMatches?: ConnectionMatch[]) => void;
   onBack: () => void;
 }
 
@@ -174,7 +174,7 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
   }
 
   function handleContinue() {
-    onSave(data, apolloContactId);
+    onSave(data, apolloContactId, connectionMatches);
   }
 
   // Check if required fields are filled
