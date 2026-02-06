@@ -43,6 +43,7 @@ interface SessionData {
   bugs_found: number;
   emails_sent: number;
   apollo_account_id: string | null;
+  workflow_type: ProspectorWorkflowType | null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -194,6 +195,16 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
       workflow.validateSession(session.created_at);
     }
   }, [session?.created_at, workflow.validateSession]);
+
+  // Initialize workflow type from session if it was previously saved
+  React.useEffect(() => {
+    if (session?.workflow_type && !workflowType) {
+      setWorkflowType(session.workflow_type);
+      if (session.workflow_type === "signup-outreach") {
+        setSignupStep(1);
+      }
+    }
+  }, [session?.workflow_type, workflowType]);
 
   function handleEditSaved() {
     refetch();
@@ -767,10 +778,20 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     }
   }, [workflowType, signupDataLoaded, sessionId]);
 
-  function handleWorkflowSelect(type: ProspectorWorkflowType) {
+  async function handleWorkflowSelect(type: ProspectorWorkflowType) {
     setWorkflowType(type);
     if (type === "signup-outreach") {
       setSignupStep(1);
+    }
+    // Save workflow type to session
+    try {
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow_type: type }),
+      });
+    } catch (error) {
+      console.error("Failed to save workflow type:", error);
     }
   }
 

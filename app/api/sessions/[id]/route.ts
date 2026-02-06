@@ -86,12 +86,21 @@ export async function PATCH(
       );
     }
 
-    const { company_name, github_org, github_repo, status, notes } = body;
+    const { company_name, github_org, github_repo, status, notes, workflow_type } = body;
 
     // Validate status if provided
     if (status !== undefined && status !== "in_progress" && status !== "completed") {
       return NextResponse.json(
         { success: false, error: "status must be 'in_progress' or 'completed'" },
+        { status: 400 }
+      );
+    }
+
+    // Validate workflow_type if provided
+    const validWorkflowTypes = ['pr-analysis', 'signup-outreach'];
+    if (workflow_type !== undefined && !validWorkflowTypes.includes(workflow_type)) {
+      return NextResponse.json(
+        { success: false, error: "workflow_type must be 'pr-analysis' or 'signup-outreach'" },
         { status: 400 }
       );
     }
@@ -102,6 +111,7 @@ export async function PATCH(
       githubRepo: github_repo,
       status: status as ProspectingSessionStatus | undefined,
       notes,
+      workflowType: workflow_type,
     });
 
     if (!updated) {

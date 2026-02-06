@@ -1644,6 +1644,7 @@ export function updateProspectingSession(
     githubRepo?: string | null;
     status?: ProspectingSessionStatus;
     notes?: string | null;
+    workflowType?: ProspectorWorkflowType;
   }
 ): boolean {
   const db = getDatabase();
@@ -1671,6 +1672,10 @@ export function updateProspectingSession(
   if (updates.notes !== undefined) {
     setClauses.push('notes = ?');
     params.push(updates.notes);
+  }
+  if (updates.workflowType !== undefined) {
+    setClauses.push('workflow_type = ?');
+    params.push(updates.workflowType);
   }
 
   params.push(id);
