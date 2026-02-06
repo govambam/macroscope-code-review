@@ -444,11 +444,19 @@ function initializeSchema(db: Database.Database): void {
       raw_slack_thread TEXT,
       parsed_data_json TEXT,
       email_variables_json TEXT,
+      apollo_enrichment_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (session_id) REFERENCES prospecting_sessions(id) ON DELETE CASCADE
     )
   `);
+
+  // Migration: Add apollo_enrichment_json column if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE signup_leads ADD COLUMN apollo_enrichment_json TEXT`);
+  } catch {
+    // Column already exists
+  }
 
   // Create index for signup leads by session
   db.exec(`
@@ -1758,6 +1766,7 @@ export interface SignupLeadRecord {
   raw_slack_thread: string | null;
   parsed_data_json: string | null;
   email_variables_json: string | null;
+  apollo_enrichment_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1843,6 +1852,23 @@ export function updateSignupLeadEmailVariables(id: number, emailVariablesJson: s
   `);
 
   const result = stmt.run(emailVariablesJson, now, id);
+  return result.changes > 0;
+}
+
+/**
+ * Update a signup lead's Apollo enrichment data.
+ */
+export function updateSignupLeadApolloEnrichment(id: number, apolloEnrichmentJson: string): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE signup_leads
+    SET apollo_enrichment_json = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(apolloEnrichmentJson, now, id);
   return result.changes > 0;
 }
 
