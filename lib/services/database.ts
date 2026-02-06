@@ -1544,7 +1544,7 @@ export function createProspectingSession(
     now,
     now,
     options.notes ?? null,
-    options.workflowType ?? 'pr-analysis',
+    options.workflowType ?? null,
     options.apolloAccountId ?? null
   ) as { id: number };
 
