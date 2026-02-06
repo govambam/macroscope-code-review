@@ -200,15 +200,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     };
 
     // If person found but no contact_id and create_contact is true, create the contact
-    if (!person.contact_id && create_contact && person.email) {
-      const contactResult = await createContactFromPerson(apolloApiKey, person);
+    // Use our provided email as fallback if Apollo doesn't have one
+    const emailForContact = person.email || email;
+    if (!person.contact_id && create_contact && emailForContact) {
+      const contactResult = await createContactFromPerson(apolloApiKey, {
+        ...person,
+        email: emailForContact,
+        // Use our data as fallback
+        first_name: person.first_name || first_name,
+        last_name: person.last_name || last_name,
+      });
       if (contactResult.contactId) {
         personData.contactId = contactResult.contactId;
+        // Also update the personData email if we used our provided email
+        if (!person.email && email) {
+          personData.email = email;
+        }
         return NextResponse.json<ApolloPersonResponse>({
           success: true,
           person: personData,
           contactCreated: true,
         });
+      }
+    }
+
+    // If person already has a contact_id and we have additional data to update, update the contact
+    if (person.contact_id && create_contact && (email || first_name || last_name)) {
+      try {
+        await updateContact(apolloApiKey, person.contact_id, {
+          email: email || undefined,
+          first_name: first_name || undefined,
+          last_name: last_name || undefined,
+          linkedin_url: linkedin_url || undefined,
+          organization_name: organization_name || undefined,
+        });
+      } catch {
+        // Don't fail if update fails, we still have the contact ID
+        console.warn("Failed to update existing contact, continuing anyway");
       }
     }
 
@@ -379,5 +407,52 @@ async function createContactFromPerson(
   } catch (error) {
     console.error("Apollo create contact from person error:", error);
     return { contactId: null };
+  }
+}
+
+/**
+ * Update an existing contact in Apollo with additional data
+ */
+async function updateContact(
+  apiKey: string,
+  contactId: string,
+  data: {
+    email?: string;
+    first_name?: string;
+    last_name?: string;
+    linkedin_url?: string;
+    organization_name?: string;
+  }
+): Promise<void> {
+  // Only include fields that have values
+  const updateData: Record<string, string> = {};
+  if (data.email) updateData.email = data.email;
+  if (data.first_name) updateData.first_name = data.first_name;
+  if (data.last_name) updateData.last_name = data.last_name;
+  if (data.linkedin_url) updateData.linkedin_url = data.linkedin_url;
+  if (data.organization_name) updateData.organization_name = data.organization_name;
+
+  // Skip if nothing to update
+  if (Object.keys(updateData).length === 0) {
+    return;
+  }
+
+  const response = await fetch(
+    `https://api.apollo.io/api/v1/contacts/${encodeURIComponent(contactId)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "X-Api-Key": apiKey,
+      },
+      body: JSON.stringify(updateData),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Apollo update contact error:", response.status, errorText);
+    throw new Error(`Failed to update contact: ${response.status}`);
   }
 }
