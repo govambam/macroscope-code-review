@@ -15,6 +15,7 @@ interface ApolloUpdateResponse {
 // Apollo custom field IDs for the email template variables.
 // These were created via the Apollo API and map to our AllEmailVariables keys.
 const APOLLO_FIELD_IDS: Record<string, string> = {
+  // PR Analysis fields
   BUG_DESCRIPTION: "69837cab139a64001576391f",
   BUG_IMPACT: "69837cb9cb2415000db6e25d",
   FIX_SUGGESTION: "69837cce9c0fa9001d7489e1",
@@ -23,6 +24,16 @@ const APOLLO_FIELD_IDS: Record<string, string> = {
   PR_LINK: "69837d0186a00f0015c0625a",
   BUG_FIX_URL: "69837d10955d06000db56beb",
   SIMULATED_PR_LINK: "69837d1e618f6b0019bfa967",
+  // Signup Outreach fields
+  REPO_NAME: "69854fc6db95f7001188b479",
+  GITHUB_USERNAME: "69854ff4f0e582000dbe327a",
+  COMPANY_SIZE: "6985732124547e0019b9150b",
+  ENG_COUNT: "698573322a43a4001510831a",
+  ACCOUNT_TYPE: "69857342f9756800153da952",
+  REPO_LANGUAGE: "6985735365a7d2002115b8fc",
+  SWAG_OFFER: "69855a5bc61da70019e27778",
+  LOCATION_INVITE: "69855a5a599d9d0015f54f1b",
+  CONNECTION_BLURB: "69855a59f975680021c6480b",
 };
 
 /**
@@ -71,11 +82,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Build the custom fields object using field IDs
     const customFieldsById: Record<string, string> = {};
+    const mappedFields: string[] = [];
+    const unmappedFields: string[] = [];
+
     for (const [varName, value] of Object.entries(variables)) {
       const fieldId = APOLLO_FIELD_IDS[varName];
-      if (fieldId) {
+      if (fieldId && value) {
         customFieldsById[fieldId] = value;
+        mappedFields.push(varName);
+      } else if (!fieldId) {
+        unmappedFields.push(varName);
       }
+    }
+
+    console.log("Apollo update - mapped fields:", mappedFields);
+    if (unmappedFields.length > 0) {
+      console.log("Apollo update - unmapped fields (no field ID):", unmappedFields);
     }
 
     const requestBody = {

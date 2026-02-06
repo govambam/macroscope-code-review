@@ -46,6 +46,21 @@ export function SignupDataReview({ initialData, initialApolloEnrichment, leadId,
     setHasChanges(JSON.stringify(data) !== JSON.stringify(initialData));
   }, [data, initialData]);
 
+  // Auto-fetch from Apollo when we have a LinkedIn URL and haven't already enriched
+  const hasAttemptedAutoFetch = useRef(false);
+  useEffect(() => {
+    if (
+      data.linkedinUrl &&
+      !apolloSuccess &&
+      !apolloFetching &&
+      !hasAttemptedAutoFetch.current &&
+      !initialApolloEnrichment // Don't auto-fetch if we already have enrichment
+    ) {
+      hasAttemptedAutoFetch.current = true;
+      fetchFromApollo();
+    }
+  }, [data.linkedinUrl, apolloSuccess, apolloFetching, initialApolloEnrichment]);
+
   async function fetchFromApollo() {
     if (!data.linkedinUrl) {
       setApolloError("Please enter a LinkedIn URL first");
