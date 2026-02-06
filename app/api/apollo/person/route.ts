@@ -59,6 +59,7 @@ interface ApolloPersonResponse {
  * - first_name: string (optional) - First name for contact creation
  * - last_name: string (optional) - Last name for contact creation
  * - organization_name: string (optional) - Company name for contact creation
+ * - account_id: string (optional) - Apollo account ID to associate the contact with
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const { linkedin_url, create_contact, email, first_name, last_name, organization_name } = body;
+    const { linkedin_url, create_contact, email, first_name, last_name, organization_name, account_id } = body;
 
     if (!linkedin_url || typeof linkedin_url !== "string") {
       return NextResponse.json<ApolloPersonResponse>(
@@ -116,6 +117,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           last_name,
           linkedin_url,
           organization_name,
+          account_id,
         });
       }
 
@@ -150,6 +152,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           last_name,
           linkedin_url,
           organization_name,
+          account_id,
         });
       }
       return NextResponse.json<ApolloPersonResponse>(
@@ -209,7 +212,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // Use our data as fallback
         first_name: person.first_name || first_name,
         last_name: person.last_name || last_name,
-      });
+      }, account_id);
       if (contactResult.contactId) {
         personData.contactId = contactResult.contactId;
         // Also update the personData email if we used our provided email
@@ -225,7 +228,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // If person already has a contact_id and we have additional data to update, update the contact
-    if (person.contact_id && create_contact && (email || first_name || last_name)) {
+    // Also associate with account if provided
+    if (person.contact_id && create_contact && (email || first_name || last_name || account_id)) {
       try {
         await updateContact(apolloApiKey, person.contact_id, {
           email: email || undefined,
@@ -233,6 +237,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           last_name: last_name || undefined,
           linkedin_url: linkedin_url || undefined,
           organization_name: organization_name || undefined,
+          account_id: account_id || undefined,
         });
       } catch {
         // Don't fail if update fails, we still have the contact ID
@@ -287,6 +292,7 @@ async function createContact(
     last_name?: string;
     linkedin_url?: string;
     organization_name?: string;
+    account_id?: string;
   }
 ): Promise<NextResponse<ApolloPersonResponse>> {
   if (!info.email) {
@@ -297,6 +303,21 @@ async function createContact(
   }
 
   try {
+    const requestBody: Record<string, string | undefined> = {
+      email: info.email,
+      first_name: info.first_name || undefined,
+      last_name: info.last_name || undefined,
+      linkedin_url: info.linkedin_url || undefined,
+      organization_name: info.organization_name || undefined,
+    };
+
+    // Associate contact with account if provided
+    if (info.account_id) {
+      requestBody.account_id = info.account_id;
+    }
+
+    console.log("Creating Apollo contact with account_id:", info.account_id || "none");
+
     const response = await fetch("https://api.apollo.io/api/v1/contacts", {
       method: "POST",
       headers: {
@@ -304,13 +325,7 @@ async function createContact(
         "Cache-Control": "no-cache",
         "X-Api-Key": apiKey,
       },
-      body: JSON.stringify({
-        email: info.email,
-        first_name: info.first_name || undefined,
-        last_name: info.last_name || undefined,
-        linkedin_url: info.linkedin_url || undefined,
-        organization_name: info.organization_name || undefined,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -374,13 +389,29 @@ async function createContactFromPerson(
     last_name?: string;
     linkedin_url?: string;
     organization?: { name?: string };
-  }
+  },
+  accountId?: string
 ): Promise<{ contactId: string | null }> {
   if (!person.email) {
     return { contactId: null };
   }
 
   try {
+    const requestBody: Record<string, string | undefined> = {
+      email: person.email,
+      first_name: person.first_name || undefined,
+      last_name: person.last_name || undefined,
+      linkedin_url: person.linkedin_url || undefined,
+      organization_name: person.organization?.name || undefined,
+    };
+
+    // Associate contact with account if provided
+    if (accountId) {
+      requestBody.account_id = accountId;
+    }
+
+    console.log("Creating Apollo contact from person with account_id:", accountId || "none");
+
     const response = await fetch("https://api.apollo.io/api/v1/contacts", {
       method: "POST",
       headers: {
@@ -388,13 +419,7 @@ async function createContactFromPerson(
         "Cache-Control": "no-cache",
         "X-Api-Key": apiKey,
       },
-      body: JSON.stringify({
-        email: person.email,
-        first_name: person.first_name || undefined,
-        last_name: person.last_name || undefined,
-        linkedin_url: person.linkedin_url || undefined,
-        organization_name: person.organization?.name || undefined,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -422,6 +447,7 @@ async function updateContact(
     last_name?: string;
     linkedin_url?: string;
     organization_name?: string;
+    account_id?: string;
   }
 ): Promise<void> {
   // Only include fields that have values
@@ -431,11 +457,14 @@ async function updateContact(
   if (data.last_name) updateData.last_name = data.last_name;
   if (data.linkedin_url) updateData.linkedin_url = data.linkedin_url;
   if (data.organization_name) updateData.organization_name = data.organization_name;
+  if (data.account_id) updateData.account_id = data.account_id;
 
   // Skip if nothing to update
   if (Object.keys(updateData).length === 0) {
     return;
   }
+
+  console.log("Updating Apollo contact:", contactId, "with account_id:", data.account_id || "none");
 
   const response = await fetch(
     `https://api.apollo.io/api/v1/contacts/${encodeURIComponent(contactId)}`,

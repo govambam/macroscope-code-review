@@ -91,8 +91,10 @@ export function ApolloSection({
       }
 
       // If we have a contact ID, create a task for them
+      console.log("Apollo send - contactId for task creation:", contactId || "NONE");
       if (contactId) {
         try {
+          console.log("Creating Apollo task for contact:", contactId);
           const taskRes = await fetch("/api/apollo/task", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -104,6 +106,7 @@ export function ApolloSection({
           });
 
           const taskData = await taskRes.json();
+          console.log("Apollo task creation result:", taskData);
           if (taskData.success) {
             setTaskCreated(true);
           } else {
@@ -114,6 +117,8 @@ export function ApolloSection({
           console.warn("Failed to create task:", taskErr);
           // Don't fail the whole operation if task creation fails
         }
+      } else {
+        console.warn("No contactId available - skipping task creation");
       }
 
       setSendSuccess(true);
