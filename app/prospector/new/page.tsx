@@ -82,6 +82,7 @@ export default function NewSessionPage() {
   }
 
   async function handleSelectApolloAccount(account: ApolloAccount) {
+    const savedName = account.name; // Store name to check for race condition
     setCompanyName(account.name);
     setShowCompanyDropdown(false);
     setApolloAccounts([]);
@@ -100,21 +101,33 @@ export default function NewSessionPage() {
       });
       const data = await res.json();
 
-      if (data.success && data.account) {
-        // Use the saved account (may have a different ID if it was newly created)
-        setSelectedApolloAccount(data.account);
-      } else if (res.status === 422) {
-        // Account already exists in their CRM - use the original account
-        setSelectedApolloAccount(account);
-      } else {
-        // Fallback: use the searched account even if save failed
-        setSelectedApolloAccount(account);
-        console.warn("Failed to save company to Apollo:", data.error);
-      }
+      // Check if user changed the company name while we were saving (race condition)
+      // Use callback form to get current state value
+      setCompanyName((currentName) => {
+        if (currentName !== savedName) {
+          // User changed input - don't set stale selection
+          return currentName;
+        }
+        // Name still matches - safe to set the selected account
+        if (data.success && data.account) {
+          setSelectedApolloAccount(data.account);
+        } else {
+          setSelectedApolloAccount(account);
+          if (!res.ok && res.status !== 422) {
+            console.warn("Failed to save company to Apollo:", data.error);
+          }
+        }
+        return currentName;
+      });
     } catch (err) {
-      // Fallback: use the searched account even if save failed
-      setSelectedApolloAccount(account);
-      console.warn("Failed to save company to Apollo:", err);
+      // Check for race condition before setting fallback
+      setCompanyName((currentName) => {
+        if (currentName === savedName) {
+          setSelectedApolloAccount(account);
+        }
+        console.warn("Failed to save company to Apollo:", err);
+        return currentName;
+      });
     } finally {
       setApolloSaving(false);
     }
