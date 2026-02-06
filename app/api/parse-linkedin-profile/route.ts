@@ -92,7 +92,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Extract model from prompt
     const modelMatch = promptTemplate.match(/Model:\s*(\S+)/i);
-    const model = modelMatch ? modelMatch[1] : "claude-haiku-3-5-20241022";
+    const model = modelMatch ? modelMatch[1] : "claude-haiku-4-5-20251001";
 
     // Initialize Anthropic client
     const anthropic = new Anthropic({ apiKey });

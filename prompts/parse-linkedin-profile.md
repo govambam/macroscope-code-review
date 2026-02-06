@@ -1,5 +1,5 @@
 # Parse LinkedIn Profile
-Model: claude-haiku-3-5-20241022
+Model: claude-haiku-4-5-20251001
 Purpose: Extract work history from LinkedIn profile content (text or PDF)
 
 ---
