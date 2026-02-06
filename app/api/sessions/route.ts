@@ -77,9 +77,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate workflow_type if provided
+    // Validate workflow_type if provided - don't default, let user choose on session page
     const validWorkflowTypes = ['pr-analysis', 'signup-outreach'];
-    const workflowType = validWorkflowTypes.includes(workflow_type) ? workflow_type as ProspectorWorkflowType : 'pr-analysis';
+    const workflowType = validWorkflowTypes.includes(workflow_type) ? workflow_type as ProspectorWorkflowType : undefined;
 
     const id = createProspectingSession(company_name.trim(), createdBy, {
       githubOrg: typeof github_org === "string" ? github_org.trim() || null : null,
