@@ -1,31 +1,42 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import type { ParsedSignupData } from "@/lib/types/signup-lead";
+import type { ParsedSignupData, ApolloEnrichmentData } from "@/lib/types/signup-lead";
 import type { WorkHistoryEntry, ConnectionMatch } from "@/lib/constants/macroscope-team";
 import { findConnectionMatches } from "@/lib/constants/macroscope-team";
 
 interface SignupDataReviewProps {
   initialData: ParsedSignupData;
+  initialApolloEnrichment?: ApolloEnrichmentData | null;
+  leadId: number | null;
   onSave: (data: ParsedSignupData, apolloContactId?: string | null, connectionMatches?: ConnectionMatch[]) => void;
+  onApolloEnrichment?: (enrichment: ApolloEnrichmentData) => void;
   onBack: () => void;
 }
 
-export function SignupDataReview({ initialData, onSave, onBack }: SignupDataReviewProps) {
+export function SignupDataReview({ initialData, initialApolloEnrichment, leadId, onSave, onApolloEnrichment, onBack }: SignupDataReviewProps) {
   const [data, setData] = useState<ParsedSignupData>(initialData);
   const [hasChanges, setHasChanges] = useState(false);
 
   // Apollo person lookup state
   const [apolloFetching, setApolloFetching] = useState(false);
   const [apolloError, setApolloError] = useState<string | null>(null);
-  const [apolloSuccess, setApolloSuccess] = useState(false);
-  const [apolloContactId, setApolloContactId] = useState<string | null>(null);
-  const [contactCreated, setContactCreated] = useState(false);
+  const [apolloSuccess, setApolloSuccess] = useState(() => !!initialApolloEnrichment);
+  const [apolloContactId, setApolloContactId] = useState<string | null>(
+    () => initialApolloEnrichment?.apolloContactId ?? null
+  );
+  const [contactCreated, setContactCreated] = useState(
+    () => initialApolloEnrichment?.contactCreated ?? false
+  );
 
   // LinkedIn profile parsing state (fallback)
   const [linkedinProfileText, setLinkedinProfileText] = useState("");
-  const [workHistory, setWorkHistory] = useState<WorkHistoryEntry[]>([]);
-  const [connectionMatches, setConnectionMatches] = useState<ConnectionMatch[]>([]);
+  const [workHistory, setWorkHistory] = useState<WorkHistoryEntry[]>(
+    () => initialApolloEnrichment?.workHistory ?? []
+  );
+  const [connectionMatches, setConnectionMatches] = useState<ConnectionMatch[]>(
+    () => (initialApolloEnrichment?.connectionMatches as ConnectionMatch[]) ?? []
+  );
   const [linkedinParsing, setLinkedinParsing] = useState(false);
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -87,8 +98,11 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
       }));
 
       // Convert Apollo employment history to our WorkHistoryEntry format
+      let history: WorkHistoryEntry[] = [];
+      let matches: ConnectionMatch[] = [];
+
       if (person.employmentHistory && person.employmentHistory.length > 0) {
-        const history: WorkHistoryEntry[] = person.employmentHistory.map((emp: {
+        history = person.employmentHistory.map((emp: {
           company: string;
           title: string;
           startDate: string | null;
@@ -103,11 +117,43 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
         setWorkHistory(history);
 
         // Find connection matches with Macroscope team
-        const matches = findConnectionMatches(history);
+        matches = findConnectionMatches(history);
         setConnectionMatches(matches);
       }
 
       setApolloSuccess(true);
+
+      // Save enrichment data
+      const enrichment: ApolloEnrichmentData = {
+        apolloContactId: person.contactId || null,
+        contactCreated: result.contactCreated || false,
+        workHistory: history,
+        connectionMatches: matches.map(m => ({
+          teamMember: m.teamMember,
+          teamMemberRole: m.teamMemberRole,
+          prospectCompany: m.prospectCompany,
+          blurb: m.blurb,
+        })),
+        enrichedAt: new Date().toISOString(),
+      };
+
+      // Notify parent
+      if (onApolloEnrichment) {
+        onApolloEnrichment(enrichment);
+      }
+
+      // Save to database
+      if (leadId) {
+        try {
+          await fetch("/api/signup-lead", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ leadId, apolloEnrichment: enrichment }),
+          });
+        } catch {
+          // Continue even if save fails
+        }
+      }
     } catch (err) {
       setApolloError(err instanceof Error ? err.message : "Failed to fetch from Apollo");
     } finally {
@@ -253,7 +299,11 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
                 type="button"
                 onClick={fetchFromApollo}
                 disabled={apolloFetching || !data.linkedinUrl}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap"
+                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                  apolloSuccess
+                    ? "text-green-700 bg-green-100 hover:bg-green-200 border border-green-300"
+                    : "text-white bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                }`}
               >
                 {apolloFetching ? (
                   <>
@@ -262,6 +312,13 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                     Fetching...
+                  </>
+                ) : apolloSuccess ? (
+                  <>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Enriched with Apollo
                   </>
                 ) : (
                   <>

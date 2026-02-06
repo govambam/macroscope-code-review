@@ -104,6 +104,27 @@ export interface SignupEmailSequence {
 }
 
 /**
+ * Apollo enrichment data stored for a signup lead.
+ */
+export interface ApolloEnrichmentData {
+  apolloContactId: string | null;
+  contactCreated: boolean;
+  workHistory: Array<{
+    company: string;
+    title: string;
+    startDate: string;
+    endDate: string;
+  }>;
+  connectionMatches: Array<{
+    teamMember: string;
+    teamMemberRole: string;
+    prospectCompany: string;
+    blurb: string;
+  }>;
+  enrichedAt: string;
+}
+
+/**
  * Database record for a signup lead.
  */
 export interface SignupLeadRecord {
@@ -112,6 +133,7 @@ export interface SignupLeadRecord {
   raw_slack_thread: string | null;
   parsed_data_json: string | null;
   email_variables_json: string | null;
+  apollo_enrichment_json: string | null;
   created_at: string;
   updated_at: string;
 }

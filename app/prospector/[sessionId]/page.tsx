@@ -25,7 +25,7 @@ import { SignupDataReview } from "@/components/prospector/SignupDataReview";
 import { SignupEmailSection } from "@/components/prospector/SignupEmailSection";
 import { parseGitHubPRUrl, parseGitHubRepo } from "@/lib/utils/github-url-parser";
 import type { AnalysisApiResponse, EmailSequence } from "@/lib/types/prospector-analysis";
-import type { ProspectorWorkflowType, ParsedSignupData, SignupEmailVariables } from "@/lib/types/signup-lead";
+import type { ProspectorWorkflowType, ParsedSignupData, SignupEmailVariables, ApolloEnrichmentData } from "@/lib/types/signup-lead";
 import type { ConnectionMatch } from "@/lib/constants/macroscope-team";
 import { WorkflowProvider, useWorkflow, type SelectedPR } from "./WorkflowContext";
 
@@ -42,6 +42,8 @@ interface SessionData {
   pr_count: number;
   bugs_found: number;
   emails_sent: number;
+  apollo_account_id: string | null;
+  workflow_type: ProspectorWorkflowType | null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -165,6 +167,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4>(1); // 1=Paste, 2=Review, 3=Email, 4=Apollo
   const [signupApolloContactId, setSignupApolloContactId] = useState<string | null>(null);
   const [signupConnectionMatches, setSignupConnectionMatches] = useState<ConnectionMatch[]>([]);
+  const [signupApolloEnrichment, setSignupApolloEnrichment] = useState<ApolloEnrichmentData | null>(null);
+  const [signupDataLoaded, setSignupDataLoaded] = useState(false);
 
   const {
     data,
@@ -191,6 +195,14 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
       workflow.validateSession(session.created_at);
     }
   }, [session?.created_at, workflow.validateSession]);
+
+  // Initialize workflow type from session if it was previously saved
+  // Note: We don't set signupStep here - let the data loading effect determine the correct step
+  React.useEffect(() => {
+    if (session?.workflow_type && !workflowType) {
+      setWorkflowType(session.workflow_type);
+    }
+  }, [session?.workflow_type, workflowType]);
 
   function handleEditSaved() {
     refetch();
@@ -697,10 +709,95 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   // ── Signup Outreach Handlers ─────────────────────────────────
 
-  function handleWorkflowSelect(type: ProspectorWorkflowType) {
+  // Load saved signup lead data when entering signup-outreach workflow
+  React.useEffect(() => {
+    if (workflowType === "signup-outreach" && !signupDataLoaded) {
+      setSignupDataLoaded(true);
+
+      // Load existing signup lead for this session
+      fetch(`/api/signup-lead?sessionId=${sessionId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.lead) {
+            const lead = data.lead;
+            let restoredStep: 1 | 2 | 3 | 4 = 1; // Default to step 1
+
+            // Restore lead ID
+            setSignupLeadId(lead.id);
+
+            // Restore raw Slack thread
+            if (lead.raw_slack_thread) {
+              setSignupRawThread(lead.raw_slack_thread);
+            }
+
+            // Restore parsed data
+            if (lead.parsed_data_json) {
+              try {
+                const parsedData = JSON.parse(lead.parsed_data_json);
+                setSignupParsedData(parsedData);
+                // If we have parsed data, user has at least completed step 1
+                restoredStep = 2;
+              } catch {
+                // Invalid JSON, ignore
+              }
+            }
+
+            // Restore Apollo enrichment
+            if (lead.apollo_enrichment_json) {
+              try {
+                const enrichment = JSON.parse(lead.apollo_enrichment_json);
+                setSignupApolloEnrichment(enrichment);
+                if (enrichment.apolloContactId) {
+                  setSignupApolloContactId(enrichment.apolloContactId);
+                }
+                if (enrichment.connectionMatches) {
+                  setSignupConnectionMatches(enrichment.connectionMatches);
+                }
+              } catch {
+                // Invalid JSON, ignore
+              }
+            }
+
+            // Restore email variables
+            if (lead.email_variables_json) {
+              try {
+                const variables = JSON.parse(lead.email_variables_json);
+                setSignupEmailVariables(variables);
+                // If we have email variables, user has completed email generation (step 3)
+                restoredStep = 4;
+              } catch {
+                // Invalid JSON, ignore
+              }
+            }
+
+            // Set the restored step
+            setSignupStep(restoredStep);
+          } else {
+            // No lead found, start at step 1
+            setSignupStep(1);
+          }
+        })
+        .catch(() => {
+          // Continue without loading - user can start fresh
+          setSignupStep(1);
+        });
+    }
+  }, [workflowType, signupDataLoaded, sessionId]);
+
+  async function handleWorkflowSelect(type: ProspectorWorkflowType) {
     setWorkflowType(type);
     if (type === "signup-outreach") {
       setSignupStep(1);
+    }
+    // Save workflow type to session
+    try {
+      await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow_type: type }),
+      });
+    } catch (error) {
+      console.error("Failed to save workflow type:", error);
     }
   }
 
@@ -759,6 +856,16 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
 
   function handleSignupBackToThread() {
     setSignupStep(1);
+  }
+
+  function handleSignupApolloEnrichment(enrichment: ApolloEnrichmentData) {
+    setSignupApolloEnrichment(enrichment);
+    if (enrichment.apolloContactId) {
+      setSignupApolloContactId(enrichment.apolloContactId);
+    }
+    if (enrichment.connectionMatches) {
+      setSignupConnectionMatches(enrichment.connectionMatches as ConnectionMatch[]);
+    }
   }
 
   function handleSignupEmailVariablesGenerated(variables: SignupEmailVariables) {
@@ -969,7 +1076,10 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   <div className="p-5">
                     <SignupDataReview
                       initialData={signupParsedData}
+                      initialApolloEnrichment={signupApolloEnrichment}
+                      leadId={signupLeadId}
                       onSave={handleSignupDataSaved}
+                      onApolloEnrichment={handleSignupApolloEnrichment}
                       onBack={handleSignupBackToThread}
                     />
                   </div>
@@ -1031,6 +1141,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                     currentAnalysisId={null}
                     onSendComplete={handleSignupApolloComplete}
                     contactId={signupApolloContactId}
+                    preSelectedAccountId={session?.apollo_account_id}
+                    preSelectedAccountName={session?.company_name}
                   />
                 </div>
               </section>
@@ -1515,6 +1627,8 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                   defaultSearchQuery={session?.company_name ?? ""}
                   currentAnalysisId={analysisData?.analysisId ?? null}
                   onSendComplete={handleApolloSendComplete}
+                  preSelectedAccountId={session?.apollo_account_id}
+                  preSelectedAccountName={session?.company_name}
                 />
               ) : (
                 <p className="text-sm text-text-muted italic">Ready to send after email generation.</p>

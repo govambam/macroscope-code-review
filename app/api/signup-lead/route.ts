@@ -4,9 +4,10 @@ import {
   getSignupLeadForSession,
   updateSignupLeadParsedData,
   updateSignupLeadEmailVariables,
+  updateSignupLeadApolloEnrichment,
   type SignupLeadRecord,
 } from "@/lib/services/database";
-import type { SignupLeadApiResponse, ParsedSignupData, SignupEmailVariables } from "@/lib/types/signup-lead";
+import type { SignupLeadApiResponse, ParsedSignupData, SignupEmailVariables, ApolloEnrichmentData } from "@/lib/types/signup-lead";
 
 interface CreateSignupLeadRequest {
   sessionId: number;
@@ -19,6 +20,7 @@ interface UpdateSignupLeadRequest {
   leadId: number;
   parsedData?: ParsedSignupData;
   emailVariables?: SignupEmailVariables;
+  apolloEnrichment?: ApolloEnrichmentData;
 }
 
 interface GetSignupLeadRequest {
@@ -61,6 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       raw_slack_thread: rawSlackThread || null,
       parsed_data_json: parsedData ? JSON.stringify(parsedData) : null,
       email_variables_json: emailVariables ? JSON.stringify(emailVariables) : null,
+      apollo_enrichment_json: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -143,7 +146,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
-    const { leadId, parsedData, emailVariables } = body as UpdateSignupLeadRequest;
+    const { leadId, parsedData, emailVariables, apolloEnrichment } = body as UpdateSignupLeadRequest;
 
     if (!leadId || typeof leadId !== "number") {
       return NextResponse.json<SignupLeadApiResponse>(
@@ -167,6 +170,16 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       if (!success) {
         return NextResponse.json<SignupLeadApiResponse>(
           { success: false, error: "Failed to update email variables - lead not found" },
+          { status: 404 }
+        );
+      }
+    }
+
+    if (apolloEnrichment) {
+      const success = updateSignupLeadApolloEnrichment(leadId, JSON.stringify(apolloEnrichment));
+      if (!success) {
+        return NextResponse.json<SignupLeadApiResponse>(
+          { success: false, error: "Failed to update Apollo enrichment - lead not found" },
           { status: 404 }
         );
       }

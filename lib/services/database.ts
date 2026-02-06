@@ -119,6 +119,7 @@ export interface ProspectingSessionRecord {
   status: ProspectingSessionStatus;
   notes: string | null;
   workflow_type: ProspectorWorkflowType;
+  apollo_account_id: string | null;
 }
 
 export interface ProspectingSessionWithStats extends ProspectingSessionRecord {
@@ -444,11 +445,19 @@ function initializeSchema(db: Database.Database): void {
       raw_slack_thread TEXT,
       parsed_data_json TEXT,
       email_variables_json TEXT,
+      apollo_enrichment_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (session_id) REFERENCES prospecting_sessions(id) ON DELETE CASCADE
     )
   `);
+
+  // Migration: Add apollo_enrichment_json column if it doesn't exist
+  const signupLeadsColumns = db.prepare("PRAGMA table_info(signup_leads)").all() as { name: string }[];
+  const signupLeadsColumnNames = signupLeadsColumns.map(c => c.name);
+  if (!signupLeadsColumnNames.includes("apollo_enrichment_json")) {
+    db.exec("ALTER TABLE signup_leads ADD COLUMN apollo_enrichment_json TEXT");
+  }
 
   // Create index for signup leads by session
   db.exec(`
@@ -1635,6 +1644,7 @@ export function updateProspectingSession(
     githubRepo?: string | null;
     status?: ProspectingSessionStatus;
     notes?: string | null;
+    workflowType?: ProspectorWorkflowType;
   }
 ): boolean {
   const db = getDatabase();
@@ -1662,6 +1672,10 @@ export function updateProspectingSession(
   if (updates.notes !== undefined) {
     setClauses.push('notes = ?');
     params.push(updates.notes);
+  }
+  if (updates.workflowType !== undefined) {
+    setClauses.push('workflow_type = ?');
+    params.push(updates.workflowType);
   }
 
   params.push(id);
@@ -1758,6 +1772,7 @@ export interface SignupLeadRecord {
   raw_slack_thread: string | null;
   parsed_data_json: string | null;
   email_variables_json: string | null;
+  apollo_enrichment_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1843,6 +1858,23 @@ export function updateSignupLeadEmailVariables(id: number, emailVariablesJson: s
   `);
 
   const result = stmt.run(emailVariablesJson, now, id);
+  return result.changes > 0;
+}
+
+/**
+ * Update a signup lead's Apollo enrichment data.
+ */
+export function updateSignupLeadApolloEnrichment(id: number, apolloEnrichmentJson: string): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    UPDATE signup_leads
+    SET apollo_enrichment_json = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(apolloEnrichmentJson, now, id);
   return result.changes > 0;
 }
 
