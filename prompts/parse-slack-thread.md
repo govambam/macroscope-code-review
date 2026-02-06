@@ -1,5 +1,5 @@
 # Parse Slack Signup Thread
-Model: claude-haiku-3-5-20241022
+Model: claude-haiku-4-5-20251001
 Purpose: Extract structured lead data from a pasted Slack signup notification thread
 
 ---
