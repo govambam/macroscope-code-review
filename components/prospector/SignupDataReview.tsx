@@ -242,6 +242,7 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
                   updateField("linkedinUrl", e.target.value);
                   setApolloSuccess(false);
                   setApolloError(null);
+                  setApolloContactId(null);
                 }}
                 className={`flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary ${
                   apolloSuccess ? "border-green-400 bg-green-50" : "border-border"
