@@ -104,7 +104,8 @@ function formatPromptFile(name: string, data: PromptData): string {
 }
 
 /**
- * Loads prompts from file system and syncs to database if not already present.
+ * Loads prompts from file system and syncs to database.
+ * Creates new prompts if not present, and updates existing prompts if model has changed.
  */
 function syncPromptsFromFiles(): void {
   const promptsDir = path.join(process.cwd(), "prompts");
@@ -127,9 +128,12 @@ function syncPromptsFromFiles(): void {
     const content = fs.readFileSync(filePath, "utf-8");
     const { model, purpose, body } = parsePromptFile(content);
 
-    // Only save to DB if not already present
     const existing = getPrompt(name);
     if (!existing) {
+      // Create new prompt
+      savePrompt(name, body, model, purpose);
+    } else if (existing.model !== model) {
+      // Update existing prompt if model has changed (e.g., model version update)
       savePrompt(name, body, model, purpose);
     }
   }
