@@ -7,7 +7,7 @@ import { findConnectionMatches } from "@/lib/constants/macroscope-team";
 
 interface SignupDataReviewProps {
   initialData: ParsedSignupData;
-  onSave: (data: ParsedSignupData) => void;
+  onSave: (data: ParsedSignupData, apolloContactId?: string | null) => void;
   onBack: () => void;
 }
 
@@ -15,17 +15,105 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
   const [data, setData] = useState<ParsedSignupData>(initialData);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // LinkedIn profile parsing state
+  // Apollo person lookup state
+  const [apolloFetching, setApolloFetching] = useState(false);
+  const [apolloError, setApolloError] = useState<string | null>(null);
+  const [apolloSuccess, setApolloSuccess] = useState(false);
+  const [apolloContactId, setApolloContactId] = useState<string | null>(null);
+  const [contactCreated, setContactCreated] = useState(false);
+
+  // LinkedIn profile parsing state (fallback)
   const [linkedinProfileText, setLinkedinProfileText] = useState("");
   const [workHistory, setWorkHistory] = useState<WorkHistoryEntry[]>([]);
   const [connectionMatches, setConnectionMatches] = useState<ConnectionMatch[]>([]);
   const [linkedinParsing, setLinkedinParsing] = useState(false);
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showManualEntry, setShowManualEntry] = useState(false);
 
   useEffect(() => {
     setHasChanges(JSON.stringify(data) !== JSON.stringify(initialData));
   }, [data, initialData]);
+
+  async function fetchFromApollo() {
+    if (!data.linkedinUrl) {
+      setApolloError("Please enter a LinkedIn URL first");
+      return;
+    }
+
+    setApolloFetching(true);
+    setApolloError(null);
+    setApolloSuccess(false);
+
+    try {
+      const res = await fetch("/api/apollo/person", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          linkedin_url: data.linkedinUrl,
+          create_contact: true, // Auto-create contact if not exists
+          email: data.email,
+          first_name: data.firstName,
+          last_name: data.fullName?.split(" ").slice(1).join(" "),
+          organization_name: data.companyName,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to fetch from Apollo");
+      }
+
+      const person = result.person;
+
+      // Store the contact ID for later use
+      if (person.contactId) {
+        setApolloContactId(person.contactId);
+      }
+      setContactCreated(result.contactCreated || false);
+
+      // Update form fields with Apollo data
+      setData((prev) => ({
+        ...prev,
+        firstName: person.firstName || prev.firstName,
+        fullName: person.fullName || prev.fullName,
+        email: person.email || prev.email,
+        location: person.location || prev.location,
+        currentRole: person.title || prev.currentRole,
+        companyName: person.organization?.name || prev.companyName,
+        companyUrl: person.organization?.domain || prev.companyUrl,
+        companySize: person.organization?.employeeCount || prev.companySize,
+      }));
+
+      // Convert Apollo employment history to our WorkHistoryEntry format
+      if (person.employmentHistory && person.employmentHistory.length > 0) {
+        const history: WorkHistoryEntry[] = person.employmentHistory.map((emp: {
+          company: string;
+          title: string;
+          startDate: string | null;
+          endDate: string | null;
+        }) => ({
+          company: emp.company,
+          title: emp.title,
+          startDate: emp.startDate || "",
+          endDate: emp.endDate || "Present",
+        }));
+
+        setWorkHistory(history);
+
+        // Find connection matches with Macroscope team
+        const matches = findConnectionMatches(history);
+        setConnectionMatches(matches);
+      }
+
+      setApolloSuccess(true);
+    } catch (err) {
+      setApolloError(err instanceof Error ? err.message : "Failed to fetch from Apollo");
+    } finally {
+      setApolloFetching(false);
+    }
+  }
 
   async function parseLinkedInProfile(content: string | File) {
     setLinkedinParsing(true);
@@ -86,7 +174,7 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
   }
 
   function handleContinue() {
-    onSave(data);
+    onSave(data, apolloContactId);
   }
 
   // Check if required fields are filled
@@ -144,15 +232,59 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
               placeholder="e.g., denizerdalpendo"
             />
           </div>
-          <div>
+          <div className="md:col-span-2">
             <label className="block text-xs font-medium text-text-secondary mb-1">LinkedIn URL</label>
-            <input
-              type="url"
-              value={data.linkedinUrl || ""}
-              onChange={(e) => updateField("linkedinUrl", e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
-              placeholder="https://linkedin.com/in/..."
-            />
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={data.linkedinUrl || ""}
+                onChange={(e) => {
+                  updateField("linkedinUrl", e.target.value);
+                  setApolloSuccess(false);
+                  setApolloError(null);
+                }}
+                className={`flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary ${
+                  apolloSuccess ? "border-green-400 bg-green-50" : "border-border"
+                }`}
+                placeholder="https://linkedin.com/in/..."
+              />
+              <button
+                type="button"
+                onClick={fetchFromApollo}
+                disabled={apolloFetching || !data.linkedinUrl}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap"
+              >
+                {apolloFetching ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Fetching...
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+                    </svg>
+                    Fetch from Apollo
+                  </>
+                )}
+              </button>
+            </div>
+            {apolloError && (
+              <p className="mt-1 text-xs text-red-600">{apolloError}</p>
+            )}
+            {apolloSuccess && (
+              <p className="mt-1 text-xs text-green-600 flex items-center gap-1">
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Profile data and work history fetched
+                {contactCreated && " • Contact created in Apollo"}
+                {apolloContactId && !contactCreated && " • Contact found in Apollo"}
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-1">Location</label>
@@ -219,36 +351,52 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
       {/* LinkedIn Connection Matching */}
       <fieldset className="border border-purple-200 bg-purple-50/30 rounded-lg p-4">
         <legend className="text-sm font-semibold text-purple-800 px-2">LinkedIn Connection Matching</legend>
-        <p className="text-xs text-text-secondary mb-3">
-          Paste the prospect&apos;s LinkedIn work history or upload their profile PDF to find connections with the Macroscope team.
-        </p>
 
-        {/* Input section */}
-        <div className="space-y-3">
-          <textarea
-            value={linkedinProfileText}
-            onChange={(e) => setLinkedinProfileText(e.target.value)}
-            rows={4}
-            className="w-full px-3 py-2 text-sm border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y bg-white"
-            placeholder="Paste LinkedIn work history here (copy from the Experience section)..."
-          />
+        {/* Show results if we have work history (from Apollo or manual) */}
+        {workHistory.length === 0 && !apolloSuccess && (
+          <p className="text-xs text-text-secondary mb-3">
+            Use &quot;Fetch from Apollo&quot; above to automatically get work history, or manually enter it below.
+          </p>
+        )}
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => parseLinkedInProfile(linkedinProfileText)}
-              disabled={linkedinParsing || linkedinProfileText.trim().length < 20}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
-            >
-              {linkedinParsing ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Parsing...
-                </>
-              ) : (
+        {/* Manual entry toggle - show when no work history yet */}
+        {workHistory.length === 0 && !showManualEntry && (
+          <button
+            type="button"
+            onClick={() => setShowManualEntry(true)}
+            className="text-sm text-purple-600 hover:text-purple-800 underline"
+          >
+            Enter work history manually (paste text or upload PDF)
+          </button>
+        )}
+
+        {/* Manual entry form */}
+        {workHistory.length === 0 && showManualEntry && (
+          <div className="space-y-3">
+            <textarea
+              value={linkedinProfileText}
+              onChange={(e) => setLinkedinProfileText(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 text-sm border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y bg-white"
+              placeholder="Paste LinkedIn work history here (copy from the Experience section)..."
+            />
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => parseLinkedInProfile(linkedinProfileText)}
+                disabled={linkedinParsing || linkedinProfileText.trim().length < 20}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors"
+              >
+                {linkedinParsing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Parsing...
+                  </>
+                ) : (
                 <>
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -278,8 +426,17 @@ export function SignupDataReview({ initialData, onSave, onBack }: SignupDataRevi
               </svg>
               Upload PDF
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowManualEntry(false)}
+              className="text-xs text-text-muted hover:text-text-secondary"
+            >
+              Cancel
+            </button>
           </div>
         </div>
+        )}
 
         {/* Error message */}
         {linkedinError && (

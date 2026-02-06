@@ -162,6 +162,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
   const [signupLeadId, setSignupLeadId] = useState<number | null>(null);
   const [signupEmailVariables, setSignupEmailVariables] = useState<SignupEmailVariables | null>(null);
   const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4>(1); // 1=Paste, 2=Review, 3=Email, 4=Apollo
+  const [signupApolloContactId, setSignupApolloContactId] = useState<string | null>(null);
 
   const {
     data,
@@ -726,9 +727,14 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
     }
   }
 
-  async function handleSignupDataSaved(data: ParsedSignupData) {
+  async function handleSignupDataSaved(data: ParsedSignupData, apolloContactId?: string | null) {
     setSignupParsedData(data);
     setSignupStep(3);
+
+    // Store the Apollo contact ID if provided
+    if (apolloContactId) {
+      setSignupApolloContactId(apolloContactId);
+    }
 
     // Update in database if we have a lead ID
     if (signupLeadId) {
@@ -1016,6 +1022,7 @@ function WorkflowContent({ sessionId }: { sessionId: string }) {
                     defaultSearchQuery={session?.company_name ?? signupParsedData?.companyName ?? ""}
                     currentAnalysisId={null}
                     onSendComplete={handleSignupApolloComplete}
+                    contactId={signupApolloContactId}
                   />
                 </div>
               </section>

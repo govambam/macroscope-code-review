@@ -8,6 +8,7 @@ interface ApolloSectionProps {
   defaultSearchQuery: string;
   currentAnalysisId: number | null;
   onSendComplete: () => void;
+  contactId?: string | null; // Apollo contact ID for task creation
 }
 
 export function ApolloSection({
@@ -15,6 +16,7 @@ export function ApolloSection({
   defaultSearchQuery,
   currentAnalysisId,
   onSendComplete,
+  contactId,
 }: ApolloSectionProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState(defaultSearchQuery);
@@ -24,6 +26,7 @@ export function ApolloSection({
   const [sending, setSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [taskCreated, setTaskCreated] = useState(false);
 
   async function handleSearch() {
     if (!searchQuery.trim()) return;
@@ -61,6 +64,7 @@ export function ApolloSection({
     setError(null);
 
     try {
+      // First, update the account with variables
       const res = await fetch("/api/apollo/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -72,12 +76,39 @@ export function ApolloSection({
 
       const data = await res.json();
 
-      if (data.success) {
-        setSendSuccess(true);
-        onSendComplete();
-      } else {
+      if (!data.success) {
         setError(data.error || "Failed to send to Apollo");
+        return;
       }
+
+      // If we have a contact ID, create a task for them
+      if (contactId) {
+        try {
+          const taskRes = await fetch("/api/apollo/task", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contact_id: contactId,
+              note: "Add to New User Signup sequence",
+              priority: "medium",
+            }),
+          });
+
+          const taskData = await taskRes.json();
+          if (taskData.success) {
+            setTaskCreated(true);
+          } else {
+            console.warn("Failed to create task:", taskData.error);
+            // Don't fail the whole operation if task creation fails
+          }
+        } catch (taskErr) {
+          console.warn("Failed to create task:", taskErr);
+          // Don't fail the whole operation if task creation fails
+        }
+      }
+
+      setSendSuccess(true);
+      onSendComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send to Apollo");
     } finally {
@@ -102,6 +133,11 @@ export function ApolloSection({
               {selectedAccount && (
                 <p className="text-sm text-green-700 mt-1">
                   Sent to: {selectedAccount.name}
+                </p>
+              )}
+              {taskCreated && (
+                <p className="text-sm text-green-700 mt-1">
+                  Task created: &quot;Add to New User Signup sequence&quot;
                 </p>
               )}
             </div>
