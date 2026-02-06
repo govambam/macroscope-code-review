@@ -26,6 +26,7 @@ export default function NewSessionPage() {
   const [apolloAccounts, setApolloAccounts] = useState<ApolloAccount[]>([]);
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [apolloSearching, setApolloSearching] = useState(false);
+  const [apolloSaving, setApolloSaving] = useState(false);
   const [selectedApolloAccount, setSelectedApolloAccount] = useState<ApolloAccount | null>(null);
   const companyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const companyContainerRef = useRef<HTMLDivElement>(null);
@@ -80,11 +81,43 @@ export default function NewSessionPage() {
     }, 300);
   }
 
-  function handleSelectApolloAccount(account: ApolloAccount) {
+  async function handleSelectApolloAccount(account: ApolloAccount) {
     setCompanyName(account.name);
-    setSelectedApolloAccount(account);
     setShowCompanyDropdown(false);
     setApolloAccounts([]);
+    setApolloSaving(true);
+
+    // Save the company to the user's Apollo account by calling create
+    // This ensures the company is actually saved to their CRM, not just searched
+    try {
+      const res = await fetch("/api/apollo/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: account.name,
+          domain: account.domain || undefined,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.account) {
+        // Use the saved account (may have a different ID if it was newly created)
+        setSelectedApolloAccount(data.account);
+      } else if (res.status === 422) {
+        // Account already exists in their CRM - use the original account
+        setSelectedApolloAccount(account);
+      } else {
+        // Fallback: use the searched account even if save failed
+        setSelectedApolloAccount(account);
+        console.warn("Failed to save company to Apollo:", data.error);
+      }
+    } catch (err) {
+      // Fallback: use the searched account even if save failed
+      setSelectedApolloAccount(account);
+      console.warn("Failed to save company to Apollo:", err);
+    } finally {
+      setApolloSaving(false);
+    }
   }
 
   function handleOpenCreateModal() {
@@ -325,7 +358,7 @@ export default function NewSessionPage() {
                       fieldError ? "border-red-400" : selectedApolloAccount ? "border-green-400" : "border-border"
                     }`}
                   />
-                  {apolloSearching && (
+                  {(apolloSearching || apolloSaving) && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
                       <svg className="animate-spin h-4 w-4 text-text-muted" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -333,7 +366,7 @@ export default function NewSessionPage() {
                       </svg>
                     </div>
                   )}
-                  {selectedApolloAccount && !apolloSearching && (
+                  {selectedApolloAccount && !apolloSearching && !apolloSaving && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
                       <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -415,15 +448,24 @@ export default function NewSessionPage() {
                 {fieldError && (
                   <p className="mt-1 text-xs text-red-600">{fieldError}</p>
                 )}
-                {selectedApolloAccount && (
+                {apolloSaving && (
+                  <p className="mt-1 text-xs text-text-muted flex items-center gap-1">
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Saving company to Apollo...
+                  </p>
+                )}
+                {selectedApolloAccount && !apolloSaving && (
                   <p className="mt-1 text-xs text-green-600 flex items-center gap-1">
                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
-                    Linked to Apollo account{selectedApolloAccount.domain ? ` (${selectedApolloAccount.domain})` : ""}
+                    Saved to Apollo{selectedApolloAccount.domain ? ` (${selectedApolloAccount.domain})` : ""}
                   </p>
                 )}
-                {!selectedApolloAccount && !fieldError && (
+                {!selectedApolloAccount && !apolloSaving && !fieldError && (
                   <p className="mt-1 text-xs text-text-muted">
                     Search for existing Apollo accounts or create a new one
                   </p>
